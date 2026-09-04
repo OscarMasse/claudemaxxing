@@ -1,0 +1,8 @@
+state/
+*.log
+NEEDS-HUMAN.md
+PAUSED
+__pycache__/
+/tasks/
+/digests/
+/reports/

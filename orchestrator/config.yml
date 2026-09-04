@@ -1,0 +1,147 @@
+# Background orchestrator config, parsed by lib/config.py (zero dependencies).
+#
+# FORMAT: a small hand-rolled YAML subset. Exactly two shapes exist:
+#   key: value          # top-level scalar
+#   section:            # a top-level key with no value opens a list of flat mappings
+#     - key: value
+#       key: value
+# No deeper nesting, no quoting, no multi-line values. Multi-value fields
+# (like a project's `dirs`) are space-separated strings. Comments and blank
+# lines are ignored.
+#
+# LAYERING: every top-level scalar acts as a shared default for all accounts;
+# an account's own keys override it. So write shared knobs (regime hours,
+# slices, rate estimates) once here, and per-subscription calibration inside
+# each `accounts` entry.
+#
+# BACKWARD COMPATIBILITY: if the `accounts` and `projects` sections are absent
+# (the legacy flat format), one account named "default" is synthesized from the
+# flat keys (profile ~/.claude) plus one project named "default" whose dirs
+# come from the legacy `extra_dirs` key. Tasks without a `project:` frontmatter
+# key route to the project named "default" when one exists, so old configs and
+# old task files keep working unchanged.
+#
+# All *_tokens figures are in ccusage-estimated token units.
+# IMPORTANT: the token numbers below are EXAMPLE calibration values from real
+# Max accounts. Calibrate your own: compare /usage percentages against
+# `npx ccusage blocks --json` totals over a few days, then scale.
+dry_run: false
+# Night regime hours (local time).
+night_start: 02:00
+night_end: 06:00
+morning_guard: 08:30
+# When the daily digest job runs (local time). Also the boundary a run's
+# journal entry uses to pick its digest day: strictly before this time, a
+# finishing run journals into TODAY's digest file; at or after, TOMORROW's
+# (today's digest has already been curated by then).
+digest_time: 07:37
+# Pre-reset burn-down starts this many hours before the reset.
+prereset_burn_hours: 8
+# Activity lock thresholds (minutes since last interactive session write on
+# the account being scheduled; each account has its own idle clock).
+activity_idle_day_min: 60
+activity_idle_night_min: 40
+# Slice sizes (wall-clock minutes handed to the claude session).
+day_slice_min: 15
+night_slice_min: 50
+# Parallel session slots per regime, PER ACCOUNT (hard ceilings; the actual
+# count is budget-driven: estimated per-session burn must fit the slice budget).
+night_parallel: 3
+day_parallel: 1
+# Default burn estimates (ccusage token units per minute) used until the cost
+# ledger has measured real rates for a (task, model) pair.
+est_rate_sonnet_per_min: 400000
+est_rate_opus_per_min: 800000
+est_rate_fable_per_min: 1200000
+# Pre-reset polarization: the burn-down upgrades sessions to the strongest
+# model the doomed surplus can justify (task `model:` is a floor, never a
+# ceiling). Thresholds in ccusage token units, to calibrate from the ledger.
+fable_min_surplus_tokens: 100000000
+opus_min_surplus_tokens: 30000000
+# Daytime surplus: max fraction of the current window already consumed for a go.
+day_window_max_frac: 0.4
+# Claude invocation defaults (an account may override claude_bin). Use an
+# absolute path if claude is not on the PATH that run.sh exports (launchd
+# hands down a bare one).
+claude_bin: /usr/local/bin/claude
+claude_model: sonnet
+claude_effort: low
+# Hard per-session cost ceiling (--max-budget-usd, enforced by the CLI even on
+# a subscription). Runaway protection only, NOT a pacing tool: a budget kill is
+# a hard stop with no clean shutdown (no resume point written). Keep it ~5x the
+# observed max per-run cost from the ledger (example: median 0.60, max 3.00).
+max_session_usd: 15
+
+# --- Accounts ---------------------------------------------------------------
+# One entry per Claude subscription. Each account is scheduled independently
+# every tick: its own budget controller, its own activity lock (idle time is
+# measured on THAT account's interactive transcripts), its own parallel-slot
+# ceilings, and its own state files under state/<name>/ (cost ledger, locks).
+# Two accounts can run sessions in the same tick without interfering.
+#
+# Per-account keys:
+#   name              required, referenced by projects
+#   claude_config_dir required, the Claude Code profile dir for this
+#                     subscription (drives CLAUDE_CONFIG_DIR at launch AND
+#                     where activity/usage are read)
+#   claude_bin        optional, defaults to the shared top-level claude_bin
+#   weekly_cap_tokens, window_cap_tokens, p90_daily_tokens
+#                     quota calibration for this subscription
+#   reset_weekday (0=Monday), reset_time, reset_tz
+#                     this subscription's weekly reset (check /usage:
+#                     "Resets <date> at <time>")
+#   promo_multiplier, promo_until
+#                     optional temporary quota multiplier; the multiplier
+#                     applies only until promo_until (inclusive), then falls
+#                     back to 1.0 automatically
+accounts:
+  - name: personal
+    claude_config_dir: ~/.claude
+    weekly_cap_tokens: 631000000
+    window_cap_tokens: 94000000
+    p90_daily_tokens: 85000000
+    reset_weekday: 4
+    reset_time: 05:59
+    reset_tz: Europe/Warsaw
+    promo_multiplier: 1.0
+    promo_until: 2000-01-01
+  - name: work
+    claude_config_dir: ~/.claude-work
+    claude_bin: /usr/local/bin/claude
+    weekly_cap_tokens: 300000000
+    window_cap_tokens: 60000000
+    p90_daily_tokens: 40000000
+    reset_weekday: 0
+    reset_time: 09:00
+    reset_tz: Europe/Warsaw
+
+# --- Projects ---------------------------------------------------------------
+# A project routes tasks to an account and declares where its sessions may
+# write. The tool imposes no taxonomy: name projects however your life is
+# organized. Task frontmatter says `project: <name>`; a task whose project
+# does not exist (or references a missing account) is never scheduled.
+#
+# Per-project keys:
+#   name               required, referenced by task frontmatter
+#   account            required, the account this project's tasks run on
+#   dirs               directories handed to the session via --add-dir,
+#                      space-separated, ~ expands to $HOME
+#   priority           optional integer, LOWER is preferred (default 100);
+#                      orders projects within an account before per-task rules
+#   local_only_default optional; tasks in this project default to
+#                      local_only: true (a task can still say local_only: false)
+projects:
+  - name: side-projects
+    account: personal
+    dirs: ~/projects
+    priority: 10
+  - name: life
+    account: personal
+    dirs: ~/personal
+    priority: 50
+    local_only_default: true
+  - name: work
+    account: work
+    dirs: ~/work
+    priority: 10
+    local_only_default: true

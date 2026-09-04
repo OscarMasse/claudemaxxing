@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.backlog.gatekeeper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ORCH_DIR__/gatekeeper-loop.sh</string>
+  </array>
+  <!-- KeepAlive loop, NOT StartInterval: see the README FAQ on launchd's
+       "pended nondemand spawn" limbo after DarkWake cycles. -->
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>BACKLOG_ROOT</key><string>__BACKLOG_ROOT__</string></dict>
+  <key>StandardOutPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.gatekeeper.log</string>
+  <key>StandardErrorPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.gatekeeper.log</string>
+</dict>
+</plist>

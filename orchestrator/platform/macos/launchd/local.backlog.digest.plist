@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.backlog.digest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ORCH_DIR__/digest-wrapper.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>__DIGEST_HOUR__</integer><key>Minute</key><integer>__DIGEST_MINUTE__</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>EnvironmentVariables</key>
+  <dict><key>BACKLOG_ROOT</key><string>__BACKLOG_ROOT__</string></dict>
+  <key>StandardOutPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.digest.log</string>
+  <key>StandardErrorPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.digest.log</string>
+</dict>
+</plist>

@@ -10,7 +10,9 @@ Eligibility: `status: ready`, and the task's `project:` must exist in the
 config's project registry AND belong to the account currently being scheduled.
 A task without a `project:` key routes to the project named "default" when one
 exists (the legacy single-account fallback synthesizes it). The tool imposes
-no taxonomy beyond that: projects are whatever the config declares.
+no taxonomy beyond that: projects are whatever the config declares. A ready task
+whose project does not resolve can never be scheduled; `orphaned` reports those
+so a typo or a renamed project does not silently swallow work.
 
 Ordering within an account: project `priority` (integer, lower preferred),
 then task `priority` (high/medium/low), then oldest `created`, then filename.
@@ -122,6 +124,25 @@ def blocked(root, projects, account):
         unmet = _unmet_prerequisites(root, fm)
         if unmet:
             out.append((p.name, unmet))
+    return out
+
+
+def orphaned(root, projects):
+    """Ready tasks that route to no project at all: list of (task filename,
+    the unresolvable project name). A task naming a project the config does not
+    declare is silently unschedulable - it matches no account, so no account's
+    `blocked` report ever mentions it. This is the only place it surfaces.
+    Account-independent by construction, so gate.py prints it once."""
+    out = []
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md":
+            continue
+        fm = _frontmatter(p)
+        if fm.get("status") != "ready":
+            continue
+        name = fm.get("project", "default")
+        if name not in projects:
+            out.append((p.name, name))
     return out
 
 

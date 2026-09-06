@@ -191,6 +191,31 @@ class TestPick(unittest.TestCase):
                    priority="high")
         self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
 
+    def test_orphaned_reports_unknown_project(self):
+        write_task(self.root, "ghost.md", project="typo", status="ready")
+        write_task(self.root, "ok.md", project="side-projects", status="ready")
+        # It is unschedulable AND invisible to every account's blocked report.
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
+        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.orphaned(self.root, PROJECTS),
+                         [("ghost.md", "typo")])
+
+    def test_orphaned_ignores_non_ready_tasks(self):
+        write_task(self.root, "ghost.md", project="typo", status="inbox")
+        self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
+
+    def test_orphaned_reports_missing_default_project(self):
+        # A task with no `project:` key routes to "default", which this config
+        # does not declare: it is orphaned, not silently dropped.
+        write_task(self.root, "legacy.md", status="ready")
+        self.assertEqual(tasks.orphaned(self.root, PROJECTS),
+                         [("legacy.md", "default")])
+
+    def test_orphaned_empty_when_every_project_resolves(self):
+        write_task(self.root, "a.md", project="side-projects", status="ready")
+        write_task(self.root, "w.md", project="work", status="ready")
+        self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
+
 
 if __name__ == "__main__":
     unittest.main()

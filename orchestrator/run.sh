@@ -3,7 +3,7 @@
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
-# first account in config.yml is used. The account selects the Claude profile
+# first account in config.yaml is used. The account selects the Claude profile
 # (CLAUDE_CONFIG_DIR), the binary, and the state/<account>/ namespace.
 # Running this directly is the MANUAL trigger: it bypasses the gatekeeper's
 # quota locks (but not the RUNNING lock) - you decide, it runs.
@@ -49,7 +49,7 @@ if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; fi
 
 # All config access goes through lib/config.py (accounts inherit flat keys).
 # The live config file is resolved once, in the single place that owns the
-# order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yml, then the repo default.
+# order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yaml, then the repo default.
 CONFIG_FILE="$(python3 lib/config.py resolve)"
 cfg() { python3 lib/config.py "$CONFIG_FILE" "$@"; }
 if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi

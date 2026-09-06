@@ -6,8 +6,8 @@
 #     - key: value
 #       key: value
 # No deeper nesting, no quoting, no multi-line values. Multi-value fields
-# (like a project's `dirs`) are space-separated strings. Comments and blank
-# lines are ignored.
+# (like a project's `dirs`) use YAML flow style: [one, two]. The older
+# space-separated form still parses. Comments and blank lines are ignored.
 #
 # LAYERING: every top-level scalar acts as a shared default for all accounts;
 # an account's own keys override it. So write shared knobs (regime hours,
@@ -125,7 +125,7 @@ accounts:
 #   name               required, referenced by task frontmatter
 #   account            required, the account this project's tasks run on
 #   dirs               directories handed to the session via --add-dir,
-#                      space-separated, ~ expands to $HOME
+#                      flow-style list [a, b], ~ expands to $HOME
 #   priority           optional integer, LOWER is preferred (default 100);
 #                      orders projects within an account before per-task rules
 #   local_only_default optional; tasks in this project default to
@@ -133,15 +133,15 @@ accounts:
 projects:
   - name: side-projects
     account: personal
-    dirs: ~/projects
+    dirs: [~/projects]
     priority: 10
   - name: life
     account: personal
-    dirs: ~/personal
+    dirs: [~/personal]
     priority: 50
     local_only_default: true
   - name: work
     account: work
-    dirs: ~/work
+    dirs: [~/work]
     priority: 10
     local_only_default: true

@@ -1,4 +1,4 @@
-"""Parse the orchestrator's config.yml (a small hand-rolled YAML subset, zero deps).
+"""Parse the orchestrator's config.yaml (a small hand-rolled YAML subset, zero deps).
 
 Exactly two shapes are supported, and nothing else:
 
@@ -10,10 +10,13 @@ Exactly two shapes are supported, and nothing else:
 Scalar coercion: true/false, integers, floats; everything else stays a string,
 so times (05:59) and dates (2026-08-19) survive as strings and are parsed
 downstream. Comments (#) and blank lines are ignored. No deeper nesting, no
-quoting, no multi-line values; multi-value fields (like a project's `dirs`)
-are space-separated strings.
+quoting, no multi-line values.
 
-Sections used: `accounts` and `projects` (see config.yml for the full story).
+Multi-value fields (like a project's `dirs`) are written in YAML flow style,
+`dirs: [~/one, ~/two]`; the legacy space-separated form still parses. See
+`split_values`.
+
+Sections used: `accounts` and `projects` (see config.yaml for the full story).
 
 Accessors:
   accounts(cfg)  -> list of merged account dicts. Each account inherits every
@@ -32,24 +35,26 @@ legacy task files keep working unchanged.
 
 Resolution (the single place that decides which config file is live):
   1. `ORCH_CONFIG` env var, when set (explicit override, tests and one-offs).
-  2. `$BACKLOG_ROOT/config.yml`, when it exists (the operator's real config,
+  2. `$BACKLOG_ROOT/config.yaml`, when it exists (the operator's real config,
      living outside the public repo so it can never be committed here).
-  3. The repo's own `orchestrator/config.yml` (the documented example/default).
+  3. The repo's own `orchestrator/config.yaml` (the documented example/default).
+`.yaml` is the preferred spelling and wins when both exist; `.yml` is still
+accepted at every step so an existing install keeps working without a rename.
 The backlog root itself is the `BACKLOG_ROOT` env var when set, else the repo
 root (the historical layout where the checkout doubles as the backlog root).
 
 CLI (used by run.sh so shell scripts never parse the config themselves):
   python3 lib/config.py resolve            # print the resolved config path
   python3 lib/config.py backlog-root       # print the resolved backlog root
-  python3 lib/config.py <config.yml> get <key> [default]
-  python3 lib/config.py <config.yml> accounts
-  python3 lib/config.py <config.yml> first-account
-  python3 lib/config.py <config.yml> account <name> <key> [default]
-  python3 lib/config.py <config.yml> account-dirs <name>
-  python3 lib/config.py <config.yml> account-projects <name>
-  python3 lib/config.py <config.yml> project-dirs <name>
-  python3 lib/config.py <config.yml> project-account <name>
-  python3 lib/config.py <config.yml> digest-file      # today/tomorrow's digest
+  python3 lib/config.py <config.yaml> get <key> [default]
+  python3 lib/config.py <config.yaml> accounts
+  python3 lib/config.py <config.yaml> first-account
+  python3 lib/config.py <config.yaml> account <name> <key> [default]
+  python3 lib/config.py <config.yaml> account-dirs <name>
+  python3 lib/config.py <config.yaml> account-projects <name>
+  python3 lib/config.py <config.yaml> project-dirs <name>
+  python3 lib/config.py <config.yaml> project-account <name>
+  python3 lib/config.py <config.yaml> digest-file      # today/tomorrow's digest
                                                        # path per digest_time
                                                        # (ORCH_NOW overrides
                                                        # "now", for tests)
@@ -75,19 +80,34 @@ def backlog_root():
     return Path(env).expanduser() if env else repo_root()
 
 
+CONFIG_NAMES = ("config.yaml", "config.yml")
+
+
+def _first_existing(directory):
+    """The first CONFIG_NAMES spelling present in `directory`, else None.
+    `.yaml` wins when both exist: it is the preferred spelling, `.yml` is
+    accepted so existing installs keep working without a rename."""
+    for name in CONFIG_NAMES:
+        candidate = Path(directory) / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def resolve_path(root=None):
     """The live config file, in resolution order: ORCH_CONFIG env override,
-    then <backlog root>/config.yml when it exists, then the repo's example
-    orchestrator/config.yml. `root` overrides the env-derived backlog root
-    (gate.py passes its ORCH_ROOT-aware root through here)."""
+    then <backlog root>/config.yaml (or .yml) when it exists, then the repo's
+    example orchestrator/config.yaml. `root` overrides the env-derived backlog
+    root (gate.py passes its ORCH_ROOT-aware root through here)."""
     explicit = os.environ.get("ORCH_CONFIG")
     if explicit:
         return Path(explicit).expanduser()
     root = Path(root) if root is not None else backlog_root()
-    candidate = root / "config.yml"
-    if candidate.exists():
-        return candidate
-    return repo_root() / "orchestrator" / "config.yml"
+    found = _first_existing(root)
+    if found is not None:
+        return found
+    example = repo_root() / "orchestrator"
+    return _first_existing(example) or example / CONFIG_NAMES[0]
 
 
 def _coerce(raw):
@@ -101,6 +121,21 @@ def _coerce(raw):
         return float(raw)
     except ValueError:
         return raw
+
+
+def split_values(raw):
+    """A multi-value field (like a project's `dirs`) as a list of strings.
+
+    Two spellings are accepted: YAML flow style `[a, b]` (preferred, and what
+    the shipped config uses) and the legacy space-separated `a b`. Flow style is
+    detected by the brackets, so a value containing spaces is only expressible
+    with it - which is why it is preferred.
+    """
+    raw = str(raw).strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1]
+        return [v.strip() for v in inner.split(",") if v.strip()]
+    return raw.split()
 
 
 def _pair(stripped):
@@ -199,7 +234,7 @@ def projects(cfg):
         out[p["name"]] = {
             "name": p["name"],
             "account": p["account"],
-            "dirs": [os.path.expanduser(d) for d in str(p.get("dirs", "")).split()],
+            "dirs": [os.path.expanduser(d) for d in split_values(p.get("dirs", ""))],
             "priority": int(p.get("priority", 100)),
             "local_only_default": bool(p.get("local_only_default", False)),
         }

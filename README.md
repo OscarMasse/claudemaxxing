@@ -23,7 +23,7 @@ gatekeeper-loop.sh  --every 30 min-->  gatekeeper.sh   digest-wrapper.sh
               +-----------------------------+                |
               |  per account: ccusage quota data, that       |
               |  profile's transcript activity, cost ledger, |
-              |  RUNNING locks; plus config.yml, task        |
+              |  RUNNING locks; plus config.yaml, task        |
               |  frontmatter, PAUSED                         |
               |  prints, per account: SKIP <account> <why>   |
               |  or RUN <account> <slice> <task> <model>     |
@@ -73,7 +73,7 @@ Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset;
 Nothing to install on the Python side: standard library only, no virtualenv, no pip.
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).
-2. Declare your `accounts` and `projects` in `orchestrator/config.yml` (fully documented example in the file).
+2. Declare your `accounts` and `projects` in `orchestrator/config.yaml` (fully documented example in the file).
 3. Calibrate each account's token numbers: compare `/usage` against `npx ccusage blocks --json` for a few days.
 4. Create a task in `tasks/` (see `examples/tasks/`) with `status: ready` and a matching `project:`.
 5. Run `orchestrator/install.sh`; it registers the gatekeeper loop and the daily digest job, and prints the one manual `pmset` step for nightly wake.
@@ -82,7 +82,7 @@ Nothing to install on the Python side: standard library only, no virtualenv, no 
 Manual trigger: `orchestrator/run.sh <minutes> [--account <name>]`.
 Dry run: `dry_run: true` in the config, then watch `state/gatekeeper.log` for a night.
 
-To run the engine from this checkout against a separate backlog, set `BACKLOG_ROOT` when installing (`BACKLOG_ROOT=~/backlog orchestrator/install.sh`) and put your real config at `$BACKLOG_ROOT/config.yml`; it lives outside this repo and is never committed.
+To run the engine from this checkout against a separate backlog, set `BACKLOG_ROOT` when installing (`BACKLOG_ROOT=~/backlog orchestrator/install.sh`) and put your real config at `$BACKLOG_ROOT/config.yaml`; it lives outside this repo and is never committed.
 
 Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sleep has no software override); lid open on AC power plus `sudo pmset -c sleep 0` is the working setup.
 

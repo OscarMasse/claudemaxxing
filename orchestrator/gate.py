@@ -14,7 +14,7 @@ accounts can both launch sessions in the same tick.
 
 Env overrides (tests / manual runs):
   ORCH_ROOT (backlog root override, wins over BACKLOG_ROOT), BACKLOG_ROOT,
-  ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.yml and
+  ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.yaml and
   the repo default; see lib/config.resolve_path),
   ORCH_NOW (ISO), ORCH_IDLE_MIN, ORCH_IDLE_MIN_<ACCOUNT>,
   ORCH_CCUSAGE_JSON, ORCH_CCUSAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,

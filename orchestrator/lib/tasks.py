@@ -31,6 +31,8 @@ and cycles cannot cause a loop.
 import re
 from pathlib import Path
 
+from lib import config
+
 PRIORITY_ORDER = {"high": 0, "medium": 1, "normal": 1, "low": 2}
 MODEL_RANK = {"sonnet": 0, "opus": 1, "fable": 2}
 
@@ -48,9 +50,10 @@ def _frontmatter(path):
 
 
 def _prereq_names(fm):
-    """Declared prerequisite task basenames, `.md` suffix stripped if present."""
-    raw = fm.get("prerequisites", "")
-    return [n[:-3] if n.endswith(".md") else n for n in raw.split()]
+    """Declared prerequisite task basenames, `.md` suffix stripped if present.
+    Accepts YAML flow style `[a, b]` and the legacy space-separated `a b`."""
+    names = config.split_values(fm.get("prerequisites", ""))
+    return [n[:-3] if n.endswith(".md") else n for n in names]
 
 
 def _unmet_prerequisites(root, fm):

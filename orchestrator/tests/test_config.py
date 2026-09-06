@@ -127,6 +127,42 @@ class TestSections(unittest.TestCase):
             config.accounts(cfg)
 
 
+class TestFlowStyleLists(unittest.TestCase):
+    """Multi-value fields accept YAML flow style [a, b]; the legacy
+    space-separated form keeps parsing."""
+
+    def dirs_for(self, dirs_line):
+        cfg = config.load(write_cfg(
+            "accounts:\n  - name: personal\n    claude_config_dir: ~/.claude\n"
+            f"projects:\n  - name: p\n    account: personal\n    {dirs_line}\n"))
+        return config.projects(cfg)["p"]["dirs"]
+
+    def test_flow_style_list(self):
+        self.assertEqual(self.dirs_for("dirs: [~/one, ~/two]"),
+                         [os.path.expanduser("~/one"),
+                          os.path.expanduser("~/two")])
+
+    def test_space_separated_still_parses(self):
+        self.assertEqual(self.dirs_for("dirs: ~/one ~/two"),
+                         [os.path.expanduser("~/one"),
+                          os.path.expanduser("~/two")])
+
+    def test_single_entry_and_whitespace_tolerance(self):
+        self.assertEqual(self.dirs_for("dirs: [ ~/one ]"),
+                         [os.path.expanduser("~/one")])
+
+    def test_empty_list(self):
+        self.assertEqual(self.dirs_for("dirs: []"), [])
+
+    def test_split_values_directly(self):
+        self.assertEqual(config.split_values("[a, b]"), ["a", "b"])
+        self.assertEqual(config.split_values("a b"), ["a", "b"])
+        self.assertEqual(config.split_values(""), [])
+        self.assertEqual(config.split_values("[]"), [])
+        # A lone bracket is not flow style and must not be mangled.
+        self.assertEqual(config.split_values("[a"), ["[a"])
+
+
 class TestLegacyFallback(unittest.TestCase):
     def setUp(self):
         self.cfg = config.load(write_cfg(
@@ -152,8 +188,9 @@ class TestLegacyFallback(unittest.TestCase):
 
 
 class TestResolution(unittest.TestCase):
-    """resolve_path order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yml,
-    then the repo's example orchestrator/config.yml."""
+    """resolve_path order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yaml,
+    then the repo's example orchestrator/config.yaml. Both the `.yaml` and the
+    legacy `.yml` spelling are accepted at every step, `.yaml` preferred."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -182,9 +219,20 @@ class TestResolution(unittest.TestCase):
         self.assertEqual(config.resolve_path(), self.root / "config.yml")
 
     def test_repo_default_last(self):
-        os.environ["BACKLOG_ROOT"] = str(self.root)  # no config.yml in it
+        os.environ["BACKLOG_ROOT"] = str(self.root)  # no config in it
         self.assertEqual(config.resolve_path(),
-                         config.repo_root() / "orchestrator" / "config.yml")
+                         config.repo_root() / "orchestrator" / "config.yaml")
+
+    def test_yaml_extension_is_found(self):
+        (self.root / "config.yaml").write_text("dry_run: true\n")
+        os.environ["BACKLOG_ROOT"] = str(self.root)
+        self.assertEqual(config.resolve_path(), self.root / "config.yaml")
+
+    def test_yaml_wins_over_yml_when_both_exist(self):
+        (self.root / "config.yaml").write_text("dry_run: true\n")
+        (self.root / "config.yml").write_text("dry_run: false\n")
+        os.environ["BACKLOG_ROOT"] = str(self.root)
+        self.assertEqual(config.resolve_path(), self.root / "config.yaml")
 
     def test_explicit_root_argument_overrides_env(self):
         (self.root / "config.yml").write_text("dry_run: true\n")
@@ -244,7 +292,7 @@ class TestDigestFileCLI(unittest.TestCase):
 
 class TestRealConfig(unittest.TestCase):
     def test_real_config_shape(self):
-        cfg = config.load(Path(__file__).resolve().parents[1] / "config.yml")
+        cfg = config.load(Path(__file__).resolve().parents[1] / "config.yaml")
         for key in ("dry_run", "night_start", "night_end", "morning_guard",
                     "prereset_burn_hours", "activity_idle_day_min",
                     "activity_idle_night_min", "day_slice_min", "night_slice_min",

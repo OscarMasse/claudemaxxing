@@ -246,6 +246,9 @@ def status(p):
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "
                   f"out_tokens={s['out_tokens']} total_tokens={s['total_tokens']}")
+    # Printed once, after the accounts: an orphaned task belongs to none of them.
+    for task_name, project in tasks.orphaned(p["root"], projs):
+        print(f"orphaned task={task_name} project={project}")
 
 
 def main():

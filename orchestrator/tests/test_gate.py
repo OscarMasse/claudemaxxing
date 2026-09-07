@@ -145,8 +145,8 @@ class TestGate(unittest.TestCase):
         self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
 
     def test_night_slot_count_is_budget_driven(self):
-        # Tuesday night's allocation is 8.6 tokens (see TestNightBudget); at an
-        # estimated 0.05 x 50min = 2.5 per session, 3 sessions fit and a 4th
+        # Tuesday night's allocation is 5.5 tokens (see TestNightBudget); at an
+        # estimated 0.05 x 50min = 2.5 per session, 2 sessions fit and a 3rd
         # does not. The slot ceiling (4) is not what decides this.
         self.append_cfg("max_parallel_sessions: 4\n"
                         "est_rate_sonnet_per_min: 0.05\n")
@@ -156,9 +156,9 @@ class TestGate(unittest.TestCase):
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
-        self.assertEqual(len(lines), 3, r.stdout)
+        self.assertEqual(len(lines), 2, r.stdout)
 
-    def test_cheap_tasks_fill_more_slots_than_the_day_would_allow(self):
+    def test_cheap_tasks_fill_more_slots_than_one_budget_would_allow(self):
         # Same night, ten times cheaper: the count rises with the budget, up to
         # the safety ceiling. This is the point of the redesign - the metric is
         # tokens, not a fixed task count.
@@ -456,7 +456,7 @@ class TestGateLegacyConfig(unittest.TestCase):
 class TestGateDuties(unittest.TestCase):
     """Recurring classes at the gate: mandatory duties, surplus-only fillers."""
 
-    NIGHT = "2026-08-11T02:30:00+02:00"  # Tuesday night, allocation 8.6 tokens
+    NIGHT = "2026-08-11T02:30:00+02:00"  # Tuesday night, allocation 5.5 tokens
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

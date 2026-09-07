@@ -168,12 +168,24 @@ class TestNightBudget(unittest.TestCase):
         self.assertEqual(got, float(CFG["window_cap_tokens"]))
 
     def test_unabsorbable_quota_burns_tonight(self):
-        # 3 nights left, 2 later ones absorb 2 x 15 = 30; the rest is doomed
-        # unless it burns tonight, and the night cap still applies.
+        # 3 nights left: the middle one absorbs 15, the last one 30 (two
+        # windows of burn-down), so 45 of the 55 pool has a later home and the
+        # remaining 10 is doomed unless it burns tonight.
         cfg = dict(CFG, night_budget_ratio=2.0)
-        self.assertEqual(controller.night_budget(cfg, self.nights(3), 40, 0), 10)
+        self.assertEqual(controller.night_budget(cfg, self.nights(3), 55, 0), 10)
         # Geometric share alone would have been far smaller than that floor.
-        self.assertLess(40 * (2 - 1) / (2 ** 3 - 1), 10)
+        self.assertLess(55 * (2 - 1) / (2 ** 3 - 1), 10)
+
+    def test_last_night_absorbs_the_whole_burn_down_not_one_window(self):
+        # The last night is the pre-reset burn-down: 8h spans two 5h quota
+        # windows, and it is bounded by neither night_end nor the morning
+        # guard. Counting it as one window would make the plan hoard less for
+        # it than it can actually spend.
+        self.assertEqual(controller.night_capacity(CFG), 15)
+        self.assertEqual(controller.night_capacity(CFG, last=True), 30)
+        # A burn-down shorter than one window is still one window.
+        self.assertEqual(
+            controller.night_capacity(dict(CFG, prereset_burn_hours=3), last=True), 15)
 
     def test_spent_tonight_is_a_remainder_not_a_new_grant(self):
         # The share is taken on the pool as it stood at night start, so two

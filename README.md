@@ -100,7 +100,8 @@ Slot counts are budget-driven: a session's estimated burn must fit the slice bud
 
 **Per-night allocation.**
 A night spends its own share of the weekly surplus, not the whole of it, or the first night of the week drains the ones that follow.
-The share is back-loaded: with `night_budget_ratio` r, the j-th of the n remaining nights gets weight r^(j-1), the last night before the reset is open bar, and quota the remaining nights could not physically absorb (one 5h window each) is burned tonight rather than stranded.
+The share is back-loaded: with `night_budget_ratio` r, the j-th of the n remaining nights gets weight r^(j-1), the last night before the reset is open bar, and quota the remaining nights could not physically absorb is burned tonight rather than stranded.
+A night absorbs one 5h quota window, except the last one: it is the pre-reset burn-down, bounded by neither night_end nor the morning guard, so it spans `ceil(prereset_burn_hours / 5)` windows and the plan may hoard that much for it.
 It adapts without any memory: `available` is recomputed from measured usage on every tick, so a heavy interactive day shrinks every later night and a quiet one grows it.
 
 **Recurring work.**

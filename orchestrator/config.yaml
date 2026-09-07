@@ -35,7 +35,9 @@ morning_guard: 08:30
 # finishing run journals into TODAY's digest file; at or after, TOMORROW's
 # (today's digest has already been curated by then).
 digest_time: 07:37
-# Pre-reset burn-down starts this many hours before the reset.
+# Pre-reset burn-down starts this many hours before the reset. Also sets what
+# the last night can absorb (ceil(hours / 5) quota windows), which is what the
+# per-night plan hoards for it.
 prereset_burn_hours: 8
 # Activity lock threshold (minutes since the last interactive session write on
 # the account being scheduled; each account has its own idle clock).

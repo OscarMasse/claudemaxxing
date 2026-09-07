@@ -7,6 +7,8 @@ See the README sections "Scheduling regimes" and "Budget controller
 Two regimes only: the night window and the pre-reset burn-down. Daytime is
 reserved for the owner, so the daytime tick always skips.
 """
+import math
+
 from collections import namedtuple
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -77,14 +79,26 @@ def nights_remaining(cfg, now, in_night):
     return _nights_remaining(cfg, now) + (1 if in_night else 0)
 
 
-def night_capacity(cfg):
-    """Tokens a single night can physically absorb.
+def night_capacity(cfg, last=False):
+    """Tokens one night can physically absorb.
 
     A night (night_start..night_end) is shorter than a 5h quota window, so one
     window's cap is the binding ceiling: hoarding more than this for a later
     night strands it, because no night can spend it.
+
+    The LAST night before the reset is not bounded that way. It falls inside
+    the pre-reset burn-down, which runs for `prereset_burn_hours` and is
+    bounded neither by night_end nor by the morning guard, so it spans
+    `ceil(prereset_burn_hours / 5)` quota windows. Counting it as one window
+    understates what the end of the week can burn and makes the plan spend
+    earlier than it needs to - harmless for the total, but it hands cheap
+    early nights quota that the valuable last one would have used better.
     """
-    return float(cfg["window_cap_tokens"])
+    windows = 1
+    if last:
+        hours = float(cfg.get("prereset_burn_hours", 0))
+        windows = max(1, math.ceil(hours / (WINDOW.total_seconds() / 3600.0)))
+    return float(cfg["window_cap_tokens"]) * windows
 
 
 def night_budget(cfg, now, available, spent_tonight, in_night=True):
@@ -102,7 +116,9 @@ def night_budget(cfg, now, available, spent_tonight, in_night=True):
       (the `prereset` regime already does this within `prereset_burn_hours`;
       this makes the night regime agree with it a few hours earlier).
     - Quota that the remaining nights cannot physically absorb must burn
-      tonight, or it is simply lost at the reset.
+      tonight, or it is simply lost at the reset. Their capacity is one quota
+      window each, except the last one, which spans the whole burn-down (see
+      `night_capacity`).
 
     Adaptation is automatic and needs no memory: `available` is recomputed each
     tick from measured weekly usage, so a heavy interactive day shrinks every
@@ -122,8 +138,11 @@ def night_budget(cfg, now, available, spent_tonight, in_night=True):
         share = pool / n  # degenerate ratio: fall back to a flat split
     else:
         share = pool * (r - 1.0) / (r ** n - 1.0)
-    # Never strand quota the later nights could not absorb anyway.
-    unabsorbable = pool - (n - 1) * night_capacity(cfg)
+    # Never strand quota the later nights could not absorb anyway. Of the
+    # n - 1 nights after tonight, exactly one is the last before the reset.
+    later_capacity = ((n - 2) * night_capacity(cfg)
+                      + night_capacity(cfg, last=True))
+    unabsorbable = pool - later_capacity
     target = max(share, unabsorbable)
     target = min(target, night_capacity(cfg))
     return max(0.0, target - spent_tonight)

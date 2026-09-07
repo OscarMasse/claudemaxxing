@@ -166,8 +166,12 @@ def period_keys(acct, now):
 
     A duty is due when its recorded key differs from the current one, so these
     keys are what makes "once per night" mean once per night and not once per
-    tick. `nightly` is absent outside the night window: a nightly duty is not
-    schedulable then.
+    tick.
+
+    `nightly` and `daily` carry the same value (the local date) but differ in
+    presence: `nightly` is absent outside the night window, which is exactly
+    what makes a nightly duty night-only, while a daily one stays eligible in
+    the daytime surplus regime and the pre-reset burn-down.
     """
     local = now.astimezone(ZoneInfo(acct["reset_tz"]))
     keys = {"daily": local.date().isoformat(),

@@ -217,5 +217,104 @@ class TestPick(unittest.TestCase):
         self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
 
 
+class TestSchedulingClasses(unittest.TestCase):
+    """Duties (mandatory) and fillers (surplus only) versus the priority queue."""
+
+    KEYS = {"nightly": "2026-08-12", "daily": "2026-08-12", "weekly": "2026-08-06"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+        # A high-priority queue task: whatever a duty does, it must beat this.
+        write_task(self.root, "queue.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def order(self, count=3, done=None):
+        return tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", count,
+                                  done=done or {}, period_keys=self.KEYS)
+
+    def names(self, picked):
+        return [Path(t["path"]).name for t in picked]
+
+    def path(self, name):
+        return str(self.root / "tasks" / name)
+
+    def test_duty_runs_before_a_higher_priority_queue_task(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   priority="low", created="2026-09-01", duty="nightly")
+        self.assertEqual(self.names(self.order()), ["sync.md", "queue.md"])
+
+    def test_duty_is_not_relaunched_within_the_same_period(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        done = {self.path("sync.md"): "2026-08-12"}
+        self.assertEqual(self.names(self.order(done=done)), ["queue.md"])
+
+    def test_duty_is_due_again_in_the_next_period(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        done = {self.path("sync.md"): "2026-08-11"}
+        self.assertIn("sync.md", self.names(self.order(done=done)))
+
+    def test_nightly_duty_not_schedulable_outside_the_night(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", 3,
+                                    done={}, period_keys={"daily": "2026-08-12"})
+        self.assertEqual(self.names(picked), ["queue.md"])
+
+    def test_unsupported_duty_period_is_never_scheduled(self):
+        write_task(self.root, "hourly.md", project="life", status="ready",
+                   duty="hourly", created="2026-09-01")
+        self.assertEqual(self.names(self.order()), ["queue.md"])
+        self.assertIn((self.path("hourly.md"), "hourly", False),
+                      tasks.duties(self.root, PROJECTS, "personal"))
+
+    def test_filler_only_once_the_queue_is_exhausted(self):
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", filler="true")
+        self.assertEqual(self.names(self.order(count=1)), ["queue.md"])
+        self.assertEqual(self.names(self.order(count=2)), ["queue.md", "tidy.md"])
+
+    def test_filler_beats_parallel_padding(self):
+        # Padding only duplicates work already picked, so it goes last.
+        write_task(self.root, "queue.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01", parallel="true")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   created="2026-08-01", filler="true")
+        self.assertEqual(self.names(self.order(count=3)),
+                         ["queue.md", "tidy.md", "queue.md"])
+
+    def test_classes_are_excluded_from_the_ordinary_queue(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", duty="nightly")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", filler="true")
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 5)
+        self.assertEqual(self.names(picked), ["queue.md"])
+
+    def test_classes_are_tagged_for_the_caller(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   filler="true", created="2026-09-01")
+        got = {Path(t["path"]).name: t["sched"] for t in self.order(count=5)}
+        self.assertEqual(got, {"sync.md": "duty", "queue.md": None,
+                               "tidy.md": "filler"})
+
+    def test_duty_still_obeys_prerequisites_and_model_floor(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01", model="opus")
+        self.assertEqual(self.names(self.order()), ["queue.md"])
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01",
+                   prerequisites="missing.md")
+        self.assertEqual(self.names(self.order()), ["queue.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

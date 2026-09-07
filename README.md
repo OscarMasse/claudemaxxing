@@ -89,13 +89,25 @@ Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sle
 ## Design details
 
 **Scheduling regimes, per account.**
-Night (02:00-06:00): up to `night_parallel` slots, stronger model floors allowed, guarded so no 5h quota window crosses the morning guard into the workday.
+Night (02:00-06:00): as many slots as tonight's token allocation pays for (up to the `max_parallel_sessions` safety ceiling), stronger model floors allowed, guarded so no 5h quota window crosses the morning guard into the workday.
 Day surplus: one sonnet slot, armed only when the remaining nights cannot absorb the surplus and the current quota window is not serving the owner.
 Pre-reset burn-down: the last hours before the weekly reset spend the expiring surplus, upgrading to the strongest model the doomed surplus justifies.
 
 **Budget controller.**
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
-Slot counts are budget-driven: a session's estimated burn must fit the slice budget.
+Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
+
+**Per-night allocation.**
+A night spends its own share of the weekly surplus, not the whole of it, or the first night of the week drains the ones that follow.
+The share is back-loaded: with `night_budget_ratio` r, the j-th of the n remaining nights gets weight r^(j-1), the last night before the reset is open bar, and quota the remaining nights could not physically absorb (one 5h window each) is burned tonight rather than stranded.
+It adapts without any memory: `available` is recomputed from measured usage on every tick, so a heavy interactive day shrinks every later night and a quiet one grows it.
+
+**Recurring work.**
+Two scheduling classes sit outside the priority queue.
+A task with `duty: nightly|daily|weekly` is mandatory: it is taken off the top once per period, charged to the budget but never gated by it, so the queue cannot starve it.
+A task with `filler: true` is the opposite: pure surplus, launched only once the queue is exhausted and only on budget that is already there.
+Both stay `ready` forever; `state/<account>/duties.json` records the period each duty last ran, and periods are consumed at launch, so a failing duty does not relaunch every tick.
+Whatever needs no reasoning (commit and push a directory, prune caches) belongs in a plain cron/launchd job instead - it should not burn tokens at all.
 
 **The ledger is the memory.**
 Every session's result JSON is appended to `state/<account>/costs.jsonl`; measured burn rates per (task, model) feed the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.

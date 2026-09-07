@@ -1,6 +1,7 @@
 #!/bin/bash
 # Launch one background orchestrator session (or the morning digest).
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
+#                                [est_tokens]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
@@ -45,6 +46,9 @@ done
 SLICE_MIN="${ARGS[0]:-15}"
 TASK_FILE="${ARGS[1]:-}"; MODEL_OVR="${ARGS[2]:-}"; EFFORT_OVR="${ARGS[3]:-}"
 PROJECT="${ARGS[4]:-}"
+# What the gatekeeper predicted this slice would burn. Recorded in the ledger
+# next to the actual usage so the estimate can be scored (ledger.accuracy).
+EST_TOKENS="${ARGS[5]:-0}"
 if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; fi
 
 # All config access goes through lib/config.py (accounts inherit flat keys).
@@ -139,7 +143,8 @@ printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
 CODE=$?
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
-  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" >> "$STATE_ROOT/runs.out" 2>&1
+  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_TOKENS" \
+  >> "$STATE_ROOT/runs.out" 2>&1
 # Cost and duration for the digest journal's mechanical line, read from the
 # result JSON before it is deleted.
 read -r COST_USD DURATION_MIN < <(python3 lib/ledger.py fields "$OUT_JSON")

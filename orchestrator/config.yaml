@@ -44,10 +44,19 @@ activity_idle_night_min: 40
 # Slice sizes (wall-clock minutes handed to the claude session).
 day_slice_min: 15
 night_slice_min: 50
-# Parallel session slots per regime, PER ACCOUNT (hard ceilings; the actual
-# count is budget-driven: estimated per-session burn must fit the slice budget).
-night_parallel: 3
+# Session slots. Daytime is a fixed, conservative cap (that regime only nibbles
+# a surplus). At night the count is decided by the budget alone;
+# max_parallel_sessions is a SAFETY ceiling for the machine, not a pacing tool
+# (8 max: run.sh allocates RUNNING.1..8). Start conservative, read the
+# `estimate` and `cost` lines of `gate.py status`, then raise it.
+max_parallel_sessions: 4
 day_parallel: 1
+
+# Shape of the per-night allocation of the weekly surplus. Night j of the n left
+# before the reset gets weight r^(j-1), so the plan is back-loaded: unspent
+# quota is worth less the closer the reset gets, and the last night is open bar.
+# r = 1 degenerates to a flat split.
+night_budget_ratio: 2.0
 # Default burn estimates (ccusage token units per minute) used until the cost
 # ledger has measured real rates for a (task, model) pair.
 est_rate_sonnet_per_min: 400000

@@ -74,8 +74,8 @@ class TestSections(unittest.TestCase):
         self.assertIs(self.cfg["projects"][1]["local_only_default"], True)
 
     def test_scalar_after_section_returns_to_top_level(self):
-        cfg = config.load(write_cfg(NESTED + "night_parallel: 3\n"))
-        self.assertEqual(cfg["night_parallel"], 3)
+        cfg = config.load(write_cfg(NESTED + "max_parallel_sessions: 3\n"))
+        self.assertEqual(cfg["max_parallel_sessions"], 3)
         self.assertEqual(len(cfg["accounts"]), 2)
 
     def test_accounts_merge_flat_defaults(self):

@@ -43,6 +43,16 @@ def _promo(cfg, now):
     return 1.0
 
 
+def surplus(cfg, now, week_tokens):
+    """Tokens the background system may spend this week: the weekly cap minus
+    what is consumed minus the decaying daily reserve that protects the owner's
+    own usage. Same quantity `decide()` calls `available`, exposed so the digest
+    and the planner report exactly what the decision was made on."""
+    cap = float(cfg["weekly_cap_tokens"]) * _promo(cfg, now)
+    days_remaining = (next_reset(cfg, now) - now).total_seconds() / 86400.0
+    return cap - float(week_tokens) - float(cfg["p90_daily_tokens"]) * days_remaining
+
+
 def _nights_remaining(cfg, now):
     """Occurrences of night_start strictly between now and the next reset."""
     t = _parse_hhmm(cfg["night_start"])
@@ -57,6 +67,64 @@ def _nights_remaining(cfg, now):
         n += 1
         probe = candidate + timedelta(minutes=1)
     return n
+
+
+def nights_remaining(cfg, now, in_night):
+    """Night windows left before the reset, counting the one now in progress."""
+    return _nights_remaining(cfg, now) + (1 if in_night else 0)
+
+
+def night_capacity(cfg):
+    """Tokens a single night can physically absorb.
+
+    A night (night_start..night_end) is shorter than a 5h quota window, so one
+    window's cap is the binding ceiling: hoarding more than this for a later
+    night strands it, because no night can spend it.
+    """
+    return float(cfg["window_cap_tokens"])
+
+
+def night_budget(cfg, now, available, spent_tonight, in_night=True):
+    """Tonight's token allocation out of the weekly surplus.
+
+    Deliberately non-linear and back-loaded: with `night_budget_ratio` r, night
+    j of the n remaining gets a weight r^(j-1), so tonight takes the smallest
+    slice ((r-1)/(r^n - 1) of the pool) and the last night before the reset
+    takes the largest. Approaching the reset the surplus is worth less and less
+    unspent, so the plan should spend it later rather than sooner.
+
+    Two guards keep the escalation honest:
+
+    - The last remaining night is open bar: the whole surplus, no share math
+      (the `prereset` regime already does this within `prereset_burn_hours`;
+      this makes the night regime agree with it a few hours earlier).
+    - Quota that the remaining nights cannot physically absorb must burn
+      tonight, or it is simply lost at the reset. That floor is the same
+      reasoning as the daytime `nights * window_cap` check, applied forward.
+
+    Adaptation is automatic and needs no memory: `available` is recomputed each
+    tick from measured weekly usage, so a heavy interactive day shrinks every
+    later night's allocation, and a quiet one grows it.
+
+    `spent_tonight` is what this night has already burned. The share is taken
+    on the pool as it stood at night start (`available + spent_tonight`), so
+    the allocation does not shrink as the night progresses; only the remainder
+    returned does.
+    """
+    n = nights_remaining(cfg, now, in_night)
+    pool = available + spent_tonight
+    if n <= 1:
+        return max(0.0, pool - spent_tonight)  # last night: open bar
+    r = float(cfg.get("night_budget_ratio", 2.0))
+    if r <= 1.0:
+        share = pool / n  # degenerate ratio: fall back to a flat split
+    else:
+        share = pool * (r - 1.0) / (r ** n - 1.0)
+    # Never strand quota the later nights could not absorb anyway.
+    unabsorbable = pool - (n - 1) * night_capacity(cfg)
+    target = max(share, unabsorbable)
+    target = min(target, night_capacity(cfg))
+    return max(0.0, target - spent_tonight)
 
 
 def _today_at(now, hhmm):
@@ -118,6 +186,15 @@ def decide(cfg, now, usage, idle_min):
     if night:
         if idle < float(cfg["activity_idle_night_min"]):
             return Decision("skip", f"night: activity {idle:.0f}min ago", 0, "night")
+        # The night spends tonight's share of the surplus, not the whole weekly
+        # surplus: without this the first night of the week drains everything
+        # and the later (more valuable) nights find available <= 0.
+        tonight = night_budget(cfg, now, available,
+                               float(usage.get("spent_tonight") or 0.0), in_night=True)
+        if tonight <= 0:
+            return Decision("skip",
+                            f"night: tonight's allocation spent "
+                            f"(available={available:.0f})", 0, "night")
         guard = _today_at(now, cfg["morning_guard"])
         window_end = block["end"] if (block and block["active"]) else now + WINDOW
         if window_end > guard:
@@ -130,7 +207,7 @@ def decide(cfg, now, usage, idle_min):
                 return Decision("skip", "night: window would cross morning guard", 0, "night")
             return Decision("run", "night: open-window remainder",
                             min(int(cfg["night_slice_min"]), int(remainder_min)), "night",
-                            min(available, _window_headroom(cfg, block)))
+                            min(tonight, _window_headroom(cfg, block)))
         # Current window closes before the guard, but work crossing into a
         # follow-on window is only safe if that one also closes before the guard.
         slice_min = int(cfg["night_slice_min"])
@@ -140,7 +217,7 @@ def decide(cfg, now, usage, idle_min):
                 return Decision("skip", "night: window would cross morning guard", 0, "night")
             slice_min = min(slice_min, int(remainder_min))
         return Decision("run", "night regime", slice_min, "night",
-                        min(available, _window_headroom(cfg, block)))
+                        min(tonight, _window_headroom(cfg, block)))
 
     # Daytime: surplus regime only.
     nights = _nights_remaining(cfg, now)

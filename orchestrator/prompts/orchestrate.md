@@ -37,8 +37,10 @@ Procedure:
    turns prose knowledge into scheduler knowledge and prevents future no-op slices
    on the same task.
 3. If no task is eligible, exit after writing "no eligible task" to your session summary.
-   A task with `recurring: true` is a standing routine: do one bounded pass, never set
-   it `done` - leave it `ready` with a dated note describing what the pass covered.
+   A task with `recurring: true`, `duty: <period>` or `filler: true` is a standing
+   routine: do one bounded pass, never set it `done` - leave it `ready` with a dated
+   note describing what the pass covered. Setting such a task `done` silently
+   retires a routine the owner expects to keep running.
 4. Set the task's `status: in-progress` and add a dated line in its `## Notes` section.
 5. Work on the task within this slice AND within the task's `token_budget`. Follow the
    task's own instructions section ("## Background execution protocol" when present).

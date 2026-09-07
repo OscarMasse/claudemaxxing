@@ -3,6 +3,9 @@
 Everything here is deterministic in (cfg, now, usage, idle_min): no I/O, no clocks.
 See the README sections "Scheduling regimes" and "Budget controller
 (decaying reserve)".
+
+Two regimes only: the night window and the pre-reset burn-down. Daytime is
+reserved for the owner, so the daytime tick always skips.
 """
 from collections import namedtuple
 from datetime import date, datetime, time, timedelta
@@ -99,8 +102,7 @@ def night_budget(cfg, now, available, spent_tonight, in_night=True):
       (the `prereset` regime already does this within `prereset_burn_hours`;
       this makes the night regime agree with it a few hours earlier).
     - Quota that the remaining nights cannot physically absorb must burn
-      tonight, or it is simply lost at the reset. That floor is the same
-      reasoning as the daytime `nights * window_cap` check, applied forward.
+      tonight, or it is simply lost at the reset.
 
     Adaptation is automatic and needs no memory: `available` is recomputed each
     tick from measured weekly usage, so a heavy interactive day shrinks every
@@ -176,58 +178,55 @@ def decide(cfg, now, usage, idle_min):
                         max(5, min(int(cfg["night_slice_min"]), int(minutes_to_reset))),
                         "prereset", budget, _prereset_model(cfg, available))
 
+    if not night:
+        # Outside the night window and outside the burn-down, the system does
+        # not run at all. It used to have a "day surplus" regime, armed when
+        # the remaining nights could not absorb the surplus; measured on the
+        # live gatekeeper it armed 0 times in 75 day ticks, because the nights
+        # plus the burn-down always cover the surplus first. Keeping a regime
+        # that never fires only added config, code and a way to surprise the
+        # owner mid-workday. Daytime runs are manual (`run.sh`) now.
+        return Decision("skip", "day: daytime runs are manual only", 0, "day")
+
     reserve = float(cfg["p90_daily_tokens"]) * days_remaining
     available = cap - week - reserve
 
     if available <= 0:
-        return Decision("skip", f"available={available:.0f} <= 0 (reserve={reserve:.0f})", 0,
-                        "night" if night else "day")
-
-    if night:
-        if idle < float(cfg["activity_idle_night_min"]):
-            return Decision("skip", f"night: activity {idle:.0f}min ago", 0, "night")
-        # The night spends tonight's share of the surplus, not the whole weekly
-        # surplus: without this the first night of the week drains everything
-        # and the later (more valuable) nights find available <= 0.
-        tonight = night_budget(cfg, now, available,
-                               float(usage.get("spent_tonight") or 0.0), in_night=True)
-        if tonight <= 0:
-            return Decision("skip",
-                            f"night: tonight's allocation spent "
-                            f"(available={available:.0f})", 0, "night")
-        guard = _today_at(now, cfg["morning_guard"])
-        window_end = block["end"] if (block and block["active"]) else now + WINDOW
-        if window_end > guard:
-            if block and block["active"]:
-                # An open late-evening window: use its remainder, never past the guard.
-                remainder_min = (min(block["end"], guard) - now).total_seconds() / 60
-            else:
-                remainder_min = 0
-            if remainder_min < 5:
-                return Decision("skip", "night: window would cross morning guard", 0, "night")
-            return Decision("run", "night: open-window remainder",
-                            min(int(cfg["night_slice_min"]), int(remainder_min)), "night",
-                            min(tonight, _window_headroom(cfg, block)))
-        # Current window closes before the guard, but work crossing into a
-        # follow-on window is only safe if that one also closes before the guard.
-        slice_min = int(cfg["night_slice_min"])
-        if window_end + WINDOW > guard:
-            remainder_min = (window_end - now).total_seconds() / 60
-            if remainder_min < 5:
-                return Decision("skip", "night: window would cross morning guard", 0, "night")
-            slice_min = min(slice_min, int(remainder_min))
-        return Decision("run", "night regime", slice_min, "night",
-                        min(tonight, _window_headroom(cfg, block)))
-
-    # Daytime: surplus regime only.
-    nights = _nights_remaining(cfg, now)
-    night_capacity = nights * float(cfg["window_cap_tokens"])
-    if available <= night_capacity:
         return Decision("skip",
-                        f"day: {nights} nights ({night_capacity:.0f}) cover available ({available:.0f})", 0, "day")
-    if idle < float(cfg["activity_idle_day_min"]):
-        return Decision("skip", f"day: activity {idle:.0f}min ago", 0, "day")
-    if block and block["active"] and block["tokens"] >= float(cfg["day_window_max_frac"]) * float(cfg["window_cap_tokens"]):
-        return Decision("skip", "day: current window already serving the owner", 0, "day")
-    return Decision("run", "day surplus regime", int(cfg["day_slice_min"]), "day",
-                    min(available, _window_headroom(cfg, block)))
+                        f"available={available:.0f} <= 0 (reserve={reserve:.0f})",
+                        0, "night")
+
+    if idle < float(cfg["activity_idle_night_min"]):
+        return Decision("skip", f"night: activity {idle:.0f}min ago", 0, "night")
+    # The night spends tonight's share of the surplus, not the whole weekly
+    # surplus: without this the first night of the week drains everything
+    # and the later (more valuable) nights find available <= 0.
+    tonight = night_budget(cfg, now, available,
+                           float(usage.get("spent_tonight") or 0.0), in_night=True)
+    if tonight <= 0:
+        return Decision("skip",
+                        f"night: tonight's allocation spent "
+                        f"(available={available:.0f})", 0, "night")
+    guard = _today_at(now, cfg["morning_guard"])
+    window_end = block["end"] if (block and block["active"]) else now + WINDOW
+    if window_end > guard:
+        if block and block["active"]:
+            # An open late-evening window: use its remainder, never past the guard.
+            remainder_min = (min(block["end"], guard) - now).total_seconds() / 60
+        else:
+            remainder_min = 0
+        if remainder_min < 5:
+            return Decision("skip", "night: window would cross morning guard", 0, "night")
+        return Decision("run", "night: open-window remainder",
+                        min(int(cfg["night_slice_min"]), int(remainder_min)), "night",
+                        min(tonight, _window_headroom(cfg, block)))
+    # Current window closes before the guard, but work crossing into a
+    # follow-on window is only safe if that one also closes before the guard.
+    slice_min = int(cfg["night_slice_min"])
+    if window_end + WINDOW > guard:
+        remainder_min = (window_end - now).total_seconds() / 60
+        if remainder_min < 5:
+            return Decision("skip", "night: window would cross morning guard", 0, "night")
+        slice_min = min(slice_min, int(remainder_min))
+    return Decision("run", "night regime", slice_min, "night",
+                    min(tonight, _window_headroom(cfg, block)))

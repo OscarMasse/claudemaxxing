@@ -221,27 +221,23 @@ def tick_account(p, acct, projs):
     # protects the machine (each session may run docker builds, test suites and
     # Playwright) and bounds how many sessions can contend on the same repos.
     # run.sh only allocates RUNNING.1..8 lock slots, so 8 is the hard structural
-    # limit however high this is set. Daytime stays on the conservative
-    # `day_parallel` cap: that regime exists to nibble a surplus, not to fill it.
-    if d.regime in ("night", "prereset"):
-        cap_slots = min(int(acct.get("max_parallel_sessions", 4)), MAX_SLOTS)
-    else:
-        cap_slots = int(acct.get("day_parallel", 1))
+    # limit however high this is set.
+    cap_slots = min(int(acct.get("max_parallel_sessions", 4)), MAX_SLOTS)
     free = cap_slots - active_slots(p, state)
     if d.action == "run" and free <= 0:
         print(f"SKIP {name} running")
         return idle
     # Task selection happens here (not in the session): the tasks' declared
     # models must be known before launch. A task's model is a floor: the
-    # ceiling per regime is sonnet (day), opus (night), or the margin-driven
-    # tick model (prereset), and each session launches at max(floor, tick
-    # model) - upgrades in the burn-down, never downgrades.
+    # ceiling is opus at night and the margin-driven tick model in the
+    # burn-down, and each session launches at max(floor, tick model) -
+    # upgrades in the burn-down, never downgrades.
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
     picked = []
     if d.action == "run":
-        max_floor = {"day": "sonnet", "night": "opus"}.get(d.regime, d.model)
+        max_floor = "opus" if d.regime == "night" else d.model
         keys = period_keys(acct, now)
         candidates = tasks.launch_order(p["root"], projs, name,
                                         max_model=max_floor, count=free,

@@ -31,9 +31,8 @@ Scheduling classes (frontmatter, mutually exclusive):
   queue and outside it, at most once per period, so it can never be starved by
   a busy project. Its estimated cost comes off the top of the budget.
   There is deliberately no `daily`: it would only have differed from `nightly`
-  by also being eligible in the daytime surplus regime, and that regime almost
-  never arms (it needs a surplus larger than what every remaining night could
-  absorb). Two keys behaving identically is worse than one.
+  by also being eligible in the daytime, and the engine no longer runs in the
+  daytime at all. Two keys behaving identically is worse than one.
 
   `filler: true` - an opportunistic routine. Selected only AFTER the priority
   queue has been served and only if budget remains, so it never displaces real

@@ -37,20 +37,16 @@ morning_guard: 08:30
 digest_time: 07:37
 # Pre-reset burn-down starts this many hours before the reset.
 prereset_burn_hours: 8
-# Activity lock thresholds (minutes since last interactive session write on
+# Activity lock threshold (minutes since the last interactive session write on
 # the account being scheduled; each account has its own idle clock).
-activity_idle_day_min: 60
 activity_idle_night_min: 40
-# Slice sizes (wall-clock minutes handed to the claude session).
-day_slice_min: 15
+# Slice size (wall-clock minutes handed to the claude session).
 night_slice_min: 50
-# Session slots. Daytime is a fixed, conservative cap (that regime only nibbles
-# a surplus). At night the count is decided by the budget alone;
-# max_parallel_sessions is a SAFETY ceiling for the machine, not a pacing tool
-# (8 max: run.sh allocates RUNNING.1..8). Start conservative, read the
-# `estimate` and `cost` lines of `gate.py status`, then raise it.
+# Session slots. The count is decided by the budget alone; this is a SAFETY
+# ceiling for the machine, not a pacing tool (8 max: run.sh allocates
+# RUNNING.1..8). Start conservative, read the `estimate` and `cost` lines of
+# `gate.py status`, then raise it.
 max_parallel_sessions: 4
-day_parallel: 1
 
 # Shape of the per-night allocation of the weekly surplus. Night j of the n left
 # before the reset gets weight r^(j-1), so the plan is back-loaded: unspent
@@ -67,8 +63,6 @@ est_rate_fable_per_min: 1200000
 # ceiling). Thresholds in ccusage token units, to calibrate from the ledger.
 fable_min_surplus_tokens: 100000000
 opus_min_surplus_tokens: 30000000
-# Daytime surplus: max fraction of the current window already consumed for a go.
-day_window_max_frac: 0.4
 # Claude invocation defaults (an account may override claude_bin). Use an
 # absolute path if claude is not on the PATH that run.sh exports (launchd
 # hands down a bare one).

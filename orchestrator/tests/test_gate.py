@@ -23,8 +23,8 @@ FIXTURE = {"blocks": [
 BASE_CFG = (
     "dry_run: false\n"
     "night_start: 02:00\nnight_end: 06:00\nmorning_guard: 08:30\n"
-    "prereset_burn_hours: 8\nactivity_idle_day_min: 60\nactivity_idle_night_min: 40\n"
-    "day_slice_min: 15\nnight_slice_min: 50\nday_window_max_frac: 0.4\n"
+    "prereset_burn_hours: 8\nactivity_idle_night_min: 40\n"
+    "night_slice_min: 50\n"
     "claude_bin: /usr/local/bin/claude\nclaude_model: sonnet\nclaude_effort: low\n"
 )
 
@@ -52,7 +52,7 @@ PROJECTS = (
 def run_gate(root, extra_env=None, arg="tick"):
     env = dict(os.environ,
                ORCH_ROOT=str(root),
-               ORCH_NOW="2026-08-12T15:00:00+02:00",  # Wednesday afternoon
+               ORCH_NOW="2026-08-11T02:30:00+02:00",  # Tuesday night
                ORCH_IDLE_MIN="999",
                ORCH_NO_NOTIFY="1")
     # A developer shell may carry these; they must not leak into the tests.
@@ -97,26 +97,31 @@ class TestGate(unittest.TestCase):
 
     def test_run_decision_and_log(self):
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("RUN personal 15"), r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout + r.stderr)
         self.assertIn("t1.md sonnet low side-projects", r.stdout)
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("account=personal", log)
-        self.assertIn("day surplus regime", log)
+        self.assertIn("night regime", log)
 
-    def test_opus_task_not_picked_during_day(self):
-        # Make the only task an opus one: daytime surplus must not launch it.
+    def test_fable_task_not_picked_at_night(self):
+        # A fable floor is only affordable in the pre-reset burn-down; at night
+        # the ceiling is opus, so the task is simply not eligible.
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
-                        "model: opus\n---\n")
+                        "model: fable\n---\n")
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
+
+    def test_daytime_tick_never_runs(self):
+        env = dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00")
+        r = run_gate(self.root, env)
+        self.assertTrue(r.stdout.startswith("SKIP personal day:"), r.stdout)
 
     def test_opus_task_picked_at_night(self):
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: opus\neffort: medium\n---\n")
-        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")  # Tuesday night
-        r = run_gate(self.root, env)
+        r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
         self.assertIn("opus medium", r.stdout)
 
@@ -143,7 +148,7 @@ class TestGate(unittest.TestCase):
         # Tuesday night's allocation is 8.6 tokens (see TestNightBudget); at an
         # estimated 0.05 x 50min = 2.5 per session, 3 sessions fit and a 4th
         # does not. The slot ceiling (4) is not what decides this.
-        self.append_cfg("max_parallel_sessions: 4\nday_parallel: 1\n"
+        self.append_cfg("max_parallel_sessions: 4\n"
                         "est_rate_sonnet_per_min: 0.05\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -157,7 +162,7 @@ class TestGate(unittest.TestCase):
         # Same night, ten times cheaper: the count rises with the budget, up to
         # the safety ceiling. This is the point of the redesign - the metric is
         # tokens, not a fixed task count.
-        self.append_cfg("max_parallel_sessions: 4\nday_parallel: 1\n"
+        self.append_cfg("max_parallel_sessions: 4\n"
                         "est_rate_sonnet_per_min: 0.005\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -169,7 +174,7 @@ class TestGate(unittest.TestCase):
 
     def test_safety_ceiling_caps_the_slot_count(self):
         # Budget for many, machine for two: the ceiling wins.
-        self.append_cfg("max_parallel_sessions: 2\nday_parallel: 1\n"
+        self.append_cfg("max_parallel_sessions: 2\n"
                         "est_rate_sonnet_per_min: 0.005\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -182,7 +187,7 @@ class TestGate(unittest.TestCase):
     def test_heavy_task_limits_parallelism(self):
         # One session's estimated burn (1.0 x 50min = 50) exceeds the night
         # allocation: parallelizing is pointless, exactly one session runs.
-        self.append_cfg("max_parallel_sessions: 4\nday_parallel: 1\n"
+        self.append_cfg("max_parallel_sessions: 4\n"
                         "est_rate_sonnet_per_min: 1.0\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -199,7 +204,7 @@ class TestGate(unittest.TestCase):
         self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # 0.05 x 50
 
     def test_parallel_respects_active_slots(self):
-        self.append_cfg("max_parallel_sessions: 2\nday_parallel: 1\n"
+        self.append_cfg("max_parallel_sessions: 2\n"
                         "est_rate_sonnet_per_min: 0.005\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
@@ -230,7 +235,7 @@ class TestGate(unittest.TestCase):
         # config.yml, tasks/ and state/.
         env = dict(os.environ,
                    BACKLOG_ROOT=str(self.root),
-                   ORCH_NOW="2026-08-12T15:00:00+02:00",
+                   ORCH_NOW="2026-08-11T02:30:00+02:00",
                    ORCH_IDLE_MIN="999",
                    ORCH_NO_NOTIFY="1")
         env.pop("ORCH_ROOT", None)
@@ -238,7 +243,7 @@ class TestGate(unittest.TestCase):
         env.update(self.env)
         r = subprocess.run(["python3", str(ORCH / "gate.py"), "tick"],
                            capture_output=True, text=True, env=env, cwd=ORCH)
-        self.assertTrue(r.stdout.startswith("RUN personal 15"),
+        self.assertTrue(r.stdout.startswith("RUN personal 50"),
                         r.stdout + r.stderr)
         self.assertIn(str(self.root / "tasks" / "t1.md"), r.stdout)
         log = self.root / "orchestrator" / "state" / "gatekeeper.log"
@@ -246,6 +251,7 @@ class TestGate(unittest.TestCase):
         self.assertIn("account=personal", log.read_text())
 
     def test_stale_lock_broken_fresh_lock_respected(self):
+        self.append_cfg("max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         lock = state / "RUNNING.1"
@@ -362,9 +368,9 @@ class TestGateMultiAccount(unittest.TestCase):
         r = run_gate(self.root, self.env)
         lines = self.lines(r)
         self.assertEqual(len(lines), 2, r.stdout + r.stderr)
-        self.assertIn("RUN personal 15", lines[0])
+        self.assertIn("RUN personal 50", lines[0])
         self.assertIn("p.md sonnet low side-projects", lines[0])
-        self.assertIn("RUN work 15", lines[1])
+        self.assertIn("RUN work 50", lines[1])
         self.assertIn("w.md sonnet low job", lines[1])
 
     def test_budget_isolation(self):
@@ -393,6 +399,8 @@ class TestGateMultiAccount(unittest.TestCase):
         self.assertTrue(lines[1].startswith("RUN work"), r.stdout)
 
     def test_running_lock_is_per_account(self):
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text() + "max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "work"
         state.mkdir(parents=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -441,7 +449,7 @@ class TestGateLegacyConfig(unittest.TestCase):
 
     def test_legacy_flat_config_still_runs(self):
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("RUN default 15"), r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("RUN default 50"), r.stdout + r.stderr)
         self.assertIn("t1.md sonnet low default", r.stdout)
 
 
@@ -459,7 +467,7 @@ class TestGateDuties(unittest.TestCase):
         self.env = {"ORCH_CCUSAGE_JSON": str(self.root / "fixture.json"),
                     "ORCH_NOW": self.NIGHT}
         (self.root / "config.yml").write_text(
-            BASE_CFG + "max_parallel_sessions: 4\nday_parallel: 1\n"
+            BASE_CFG + "max_parallel_sessions: 4\n"
             + PERSONAL + PROJECTS)
 
     def tearDown(self):
@@ -518,12 +526,17 @@ class TestGateDuties(unittest.TestCase):
         self.assertEqual(self.served(), {})
 
     def test_nightly_duty_is_not_launched_during_the_day(self):
+        # Belt and braces: the daytime tick skips before selection anyway, but
+        # the period key is also absent, so nothing can pick the duty up.
         self.rate(0.05)
         self.task("sync.md", "duty: nightly\n")
-        env = dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00")
-        r = run_gate(self.root, env)
-        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
-                        r.stdout)
+        day = gate.now_from_env.__globals__["datetime"].fromisoformat(
+            "2026-08-12T15:00:00+02:00")
+        acct = {"reset_tz": "Europe/Warsaw", "reset_weekday": 3,
+                "reset_time": "05:59", "night_start": "02:00", "night_end": "06:00"}
+        self.assertNotIn("nightly", gate.period_keys(acct, day))
+        r = run_gate(self.root, dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00"))
+        self.assertTrue(r.stdout.startswith("SKIP personal day:"), r.stdout)
 
     def test_filler_runs_on_leftover_budget(self):
         self.rate(0.05)

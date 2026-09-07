@@ -40,13 +40,9 @@ night_start: 02:00
 night_end: 06:00
 morning_guard: 08:30
 prereset_burn_hours: 8
-activity_idle_day_min: 60
 activity_idle_night_min: 40
-day_slice_min: 15
 night_slice_min: 50
-day_window_max_frac: 0.4
 max_parallel_sessions: 4
-day_parallel: 1
 night_budget_ratio: 2.0
 est_rate_sonnet_per_min: 0.05
 fable_min_surplus_tokens: 100000000

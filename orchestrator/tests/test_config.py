@@ -11,7 +11,7 @@ NESTED = (
     "# comment\n"
     "dry_run: true\n"
     "night_start: 02:00\n"
-    "day_window_max_frac: 0.4\n"
+    "night_budget_ratio: 2.0\n"
     "claude_bin: /usr/local/bin/claude\n"
     "weekly_cap_tokens: 100\n"
     "accounts:\n"
@@ -49,13 +49,13 @@ class TestFlatParsing(unittest.TestCase):
             "# comment\n"
             "dry_run: true\n"
             "weekly_cap_tokens: 300000000\n"
-            "day_window_max_frac: 0.4\n"
+            "night_budget_ratio: 2.0\n"
             "reset_tz: Europe/Warsaw\n"
             "reset_time: 05:59\n"
             "promo_until: 2026-08-19\n"))
         self.assertIs(cfg["dry_run"], True)
         self.assertEqual(cfg["weekly_cap_tokens"], 300000000)
-        self.assertAlmostEqual(cfg["day_window_max_frac"], 0.4)
+        self.assertAlmostEqual(cfg["night_budget_ratio"], 2.0)
         self.assertEqual(cfg["reset_tz"], "Europe/Warsaw")
         self.assertEqual(cfg["reset_time"], "05:59")
         self.assertEqual(cfg["promo_until"], "2026-08-19")
@@ -294,9 +294,9 @@ class TestRealConfig(unittest.TestCase):
     def test_real_config_shape(self):
         cfg = config.load(Path(__file__).resolve().parents[1] / "config.yaml")
         for key in ("dry_run", "night_start", "night_end", "morning_guard",
-                    "prereset_burn_hours", "activity_idle_day_min",
-                    "activity_idle_night_min", "day_slice_min", "night_slice_min",
-                    "day_window_max_frac", "claude_bin", "claude_model",
+                    "prereset_burn_hours",
+                    "activity_idle_night_min", "night_slice_min",
+                    "claude_bin", "claude_model",
                     "claude_effort", "max_session_usd", "digest_time"):
             self.assertIn(key, cfg)
         accts = config.accounts(cfg)

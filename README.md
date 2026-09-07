@@ -91,8 +91,8 @@ Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sle
 
 **Scheduling regimes, per account.**
 Night (02:00-06:00): as many slots as tonight's token allocation pays for (up to the `max_parallel_sessions` safety ceiling), stronger model floors allowed, guarded so no 5h quota window crosses the morning guard into the workday.
-Day surplus: one sonnet slot, armed only when the remaining nights cannot absorb the surplus and the current quota window is not serving the owner.
 Pre-reset burn-down: the last hours before the weekly reset spend the expiring surplus, upgrading to the strongest model the doomed surplus justifies.
+Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a deliberate `run.sh` invocation.
 
 **Budget controller.**
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.

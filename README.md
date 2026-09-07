@@ -105,7 +105,7 @@ It adapts without any memory: `available` is recomputed from measured usage on e
 
 **Recurring work.**
 Two scheduling classes sit outside the priority queue.
-A task with `duty: nightly|daily|weekly` is mandatory: it is taken off the top once per period, charged to the budget but never gated by it, so the queue cannot starve it.
+A task with `duty: nightly|weekly` is mandatory: it is taken off the top once per period, charged to the budget but never gated by it, so the queue cannot starve it.
 A task with `filler: true` is the opposite: pure surplus, launched only once the queue is exhausted and only on budget that is already there.
 Both stay `ready` forever; `state/<account>/duties.json` records the period each duty last ran, and periods are consumed at launch, so a failing duty does not relaunch every tick.
 Whatever needs no reasoning (commit and push a directory, prune caches) belongs in a plain cron/launchd job instead - it should not burn tokens at all.

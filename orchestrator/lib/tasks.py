@@ -27,15 +27,13 @@ whose floor exceeds what the current regime/budget allows is skipped.
 
 Scheduling classes (frontmatter, mutually exclusive):
 
-  `duty: nightly|daily|weekly` - a mandatory routine. Selected BEFORE the
-  priority queue and outside it, at most once per period, so it can never be
-  starved by a busy project. Its estimated cost comes off the top of the budget.
-  `nightly` and `daily` share the same period length (one day); they differ in
-  ELIGIBILITY. A nightly duty is only schedulable inside the night window, so a
-  night that never ran (activity lock, quota, sleeping machine) loses it for
-  that day; a daily one can also be picked up by the daytime surplus regime or
-  the pre-reset burn-down. Prefer `daily` when the routine must happen, and
-  `nightly` when running it outside the night would disturb the owner.
+  `duty: nightly|weekly` - a mandatory routine. Selected BEFORE the priority
+  queue and outside it, at most once per period, so it can never be starved by
+  a busy project. Its estimated cost comes off the top of the budget.
+  There is deliberately no `daily`: it would only have differed from `nightly`
+  by also being eligible in the daytime surplus regime, and that regime almost
+  never arms (it needs a surplus larger than what every remaining night could
+  absorb). Two keys behaving identically is worse than one.
 
   `filler: true` - an opportunistic routine. Selected only AFTER the priority
   queue has been served and only if budget remains, so it never displaces real
@@ -91,7 +89,7 @@ def _unmet_prerequisites(root, fm):
     return unmet
 
 
-DUTY_PERIODS = ("nightly", "daily", "weekly")
+DUTY_PERIODS = ("nightly", "weekly")
 
 
 def _sched_class(fm):
@@ -156,7 +154,7 @@ def duties_due(root, projects, account, max_model, done, period_keys):
     """Mandatory recurring tasks whose period has not been served yet.
 
     `done` maps task path -> the period key last recorded for it, and
-    `period_keys` maps a duty period ("nightly", "daily", "weekly") to the key
+    `period_keys` maps a duty period ("nightly", "weekly") to the key
     identifying the current one. A duty is due when the two differ, so a
     nightly duty runs once per night however many ticks that night has.
     Returned outside the priority ordering: duties are never starved.

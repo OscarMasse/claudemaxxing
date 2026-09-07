@@ -220,7 +220,7 @@ class TestPick(unittest.TestCase):
 class TestSchedulingClasses(unittest.TestCase):
     """Duties (mandatory) and fillers (surplus only) versus the priority queue."""
 
-    KEYS = {"nightly": "2026-08-12", "daily": "2026-08-12", "weekly": "2026-08-06"}
+    KEYS = {"nightly": "2026-08-12", "weekly": "2026-08-06"}
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -264,15 +264,18 @@ class TestSchedulingClasses(unittest.TestCase):
         write_task(self.root, "sync.md", project="life", status="ready",
                    duty="nightly", created="2026-09-01")
         picked = tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", 3,
-                                    done={}, period_keys={"daily": "2026-08-12"})
+                                    done={}, period_keys={"weekly": "2026-08-06"})
         self.assertEqual(self.names(picked), ["queue.md"])
 
     def test_unsupported_duty_period_is_never_scheduled(self):
-        write_task(self.root, "hourly.md", project="life", status="ready",
-                   duty="hourly", created="2026-09-01")
-        self.assertEqual(self.names(self.order()), ["queue.md"])
-        self.assertIn((self.path("hourly.md"), "hourly", False),
-                      tasks.duties(self.root, PROJECTS, "personal"))
+        # "daily" is among these: it was dropped for behaving like "nightly".
+        for period in ("hourly", "daily", "montly"):
+            with self.subTest(period=period):
+                write_task(self.root, "recur.md", project="life", status="ready",
+                           duty=period, created="2026-09-01")
+                self.assertEqual(self.names(self.order()), ["queue.md"])
+                self.assertIn((self.path("recur.md"), period, False),
+                              tasks.duties(self.root, PROJECTS, "personal"))
 
     def test_filler_only_once_the_queue_is_exhausted(self):
         write_task(self.root, "tidy.md", project="life", status="ready",

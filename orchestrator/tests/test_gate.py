@@ -546,11 +546,11 @@ class TestGateDuties(unittest.TestCase):
 
     def test_status_reports_duties_and_fillers(self):
         self.task("sync.md", "duty: nightly\n")
-        self.task("hourly.md", "duty: hourly\n")
+        self.task("daily.md", "duty: daily\n")
         self.task("tidy.md", "filler: true\n")
         out = run_gate(self.root, self.env, arg="status").stdout
         self.assertIn("duty task=sync.md period=nightly supported=yes due=yes", out)
-        self.assertIn("duty task=hourly.md period=hourly supported=NO due=no", out)
+        self.assertIn("duty task=daily.md period=daily supported=NO due=no", out)
         self.assertIn("filler task=tidy.md", out)
 
 

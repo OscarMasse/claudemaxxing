@@ -168,17 +168,15 @@ def period_keys(acct, now):
     keys are what makes "once per night" mean once per night and not once per
     tick.
 
-    `nightly` and `daily` carry the same value (the local date) but differ in
-    presence: `nightly` is absent outside the night window, which is exactly
-    what makes a nightly duty night-only, while a daily one stays eligible in
-    the daytime surplus regime and the pre-reset burn-down.
+    A period is ABSENT when the current tick is outside its window, which is
+    what makes a nightly duty night-only: no key, not due. `weekly` is keyed on
+    the quota week (the last reset), so it is always present.
     """
-    local = now.astimezone(ZoneInfo(acct["reset_tz"]))
-    keys = {"daily": local.date().isoformat(),
-            "weekly": controller.prev_reset(acct, now).date().isoformat()}
+    tz = ZoneInfo(acct["reset_tz"])
+    keys = {"weekly": controller.prev_reset(acct, now).date().isoformat()}
     start = night_start_dt(acct, now)
     if start:
-        keys["nightly"] = start.astimezone(ZoneInfo(acct["reset_tz"])).date().isoformat()
+        keys["nightly"] = start.astimezone(tz).date().isoformat()
     return keys
 
 

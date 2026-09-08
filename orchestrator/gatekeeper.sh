@@ -13,14 +13,14 @@ mkdir -p "$STATE_ROOT"
 DECISION="$(python3 gate.py tick 2>> "$STATE_ROOT/gatekeeper.log")" || exit 0
 # One RUN line per session to launch (parallel slots, possibly on several
 # accounts in the same tick). Format:
-#   RUN <account> <slice> <task> <model> <effort> <project> <est_tokens> <budget_tokens>
+#   RUN <account> <slice> <task> <model> <effort> <project> <est_tokens>
 LAUNCHED=0
 while IFS= read -r line; do
   case "$line" in
     RUN\ *)
       read -r _ ACCOUNT REST <<< "$line"
       # Word splitting of REST is intentional:
-      # "<slice> <task> <model> <effort> <project> <est_tokens> <budget_tokens>".
+      # "<slice> <task> <model> <effort> <project> <est_tokens>".
       ./run.sh --account "$ACCOUNT" $REST &
       LAUNCHED=1
       ;;

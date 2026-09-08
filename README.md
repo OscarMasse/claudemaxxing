@@ -27,8 +27,7 @@ gatekeeper-loop.sh  --every 30 min-->  gatekeeper.sh   digest-wrapper.sh
               |  frontmatter, PAUSED                         |
               |  prints, per account: SKIP <account> <why>   |
               |  or RUN <account> <slice> <task> <model>     |
-              |  <effort> <project> <est> <budget>           |
-              |  (one line per slot)                        |
+              |  <effort> <project> (one line per slot)      |
               +-----------------------------+                |
                                             v                v
                                 run.sh --account <name> <slice> [task] ...
@@ -49,7 +48,7 @@ gatekeeper-loop.sh  --every 30 min-->  gatekeeper.sh   digest-wrapper.sh
 
 One constraint drives the whole design: background work shares a quota with a human who must never notice it.
 
-Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffrey Huntley) with a budget and a verifier - same "fresh-context session against a backlog" core, plus quota-aware scheduling and mandatory verification, which addresses the completion-without-testing failure mode Anthropic documents in [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents).
+Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffrey Huntley) with a budget and a verifier - same "one task per fresh-context session against a backlog" core, plus quota-aware scheduling and mandatory verification, which addresses the completion-without-testing failure mode Anthropic documents in [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents).
 
 - **Verification before landing.** Every task declares a `verification` method (tests, script, checkable criteria, optionally a per-item `## Acceptance` checklist), and each session must pass an adversarial review: a fresh-context subagent instructed to refute the work, looped until a pass finds zero new major issues.
 - **Quota-aware scheduling.** A decaying reserve protects a P90 heavy day for every remaining day of the quota week; background sessions consume only the surplus, mostly at night (02:00-06:00).
@@ -99,12 +98,6 @@ Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a del
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
 Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
 
-**A session is a budget, not a task.**
-The tick's allocation is split evenly between the sessions it launches, and each session then packs as many tasks as fit into its share: it selects the next one itself, works it, commits, and repeats until its budget or its slice runs out.
-The alternative (one task per session, which this used to do) systematically underspends the night, because a session that finishes its task in five minutes of a fifty-minute slice exits and hands the leftover back to a pool that expires at the reset.
-The gatekeeper still selects the FIRST task of each session, because the model must be known before launch; a session cannot upgrade its own model, so the tasks it picks afterwards must declare no model floor above what it is running.
-Sessions of the same tick agree on ownership through atomic claim files under `state/<account>/claims/` (noclobber create, released on every exit path, and broken by the gatekeeper after the lock TTL), because `status: in-progress` in a task file is not an atomic claim.
-
 **Per-night allocation.**
 A night spends its own share of the weekly surplus, not the whole of it, or the first night of the week drains the ones that follow.
 The share is back-loaded: with `night_budget_ratio` r, the j-th of the n remaining nights gets weight r^(j-1), the last night before the reset is open bar, and quota the remaining nights could not physically absorb is burned tonight rather than stranded.
@@ -135,10 +128,9 @@ A KeepAlive loop ticks itself; launchd only has to restart it if it dies, and th
 `--max-budget-usd` is runaway protection, not pacing: a budget kill is a hard stop with no resume point.
 The cap sits ~5x the observed max per-run cost, so it only fires on a genuinely broken session.
 
-**Why does the gatekeeper pick the first task, not the session?**
+**Why does the gatekeeper pick tasks, not the session?**
 The model must be known before launch (`claude -p --model ...`), and selection in pure Python costs zero tokens.
 Everything decidable locally is decided locally.
-The later tasks of a session are its own choice, because by then the model is fixed and only the session knows how much of its budget it has left.
 
 **Why derive idle time from transcript events instead of file mtimes?**
 Two independent writers bump transcript mtimes with no human present (external tools rewriting session files, Claude Code appending housekeeping events).

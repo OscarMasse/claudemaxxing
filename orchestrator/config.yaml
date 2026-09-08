@@ -54,7 +54,11 @@ max_parallel_sessions: 4
 # before the reset gets weight r^(j-1), so the plan is back-loaded: unspent
 # quota is worth less the closer the reset gets, and the last night is open bar.
 # r = 1 degenerates to a flat split.
-night_budget_ratio: 2.0
+# Raise this cautiously: the share is (r-1)/(r^n - 1), which collapses fast. At
+# r = 2 with 7 nights left the first night gets 1/127 of the pool - measured on
+# a real backlog that was less than one median session, so most nights of the
+# week could not fund a single session out of their own allocation.
+night_budget_ratio: 1.0
 # Default burn estimates (ccusage token units per minute) used until the cost
 # ledger has measured real rates for a (task, model) pair.
 est_rate_sonnet_per_min: 400000

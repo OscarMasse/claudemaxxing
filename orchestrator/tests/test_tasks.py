@@ -1,4 +1,6 @@
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from lib import tasks
@@ -216,6 +218,25 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "w.md", project="work", status="ready")
         self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
 
+    def test_unknown_model_makes_the_task_unschedulable_and_reported(self):
+        # The regression this guards: `claude-fable-5` (a CLI model id, not an
+        # engine model name) used to be rewritten to sonnet, so tasks written
+        # for Fable ran on Sonnet and every log line said "sonnet".
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", priority="high", model="claude-fable-5")
+        write_task(self.root, "ok.md", project="side-projects",
+                   status="ready", priority="low")
+        self.assertTrue(self.pick(max_model="fable")["path"].endswith("ok.md"))
+        self.assertEqual(tasks.misconfigured(self.root),
+                         [("ghost.md", "claude-fable-5")])
+
+    def test_known_models_are_not_reported_as_misconfigured(self):
+        for i, model in enumerate(("sonnet", "opus", "fable")):
+            write_task(self.root, f"m{i}.md", project="side-projects",
+                       status="ready", model=model)
+        write_task(self.root, "none.md", project="side-projects", status="ready")
+        self.assertEqual(tasks.misconfigured(self.root), [])
+
 
 class TestSchedulingClasses(unittest.TestCase):
     """Duties (mandatory) and fillers (surplus only) versus the priority queue."""
@@ -321,3 +342,70 @@ class TestSchedulingClasses(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRepairStuck(unittest.TestCase):
+    """Tasks left `in-progress` by a session that died are reset to `ready`."""
+
+    TTL = 4.5 * 3600
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def stale(self, name, body, age_s):
+        p = self.root / "tasks" / name
+        p.write_text(body)
+        os.utime(p, (time.time() - age_s, time.time() - age_s))
+        return p
+
+    def repair(self):
+        return tasks.repair_stuck(self.root, time.time(), self.TTL, "2026-09-08")
+
+    def test_old_in_progress_task_becomes_ready_again(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Notes\n\n- 2026-08-01: started\n", 10 * 3600)
+        repaired = self.repair()
+        self.assertEqual([n for n, _ in repaired], ["t.md"])
+        self.assertIn("status: ready", p.read_text())
+        self.assertNotIn("status: in-progress", p.read_text())
+        # The last note the dead session left must survive: the repaired task
+        # is resumed from it, not restarted.
+        self.assertIn("- 2026-08-01: started", p.read_text())
+        self.assertIn("auto-repaired by the gatekeeper", p.read_text())
+
+    def test_recent_in_progress_task_is_left_alone(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n", 60)
+        self.assertEqual(self.repair(), [])
+        self.assertIn("status: in-progress", p.read_text())
+
+    def test_other_statuses_are_never_touched(self):
+        for status in ("ready", "done", "blocked", "inbox"):
+            p = self.stale(f"{status}.md",
+                           f"---\ntitle: X\nstatus: {status}\n---\n", 10 * 3600)
+            self.assertEqual(self.repair(), [])
+            self.assertIn(f"status: {status}", p.read_text())
+
+    def test_a_task_without_a_notes_section_gets_one(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Context\n\nsomething\n", 10 * 3600)
+        self.assertEqual([n for n, _ in self.repair()], ["t.md"])
+        text = p.read_text()
+        self.assertIn("## Notes", text)
+        self.assertIn("## Context", text)
+
+    def test_a_status_line_in_the_body_is_not_rewritten(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Context\n\nRun `gate.py status: in-progress`\n",
+                       10 * 3600)
+        self.repair()
+        self.assertIn("Run `gate.py status: in-progress`", p.read_text())
+
+    def test_repair_is_idempotent(self):
+        self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n", 10 * 3600)
+        self.assertEqual(len(self.repair()), 1)
+        self.assertEqual(self.repair(), [])

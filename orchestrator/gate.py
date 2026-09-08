@@ -229,15 +229,22 @@ def tick_account(p, acct, projs):
         return idle
     # Task selection happens here (not in the session): the tasks' declared
     # models must be known before launch. A task's model is a floor: the
-    # ceiling is opus at night and the margin-driven tick model in the
-    # burn-down, and each session launches at max(floor, tick model) -
-    # upgrades in the burn-down, never downgrades.
+    # ceiling is every model the engine knows at night, and the margin-driven
+    # tick model in the burn-down, and each session launches at
+    # max(floor, tick model) - upgrades in the burn-down, never downgrades.
+    # The night ceiling used to be opus, which quietly made a `fable` floor
+    # unschedulable except in the burn-down: the strongest model was reachable
+    # only in the last hours of the week, so the tasks that asked for it (deep
+    # research, architecture, taste) waited days for a window they might miss
+    # entirely. What a night may spend is a budget question, and the budget
+    # already answers it below - the model ceiling was a second, blunter
+    # answer to the same question.
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
     picked = []
     if d.action == "run":
-        max_floor = "opus" if d.regime == "night" else d.model
+        max_floor = "fable" if d.regime == "night" else d.model
         keys = period_keys(acct, now)
         candidates = tasks.launch_order(p["root"], projs, name,
                                         max_model=max_floor, count=free,
@@ -296,6 +303,16 @@ def tick(p):
         return
     cfg = config.load(p["config"])
     projs = config.projects(cfg)
+    # Logged every tick, not just in `status`: a task the engine refuses to
+    # schedule is otherwise indistinguishable from one that is simply not its
+    # turn yet, and the whole point of refusing is to be noticed.
+    for task_name, model in tasks.misconfigured(p["root"]):
+        log(p, f"unschedulable task={task_name}: unknown model {model!r}")
+    # Before any account is scheduled, so a task freed here is eligible in the
+    # very same tick rather than waiting 30 minutes for the next one.
+    for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,
+                                               datetime.now().strftime("%F")):
+        log(p, f"repaired stuck task={task_name} in-progress for {hours:.1f}h")
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))
@@ -352,9 +369,11 @@ def status(p):
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "
                   f"out_tokens={s['out_tokens']} total_tokens={s['total_tokens']}")
-    # Printed once, after the accounts: an orphaned task belongs to none of them.
+    # Printed once, after the accounts: these tasks belong to none of them.
     for task_name, project in tasks.orphaned(p["root"], projs):
         print(f"orphaned task={task_name} project={project}")
+    for task_name, model in tasks.misconfigured(p["root"]):
+        print(f"misconfigured task={task_name} model={model}")
 
 
 def plan(p):

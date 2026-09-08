@@ -15,7 +15,7 @@ The failure modes were all infrastructure (launchd pended spawns, clamshell slee
 launchd (KeepAlive)                          launchd (07:37 daily)
         |                                            |
         v                                            v
-gatekeeper-loop.sh  --every 30 min-->  gatekeeper.sh   digest-wrapper.sh
+gatekeeper-loop.sh  --every 5 min-->   gatekeeper.sh   digest-wrapper.sh
                                             |          (watchdog: kickstarts
                                             v           the loop if dead)
                                         gate.py tick         |
@@ -55,6 +55,8 @@ Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffre
 - **Activity lock.** Idle time comes from interactive event timestamps in session transcripts; any recent human activity on an account blocks its background launches.
 - **Prerequisite gating.** `prerequisites: <task> <task>` in a task's frontmatter keeps it unscheduled until every named task is `done`.
 - **Kill switch.** `touch orchestrator/PAUSED` stops all launches; deleting it resumes.
+- **No silent defaults.** A frontmatter value the engine interprets gets a default when the key is ABSENT, never when it is present and unreadable: an unknown `model:` or `project:` makes the task unschedulable and reported (`gate.py status`, every tick's log), because work done at the wrong model or in the wrong place costs more than work not done.
+- **Self-repair.** A session killed mid-task leaves it `in-progress`, which no scheduler ever picks again; the gatekeeper resets such a task to `ready` once no live session can account for it, keeping its last notes so the next session resumes rather than restarts.
 - **Live morning digest.** Every run journals its progress into the day's digest file as it finishes; the 07:37 session curates it into "done autonomously" vs "needs the human". Readable at any hour.
 
 ## Accounts and projects
@@ -90,7 +92,9 @@ Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sle
 ## Design details
 
 **Scheduling regimes, per account.**
-Night (02:00-06:00): as many slots as tonight's token allocation pays for (up to the `max_parallel_sessions` safety ceiling), stronger model floors allowed, guarded so no 5h quota window crosses the morning guard into the workday.
+Night: as many slots as tonight's token allocation pays for (up to the `max_parallel_sessions` safety ceiling), every model reachable, guarded so no 5h quota window crosses the morning guard into the workday.
+The usable night is `night_start` .. `morning_guard - 5h`, not `night_start` .. `night_end`: a launch opens a 5h quota window that runs in wall-clock time however short the session is, so past that hour there is nothing a shorter slice can buy.
+The budget decides what a night may spend; the model name is not a second gate on it, so a `fable` task does not have to wait for the burn-down.
 Pre-reset burn-down: the last hours before the weekly reset spend the expiring surplus, upgrading to the strongest model the doomed surplus justifies.
 Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a deliberate `run.sh` invocation.
 
@@ -119,6 +123,11 @@ Every session's result JSON is appended to `state/<account>/costs.jsonl`; measur
 **Does it run on Linux or Windows?**
 Not yet, but the engine is portable: everything OS-specific sits behind the seam in `orchestrator/platform/` (five hooks, documented in its README).
 A Linux port would swap launchd for systemd timers in `platform/linux/`.
+
+**Why does a tick not wait for the sessions it launched?**
+It used to, and that turned the night into a batch: four slots launched at 02:00, one session running 20 minutes, and the loop slept until 02:50 with three slots idle.
+Returning immediately makes it a pipeline - the next tick refills whatever came free.
+This is why launchd's job is `gatekeeper-loop.sh` and not `gatekeeper.sh`: the loop never exits, so the sessions it spawned keep their process group.
 
 **Why a KeepAlive loop instead of launchd StartInterval?**
 This launchd domain left scheduled spawns pending across DarkWake cycles ("pended nondemand spawn"), losing whole nights.

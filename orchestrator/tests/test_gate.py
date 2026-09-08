@@ -103,14 +103,18 @@ class TestGate(unittest.TestCase):
         self.assertIn("account=personal", log)
         self.assertIn("night regime", log)
 
-    def test_fable_task_not_picked_at_night(self):
-        # A fable floor is only affordable in the pre-reset burn-down; at night
-        # the ceiling is opus, so the task is simply not eligible.
+    def test_fable_task_picked_at_night(self):
+        # Every model the engine knows is reachable at night. The ceiling used
+        # to be opus, which made a fable floor schedulable only in the pre-reset
+        # burn-down: the tasks that ask for the strongest model waited days for
+        # a window they could miss entirely. What a night may spend is the
+        # budget's decision, not a second gate on the model name.
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: fable\n---\n")
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
+        self.assertIn("t1.md fable low side-projects", r.stdout)
 
     def test_daytime_tick_never_runs(self):
         env = dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00")

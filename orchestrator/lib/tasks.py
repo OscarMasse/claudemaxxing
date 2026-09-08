@@ -24,6 +24,9 @@ enforces the strictly-local rails (nothing leaves the machine).
 The declared `model:` is a FLOOR, never a ceiling: a task may be upgraded to a
 stronger model by the gatekeeper (pre-reset burn-down), never downgraded. A task
 whose floor exceeds what the current regime/budget allows is skipped.
+It must name one of `sonnet`, `opus`, `fable` - the engine's own names, not CLI
+model ids. Anything else makes the task unschedulable and is reported by
+`misconfigured`; see `_declared_model` for why there is no fallback.
 
 Scheduling classes (frontmatter, mutually exclusive):
 
@@ -65,6 +68,27 @@ def _frontmatter(path):
             if k.strip() and v.strip():
                 fm[k.strip()] = v.strip()
     return fm
+
+
+def _declared_model(fm):
+    """The task's declared model floor, or None when it names one the engine
+    does not know.
+
+    There is deliberately no fallback. An unrecognized `model:` value used to
+    be rewritten to sonnet, silently: five tasks written for Fable ran on
+    Sonnet for weeks (they declared the CLI model id `claude-fable-5`, not the
+    engine's `fable`) and nothing in any log said so, because the coerced
+    value is what every later line printed. A wrong model produces work of the
+    wrong quality, which is far more expensive than a task that does not run,
+    so the task becomes unschedulable instead and `misconfigured()` reports it.
+
+    The same argument applies to any frontmatter value the engine interprets:
+    default when the key is ABSENT, never when it is present and unreadable.
+    """
+    raw = fm.get("model")
+    if raw is None:
+        return "sonnet"
+    return raw if raw in MODEL_RANK else None
 
 
 def _prereq_names(fm):
@@ -123,9 +147,9 @@ def _ordered(root, projects, account, max_model, sched_class=None):
         proj = projects.get(fm.get("project", "default"))
         if proj is None or proj["account"] != account:
             continue
-        model = fm.get("model", "sonnet")
-        if model not in MODEL_RANK:
-            model = "sonnet"
+        model = _declared_model(fm)
+        if model is None:
+            continue  # unknown model name, reported by misconfigured()
         if MODEL_RANK[model] > ceiling:
             continue  # floor above what this tick may launch
         if _unmet_prerequisites(root, fm):
@@ -219,6 +243,96 @@ def orphaned(root, projects):
         name = fm.get("project", "default")
         if name not in projects:
             out.append((p.name, name))
+    return out
+
+
+STUCK_NOTE = (
+    "- {date}: auto-repaired by the gatekeeper. Left `in-progress` with no "
+    "live session behind it for {hours:.0f}h, which makes a task "
+    "unschedulable forever (only `ready` is ever picked). Status set back to "
+    "`ready`. The notes above are the last thing that session recorded - "
+    "resume from them, do not restart from scratch.\n")
+
+
+def _set_ready(path, hours, date):
+    """Rewrite one task's frontmatter status to `ready` and log why in Notes.
+
+    The status line is replaced only inside the frontmatter block, so a task
+    whose prose happens to contain a `status:` line is not corrupted. A task
+    with no `## Notes` section gets one: the note is the only trace of the
+    repair the human ever sees in the task itself.
+    """
+    text = path.read_text(errors="replace")
+    m = re.match(r"---\n(.*?)\n---", text, re.S)
+    if not m:
+        return False
+    fm = re.sub(r"^status:.*$", "status: ready", m.group(1),
+                count=1, flags=re.M)
+    text = text[:m.start(1)] + fm + text[m.end(1):]
+    note = STUCK_NOTE.format(date=date, hours=hours)
+    if "\n## Notes" in text:
+        head, sep, tail = text.rpartition("\n## Notes")
+        body = tail.split("\n", 1)
+        rest = body[1] if len(body) > 1 else ""
+        text = f"{head}{sep}{body[0]}\n{rest.rstrip()}\n{note}"
+    else:
+        text = f"{text.rstrip()}\n\n## Notes\n\n{note}"
+    path.write_text(text)
+    return True
+
+
+def repair_stuck(root, now, ttl_s, date):
+    """Reset tasks stuck `in-progress` back to `ready`: list of (filename, hours).
+
+    A session is killed hard when its slice runs out, and the machine can go
+    down mid-run. Either way the task keeps the `in-progress` it set on itself
+    and becomes permanently invisible to the scheduler, silently - three tasks
+    on this backlog sat that way for a month. The owner ruled once that he
+    would rather handle these by hand and revisit if it happened three times;
+    it has now happened five, so the engine repairs them.
+
+    Liveness is inferred from the file's own mtime rather than from the RUNNING
+    locks, because the locks do not record which task they hold. A session
+    cannot outlive its slice (hard kill at slice + 10 minutes, an hour at the
+    configured slice), so `ttl_s` at the lock TTL leaves no window in which a
+    working session's task could be reset under it.
+    """
+    out = []
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md":
+            continue
+        if _frontmatter(p).get("status") != "in-progress":
+            continue
+        try:
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if age < ttl_s:
+            continue
+        if _set_ready(p, age / 3600.0, date):
+            out.append((p.name, age / 3600.0))
+    return out
+
+
+def misconfigured(root):
+    """Ready tasks the engine refuses to schedule because their `model:` names
+    a model it does not know: list of (task filename, the unreadable value).
+
+    Plays the same role for models that `orphaned` plays for projects. Both
+    conditions make a task invisible rather than merely unscheduled: it enters
+    no account's queue, so no `blocked` report ever mentions it, and this is
+    the only place it surfaces. Model names the engine accepts: the keys of
+    MODEL_RANK (sonnet, opus, fable), never CLI model ids.
+    Account-independent by construction, so gate.py prints it once."""
+    out = []
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md":
+            continue
+        fm = _frontmatter(p)
+        if fm.get("status") != "ready":
+            continue
+        if _declared_model(fm) is None:
+            out.append((p.name, fm["model"]))
     return out
 
 

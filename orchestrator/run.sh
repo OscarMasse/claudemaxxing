@@ -58,6 +58,30 @@ CONFIG_FILE="$(python3 lib/config.py resolve)"
 cfg() { python3 lib/config.py "$CONFIG_FILE" "$@"; }
 if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi
 
+# Slot-based locks, namespaced per account: up to 8 concurrent sessions (the
+# gatekeeper caps how many get launched per regime and per account; manual
+# runs take a slot like any other). Accounts never contend for slots.
+#
+# Claimed HERE, as the first thing this script does after resolving its
+# account, and deliberately ahead of every other config read. The lock is what
+# makes two launches of the same slot impossible, so every millisecond between
+# process start and lock acquisition is a window in which a second launcher
+# can pass the same check. The profile, dirs and digest lookups below are one
+# python3 subprocess each - about a second in total, which is a wide enough
+# window to matter once the gatekeeper ticks every few minutes.
+STATE="$STATE_ROOT/$ACCOUNT"
+mkdir -p "$STATE"
+SLOT=""
+for i in 1 2 3 4 5 6 7 8; do
+  if ( set -o noclobber; echo "$$ $(date +%s)" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
+    SLOT=$i; break
+  fi
+done
+if [ -z "$SLOT" ]; then echo "no free slot account=$ACCOUNT" >> "$STATE_ROOT/runs.log"; exit 0; fi
+LOCK="$STATE/RUNNING.$SLOT"
+trap 'rm -f "$LOCK"' EXIT INT TERM
+
+
 # The account's Claude profile drives the invocation AND where ccusage /
 # activity detection read, so each subscription is fully self-contained.
 export CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
@@ -90,21 +114,6 @@ if [ "$MODE" = "digest" ]; then
 else
   DIGEST_FILE="$(cfg digest-file)"
 fi
-
-# Slot-based locks, namespaced per account: up to 8 concurrent sessions (the
-# gatekeeper caps how many get launched per regime and per account; manual
-# runs take a slot like any other). Accounts never contend for slots.
-STATE="$STATE_ROOT/$ACCOUNT"
-mkdir -p "$STATE"
-SLOT=""
-for i in 1 2 3 4 5 6 7 8; do
-  if ( set -o noclobber; echo "$$ $(date +%s)" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
-    SLOT=$i; break
-  fi
-done
-if [ -z "$SLOT" ]; then echo "no free slot account=$ACCOUNT" >> "$STATE_ROOT/runs.log"; exit 0; fi
-LOCK="$STATE/RUNNING.$SLOT"
-trap 'rm -f "$LOCK"' EXIT INT TERM
 
 if [ -n "$TASK_FILE" ]; then
   DIRECTIVE="The gatekeeper already selected the task for this slice: $TASK_FILE. Work ONLY on that task and skip the selection in step 1."

@@ -3,6 +3,7 @@
 
   gate.py tick    -> one decision line PER ACCOUNT, logs each decision:
                        RUN <account> <slice_min> <task> <model> <effort> <project>
+                            <est_tokens> <budget_tokens>
                        SKIP <account> <reason>
                      (plus a global "SKIP paused" when the kill switch is set)
   gate.py status  -> human-readable per-account quota summary for the digest
@@ -125,6 +126,26 @@ def notify_duty(p, idle):
             f.write(h + "\n")
 
 
+def break_stale_claims(p, state_dir):
+    """Drop task claims left behind by a session that died without its trap.
+
+    run.sh releases its own claims on every exit path, so this only ever fires
+    after a SIGKILL or a machine that went down mid-session. Same TTL as the
+    RUNNING locks: a claim cannot outlive the longest possible session.
+    """
+    claims = state_dir / "claims"
+    if not claims.is_dir():
+        return
+    for c in sorted(claims.iterdir()):
+        try:
+            if time.time() - c.stat().st_mtime < LOCK_TTL_S:
+                continue
+            c.unlink(missing_ok=True)
+        except OSError:
+            continue
+        log(p, f"broke stale claim {state_dir.name}/{c.name}")
+
+
 def active_slots(p, state_dir):
     """Count fresh RUNNING* locks in one account's state dir; break stale ones."""
     n = 0
@@ -223,6 +244,7 @@ def tick_account(p, acct, projs):
     # run.sh only allocates RUNNING.1..8 lock slots, so 8 is the hard structural
     # limit however high this is set.
     cap_slots = min(int(acct.get("max_parallel_sessions", 4)), MAX_SLOTS)
+    break_stale_claims(p, state)
     free = cap_slots - active_slots(p, state)
     if d.action == "run" and free <= 0:
         print(f"SKIP {name} running")
@@ -235,6 +257,9 @@ def tick_account(p, acct, projs):
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
+    # Only the FIRST task of each session is selected here. A session is a
+    # budget and takes its later tasks itself, so this pass sizes the tick
+    # rather than enumerating everything that will run.
     picked = []
     if d.action == "run":
         max_floor = "opus" if d.regime == "night" else d.model
@@ -266,9 +291,16 @@ def tick_account(p, acct, projs):
             cand["est_tokens"] = int(est_burn)
             picked.append(cand)
             budget -= est_burn
+    # A session is a budget, not a task: it keeps taking further tasks itself
+    # until its share is spent (see prompts/orchestrate.md). The tick's whole
+    # allocation is therefore split evenly between the sessions it launches -
+    # never per task estimate, or the leftover between the estimate and the
+    # allocation would go unspent, which is exactly the surplus the night
+    # exists to burn. Sum over the sessions equals the tick allocation.
+    session_budget = int(d.budget_tokens / len(picked)) if picked else 0
     log(p, f"account={name} {d.action} reason={d.reason!r} slice={d.slice_min} "
            f"regime={d.regime} model={d.model} week={snap['week_tokens']} "
-           f"idle={idle} free_slots={free} "
+           f"idle={idle} free_slots={free} session_budget={session_budget} "
            f"duties={[t['path'] for t in picked if t['sched'] == 'duty'] or '-'} "
            f"fillers={[t['path'] for t in picked if t['sched'] == 'filler'] or '-'} "
            f"tasks={[t['path'] for t in picked if not t['sched']] or '-'}")
@@ -282,7 +314,8 @@ def tick_account(p, acct, projs):
     if d.action == "run":
         for t in picked:
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
-                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)}")
+                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)} "
+                  f"{session_budget}")
             if t["sched"] == "duty":
                 record_duty(state, t["path"], t["period_key"])
     else:

@@ -201,7 +201,49 @@ class TestGate(unittest.TestCase):
         self.append_cfg("max_parallel_sessions: 1\nest_rate_sonnet_per_min: 0.05\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
-        self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # 0.05 x 50
+        # ... <est_tokens> <budget_tokens>, the estimate second to last.
+        self.assertEqual(r.stdout.split()[-2], "2", r.stdout)  # 0.05 x 50
+
+    def test_single_session_gets_the_whole_tick_allocation(self):
+        # A session is a budget, not a task: with one session launched, the
+        # budget it is handed is the tick's entire allocation, so it keeps
+        # taking tasks instead of exiting after the first one.
+        self.append_cfg("max_parallel_sessions: 1\nest_rate_sonnet_per_min: 0.05\n")
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        r = run_gate(self.root, env)
+        budget = int(r.stdout.split()[-1])
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn(f"session_budget={budget}", log)
+        self.assertEqual(budget, 5, r.stdout)  # tonight's whole allocation
+
+    def test_tick_allocation_is_split_between_parallel_sessions(self):
+        # Two sessions launched: each gets half, so the sum over the sessions
+        # is still exactly what the controller allocated to this tick.
+        self.append_cfg("max_parallel_sessions: 2\n"
+                        "est_rate_sonnet_per_min: 0.005\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "parallel: true\n---\n")
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        r = run_gate(self.root, env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 2, r.stdout)
+        budgets = [int(l.split()[-1]) for l in lines]
+        self.assertEqual(budgets, [2, 2], r.stdout)  # 5 // 2, both sessions
+
+    def test_stale_claims_are_broken_fresh_ones_kept(self):
+        # A session killed without running its trap would otherwise leave a
+        # task claimed forever. Same TTL as the RUNNING locks.
+        claims = self.root / "orchestrator" / "state" / "personal" / "claims"
+        claims.mkdir(parents=True)
+        stale, fresh = claims / "old.md", claims / "new.md"
+        stale.write_text("3")
+        fresh.write_text("4")
+        os.utime(stale, (time.time() - 5 * 3600, time.time() - 5 * 3600))
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        run_gate(self.root, env)
+        self.assertFalse(stale.exists())
+        self.assertTrue(fresh.exists())
 
     def test_parallel_respects_active_slots(self):
         self.append_cfg("max_parallel_sessions: 2\n"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch one background orchestrator session (or the morning digest).
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
-#                                [est_tokens]
+#                                [est_tokens] [budget_tokens]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
@@ -10,6 +10,9 @@
 # quota locks (but not the RUNNING lock) - you decide, it runs.
 # Without a task_file the session picks the task itself (sonnet only), among
 # the projects of this account.
+# A session is a BUDGET, not a task: `budget_tokens` is what it may burn, and it
+# keeps taking further tasks itself until that budget or the slice runs out. The
+# manual default (0) means no token ceiling - the slice is the only limit.
 set -uo pipefail
 cd "$(dirname "$0")"
 ORCH_DIR="$(pwd)"
@@ -49,7 +52,10 @@ PROJECT="${ARGS[4]:-}"
 # What the gatekeeper predicted this slice would burn. Recorded in the ledger
 # next to the actual usage so the estimate can be scored (ledger.accuracy).
 EST_TOKENS="${ARGS[5]:-0}"
-if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; fi
+# How many tokens this session may burn in total, across as many tasks as fit.
+# 0 = uncapped (manual runs): the slice is then the only ceiling.
+BUDGET_TOKENS="${ARGS[6]:-0}"
+if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; BUDGET_TOKENS=0; fi
 
 # All config access goes through lib/config.py (accounts inherit flat keys).
 # The live config file is resolved once, in the single place that owns the
@@ -104,13 +110,33 @@ for i in 1 2 3 4 5 6 7 8; do
 done
 if [ -z "$SLOT" ]; then echo "no free slot account=$ACCOUNT" >> "$STATE_ROOT/runs.log"; exit 0; fi
 LOCK="$STATE/RUNNING.$SLOT"
-trap 'rm -f "$LOCK"' EXIT INT TERM
+# Task claims. A session works as many tasks as its budget allows and selects
+# the later ones itself, so parallel sessions of the same tick need an atomic
+# way to agree on who owns what: one file per task basename, containing the
+# owning slot, created with noclobber by the session (see prompts/orchestrate.md).
+# Released here on every exit path, so a killed session never leaves a task
+# claimed forever; gate.py additionally breaks claims older than the lock TTL.
+CLAIM_DIR="$STATE/claims"
+mkdir -p "$CLAIM_DIR"
+release_claims() {
+  for c in "$CLAIM_DIR"/*; do
+    [ -f "$c" ] || continue
+    if [ "$(cat "$c" 2>/dev/null)" = "$SLOT" ]; then rm -f "$c"; fi
+  done
+}
+trap 'rm -f "$LOCK"; release_claims' EXIT INT TERM
 
 if [ -n "$TASK_FILE" ]; then
-  DIRECTIVE="The gatekeeper already selected the task for this slice: $TASK_FILE. Work ONLY on that task and skip the selection in step 1."
+  DIRECTIVE="The gatekeeper already selected the FIRST task of this session: $TASK_FILE. Start with it and skip step 1 for it (still claim it, step 2). Any further task, you select yourself per step 1."
 else
   DIRECTIVE="No task was pre-selected: pick one yourself per step 1."
 fi
+# Rendered into the prompt: the token ceiling the session paces itself against.
+BUDGET_TEXT="uncapped - the slice is the only limit"
+case "$BUDGET_TOKENS" in
+  ""|0|0.*) ;;
+  *) BUDGET_TEXT="about ${BUDGET_TOKENS%%.*} tokens" ;;
+esac
 PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
               -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
               -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \
@@ -118,6 +144,9 @@ PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECT
               -e "s|{{ACCOUNT}}|$ACCOUNT|g" \
               -e "s|{{ACCOUNT_PROJECTS}}|${ACCOUNT_PROJECTS% }|g" \
               -e "s|{{PROJECT_DIRS}}|$BACKLOG_ROOT $DIRS|g" \
+              -e "s|{{TOKEN_BUDGET}}|$BUDGET_TEXT|g" \
+              -e "s|{{CLAIM_DIR}}|$CLAIM_DIR|g" \
+              -e "s|{{SLOT}}|$SLOT|g" \
               -e "s|{{DIGEST_FILE}}|$DIGEST_FILE|g" "prompts/$MODE.md")"
 TIMEOUT_S=$(( (SLICE_MIN + 10) * 60 ))
 START="$(date '+%F %T')"
@@ -149,7 +178,7 @@ python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
 # result JSON before it is deleted.
 read -r COST_USD DURATION_MIN < <(python3 lib/ledger.py fields "$OUT_JSON")
 rm -f "$OUT_JSON"
-echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=${TASK_FILE:-auto} project=${PROJECT:-auto} model=$MODEL/$EFFORT exit=$CODE" >> "$STATE_ROOT/runs.log"
+echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min budget=$BUDGET_TOKENS task=${TASK_FILE:-auto} project=${PROJECT:-auto} model=$MODEL/$EFFORT exit=$CODE" >> "$STATE_ROOT/runs.log"
 
 # Mechanical journal entry: one line per run, appended to this run's digest
 # file (creating the header/section on first write). A single `>>` write per

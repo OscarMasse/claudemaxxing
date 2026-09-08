@@ -15,7 +15,7 @@ measured burn rates and cost stats never bleed across subscriptions.
       deleted). Missing/unparseable data reads as "0.0 0".
 
   Library: stats(state_dir) -> {task: {runs, cost_usd, out_tokens, total_tokens}}
-           rates(state_dir) -> {(task, model): tokens_per_min}
+           session_costs(state_dir) -> {(task, model): tokens_per_session}
            spent_since(state_dir, iso_ts) -> tokens burned since a timestamp
            accuracy(state_dir) -> per-task estimate-vs-actual error
 """
@@ -129,9 +129,9 @@ def accuracy(state_dir):
     """{task: {runs, est_tokens, actual_tokens, ratio}} for runs whose launch
     estimate was recorded. ratio > 1 means the planner under-estimated.
 
-    This is the feedback loop on the burn estimates: `rates()` learns the
-    per-minute rate, and this reports whether that learning is actually
-    converging or systematically off for a given task."""
+    This is the feedback loop on the burn estimates: `session_costs()` learns
+    what a task costs per session, and this reports whether that learning is
+    actually converging or systematically off for a given task."""
     out = {}
     for e in _entries(state_dir):
         est = e.get("est_tokens")
@@ -148,29 +148,37 @@ def accuracy(state_dir):
     return out
 
 
-RATE_WINDOW = 5  # runs; a task's burn rate drifts as it moves through its work
+RATE_WINDOW = 5  # runs; a task's cost drifts as it moves through its work
 
 
-def rates(state_dir, window=RATE_WINDOW):
-    """Measured burn rates {(task, model): tokens_per_min} from the ledger.
+def session_costs(state_dir, window=RATE_WINDOW):
+    """Measured cost {(task, model): tokens_per_session} from the ledger.
 
     This is how the planner learns real task costs over time. Only the last
-    `window` runs per (task, model) count: a task's rate drifts as it moves
+    `window` runs per (task, model) count: a task's cost drifts as it moves
     from cheap survey slices to expensive implementation ones, and averaging
-    over all history keeps quoting a rate the task has already outgrown."""
+    over all history keeps quoting a figure the task has already outgrown.
+
+    Per SESSION, not per minute. This used to divide by `slice_min` and the
+    caller multiplied by the slice again, which cancelled back to a per-session
+    figure - correct by accident, and only while every slice had the same
+    length. Sessions do not fill their slice (measured median utilisation on
+    this backlog: 3%), so a per-minute rate does not describe anything real:
+    what a task costs is a property of the work, not of the time it was
+    allotted. The cold-start default (`est_session_tokens`) is in the same
+    unit, so the measured and unmeasured paths can no longer disagree by the
+    length of a slice."""
     recent = {}
     for e in _entries(state_dir):
-        mins = e.get("slice_min") or 0
         total = _entry_tokens(e)
-        if mins <= 0 or total <= 0:
+        if total <= 0:
             continue
         key = (e.get("task", "?"), e.get("model", "sonnet"))
         runs = recent.setdefault(key, [])
-        runs.append((total, mins))
+        runs.append(total)
         if len(runs) > window:
             runs.pop(0)
-    return {k: sum(t for t, _ in runs) / sum(m for _, m in runs)
-            for k, runs in recent.items()}
+    return {k: sum(runs) / len(runs) for k, runs in recent.items()}
 
 
 if __name__ == "__main__":

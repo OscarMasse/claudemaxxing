@@ -250,17 +250,27 @@ def tick_account(p, acct, projs):
                                         max_model=max_floor, count=free,
                                         done=duties_served(state),
                                         period_keys=keys)
-        measured = ledger.rates(state)
-        defaults = {"sonnet": float(acct.get("est_rate_sonnet_per_min", 400000)),
-                    "opus": float(acct.get("est_rate_opus_per_min", 800000)),
-                    "fable": float(acct.get("est_rate_fable_per_min", 1200000))}
+        # What a session costs is a property of the work, not of the slice it
+        # was allotted: sessions do not fill their slice (measured median
+        # utilisation here: 3%), so both the measured figure and the cold-start
+        # default are per SESSION. This used to be a per-minute rate multiplied
+        # by the slice, which was accidentally right for a task with ledger
+        # history (the divide and the multiply cancelled) and ~30x too high for
+        # one without - 400k/min x 50min = 20M against a measured median of
+        # 726k. That single wrong number capped most nights at one session,
+        # since every candidate after the first was gated on it.
+        # One default, not one per model: the measurement says session cost is
+        # driven by the task, which is why the learned figure is keyed on
+        # (task, model). A per-model prior is not supported by the data here
+        # (opus and fable sessions measured CHEAPER than sonnet ones), so
+        # inventing three numbers would only look more precise than it is.
+        measured = ledger.session_costs(state)
+        default_cost = float(acct.get("est_session_tokens", 2500000))
         budget = d.budget_tokens
         for cand in candidates:
             if tasks.MODEL_RANK[d.model] > tasks.MODEL_RANK[cand["model"]]:
                 cand["model"] = d.model
-            rate = measured.get((cand["path"], cand["model"])) \
-                or defaults.get(cand["model"], defaults["sonnet"])
-            est_burn = rate * d.slice_min
+            est_burn = measured.get((cand["path"], cand["model"]), default_cost)
             # Budget rules per scheduling class. A duty is mandatory: charged
             # to the budget, never gated by it. A queue task is exempt when it
             # is the tick's first session, or a task heavier than a whole night

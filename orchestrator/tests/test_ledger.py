@@ -7,7 +7,7 @@ from lib import ledger
 
 
 class TestLedger(unittest.TestCase):
-    def test_stats_and_rates(self):
+    def test_stats_and_session_costs(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "costs.jsonl"
             entries = [
@@ -25,9 +25,12 @@ class TestLedger(unittest.TestCase):
             s = ledger.stats(d)
             self.assertEqual(s["tasks/a.md"]["runs"], 2)
             self.assertAlmostEqual(s["tasks/a.md"]["cost_usd"], 1.0)
-            r = ledger.rates(d)
-            self.assertAlmostEqual(r[("tasks/a.md", "sonnet")], 750.0)  # 15000/20
-            self.assertAlmostEqual(r[("tasks/b.md", "opus")], 2000.0)   # 40000/20
+            # Per session, so the differing slice_min values are irrelevant:
+            # a task's cost is a property of the work, not of the time it was
+            # allotted (and sessions do not fill their slice anyway).
+            r = ledger.session_costs(d)
+            self.assertAlmostEqual(r[("tasks/a.md", "sonnet")], 7500.0)  # 15000/2
+            self.assertAlmostEqual(r[("tasks/b.md", "opus")], 40000.0)   # one run
 
     def test_record_writes_account_into_state_dir(self):
         with tempfile.TemporaryDirectory() as d:
@@ -106,13 +109,25 @@ class TestLearning(unittest.TestCase):
                              (2, 200, 300))
             self.assertAlmostEqual(a["ratio"], 1.5)  # under-estimated by 50%
 
-    def test_rates_only_average_the_recent_window(self):
+    def test_session_costs_only_average_the_recent_window(self):
         with tempfile.TemporaryDirectory() as d:
             state = Path(d) / "state"
             # Cheap survey slices first, then the task gets expensive: the
             # stale cheap runs must fall out of the window.
             jsonl(state, [entry(tokens=10)] * 5 + [entry(tokens=1000)] * 5)
-            self.assertEqual(ledger.rates(state)[("tasks/a.md", "sonnet")], 100.0)
+            self.assertEqual(
+                ledger.session_costs(state)[("tasks/a.md", "sonnet")], 1000.0)
+
+    def test_session_cost_ignores_the_slice_length(self):
+        # The regression this guards: the figure used to be per minute and the
+        # caller multiplied by the slice again. Two identical sessions
+        # allotted different slices must cost the same.
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "state"
+            jsonl(state, [entry(tokens=500, slice_min=10),
+                          entry(tokens=500, slice_min=50)])
+            self.assertEqual(
+                ledger.session_costs(state)[("tasks/a.md", "sonnet")], 500.0)
 
     def test_record_stores_the_launch_estimate(self):
         with tempfile.TemporaryDirectory() as d:

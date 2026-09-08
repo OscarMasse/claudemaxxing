@@ -150,10 +150,10 @@ class TestGate(unittest.TestCase):
 
     def test_night_slot_count_is_budget_driven(self):
         # Tuesday night's allocation is 5.5 tokens (see TestNightBudget); at an
-        # estimated 0.05 x 50min = 2.5 per session, 2 sessions fit and a 3rd
-        # does not. The slot ceiling (4) is not what decides this.
+        # estimated 2.5 per session, 2 sessions fit and a 3rd does not. The
+        # slot ceiling (4) is not what decides this.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_rate_sonnet_per_min: 0.05\n")
+                        "est_session_tokens: 2.5\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -167,7 +167,7 @@ class TestGate(unittest.TestCase):
         # the safety ceiling. This is the point of the redesign - the metric is
         # tokens, not a fixed task count.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_rate_sonnet_per_min: 0.005\n")
+                        "est_session_tokens: 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -179,7 +179,7 @@ class TestGate(unittest.TestCase):
     def test_safety_ceiling_caps_the_slot_count(self):
         # Budget for many, machine for two: the ceiling wins.
         self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_rate_sonnet_per_min: 0.005\n")
+                        "est_session_tokens: 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -189,10 +189,10 @@ class TestGate(unittest.TestCase):
         self.assertEqual(len(lines), 2, r.stdout)
 
     def test_heavy_task_limits_parallelism(self):
-        # One session's estimated burn (1.0 x 50min = 50) exceeds the night
-        # allocation: parallelizing is pointless, exactly one session runs.
+        # One session's estimated burn (50) exceeds the night allocation:
+        # parallelizing is pointless, exactly one session runs.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_rate_sonnet_per_min: 1.0\n")
+                        "est_session_tokens: 50\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -202,14 +202,14 @@ class TestGate(unittest.TestCase):
         self.assertEqual(len(lines), 1, r.stdout)
 
     def test_run_line_carries_the_launch_estimate(self):
-        self.append_cfg("max_parallel_sessions: 1\nest_rate_sonnet_per_min: 0.05\n")
+        self.append_cfg("max_parallel_sessions: 1\nest_session_tokens: 2.5\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
-        self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # 0.05 x 50
+        self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # int(2.5)
 
     def test_parallel_respects_active_slots(self):
         self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_rate_sonnet_per_min: 0.005\n")
+                        "est_session_tokens: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -482,9 +482,9 @@ class TestGateDuties(unittest.TestCase):
             "---\ntitle: X\nproject: side-projects\nstatus: ready\n"
             "priority: high\ncreated: 2026-08-01\n" + extra + "---\n")
 
-    def rate(self, per_min):
+    def cost(self, per_session):
         cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text() + f"est_rate_sonnet_per_min: {per_min}\n")
+        cfg.write_text(cfg.read_text() + f"est_session_tokens: {per_session}\n")
 
     def runs(self, r):
         return [l for l in r.stdout.splitlines() if l.startswith("RUN")]
@@ -494,9 +494,8 @@ class TestGateDuties(unittest.TestCase):
         return json.loads(f.read_text()) if f.exists() else {}
 
     def test_duty_runs_even_when_the_budget_is_gone(self):
-        # Each session is estimated at 1.0 x 50min = 50, far over the 8.6
-        # allocation. The queue task is squeezed out; the duty is not.
-        self.rate(1.0)
+        # Each session is estimated at 50, far over the 8.6 allocation. The queue task is squeezed out; the duty is not.
+        self.cost(50)
         self.task("queue.md")
         self.task("sync.md", "duty: nightly\n")
         lines = self.runs(run_gate(self.root, self.env))
@@ -504,7 +503,7 @@ class TestGateDuties(unittest.TestCase):
         self.assertIn("sync.md", lines[0])
 
     def test_duty_launch_is_recorded_once_per_night(self):
-        self.rate(0.05)
+        self.cost(2.5)
         self.task("sync.md", "duty: nightly\n")
         self.assertEqual(len(self.runs(run_gate(self.root, self.env))), 1)
         self.assertEqual(list(self.served().values()), ["2026-08-11"])
@@ -514,7 +513,7 @@ class TestGateDuties(unittest.TestCase):
                         r.stdout)
 
     def test_duty_is_due_again_the_next_night(self):
-        self.rate(0.05)
+        self.cost(2.5)
         self.task("sync.md", "duty: nightly\n")
         run_gate(self.root, self.env)
         env = dict(self.env, ORCH_NOW="2026-08-12T02:30:00+02:00")
@@ -523,7 +522,7 @@ class TestGateDuties(unittest.TestCase):
     def test_dry_run_does_not_consume_the_duty_period(self):
         cfg = self.root / "config.yml"
         cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
-        self.rate(0.05)
+        self.cost(2.5)
         self.task("sync.md", "duty: nightly\n")
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
@@ -532,7 +531,7 @@ class TestGateDuties(unittest.TestCase):
     def test_nightly_duty_is_not_launched_during_the_day(self):
         # Belt and braces: the daytime tick skips before selection anyway, but
         # the period key is also absent, so nothing can pick the duty up.
-        self.rate(0.05)
+        self.cost(2.5)
         self.task("sync.md", "duty: nightly\n")
         day = gate.now_from_env.__globals__["datetime"].fromisoformat(
             "2026-08-12T15:00:00+02:00")
@@ -543,7 +542,7 @@ class TestGateDuties(unittest.TestCase):
         self.assertTrue(r.stdout.startswith("SKIP personal day:"), r.stdout)
 
     def test_filler_runs_on_leftover_budget(self):
-        self.rate(0.05)
+        self.cost(2.5)
         self.task("queue.md")
         self.task("tidy.md", "filler: true\n")
         lines = self.runs(run_gate(self.root, self.env))
@@ -554,7 +553,7 @@ class TestGateDuties(unittest.TestCase):
     def test_filler_never_runs_on_borrowed_budget(self):
         # The queue task alone overshoots the allocation: unlike a queue task,
         # a filler never gets the "first session always runs" exemption.
-        self.rate(1.0)
+        self.cost(50)
         self.task("queue.md")
         self.task("tidy.md", "filler: true\n")
         lines = self.runs(run_gate(self.root, self.env))

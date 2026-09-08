@@ -44,7 +44,7 @@ activity_idle_night_min: 40
 night_slice_min: 50
 max_parallel_sessions: 4
 night_budget_ratio: 2.0
-est_rate_sonnet_per_min: 0.05
+est_session_tokens: 2.5
 fable_min_surplus_tokens: 100000000
 opus_min_surplus_tokens: 30000000
 claude_bin: $SANDBOX/claude-stub.sh
@@ -86,6 +86,13 @@ ORCH_NOW="$NIGHT" python3 gate.py plan
 echo
 echo "== one full night tick (duty, queue, filler) =="
 ORCH_NOW="$NIGHT" ./gatekeeper.sh
+# gatekeeper.sh deliberately does not wait for the sessions it launches (it is
+# a pipeline, not a batch - see the comment at the end of it), so a rehearsal
+# has to wait for them itself before reading what they logged.
+for _ in $(seq 1 100); do
+  [ -f "$SANDBOX/orchestrator/state/runs.log" ] && [ -z "$(ls "$SANDBOX"/orchestrator/state/max/RUNNING.* 2>/dev/null)" ] && break
+  sleep 0.2
+done
 grep -o 'tasks/[a-z]*\.md' "$SANDBOX/orchestrator/state/runs.log" | sort | sed 's/^/launched /'
 echo
 echo "== duty period consumed =="

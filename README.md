@@ -116,7 +116,8 @@ Both stay `ready` forever; `state/<account>/duties.json` records the period each
 Whatever needs no reasoning (commit and push a directory, prune caches) belongs in a plain cron/launchd job instead - it should not burn tokens at all.
 
 **The ledger is the memory.**
-Every session's result JSON is appended to `state/<account>/costs.jsonl`; measured burn rates per (task, model) feed the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
+Every session's result JSON is appended to `state/<account>/costs.jsonl`; the measured cost per (task, model) feeds the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
+Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_tokens`) is in the same unit as the learned figure.
 
 ## FAQ
 

@@ -48,6 +48,15 @@ Prerequisite gating: a task with a `prerequisites:` key is not eligible until
 every named prerequisite task is itself `status: done`. Only the prerequisite's
 own status is read, never its own prerequisites, so this check never recurses
 and cycles cannot cause a loop.
+
+Priority inheritance: a blocker is at least as urgent as the most urgent thing
+waiting on it. A task's EFFECTIVE priority is the best of its own and of every
+unfinished task that transitively depends on it, so a `low` prerequisite sitting
+under a `high` task is scheduled as `high`. Without this, declaring a
+prerequisite silently deprioritises the very work that unblocks the queue: the
+dependent is skipped every tick (unmet prerequisite) while its blocker waits
+behind unrelated tasks. Only the effective priority is used for ordering; the
+declared `priority:` in the file is never rewritten. See `_effective_priorities`.
 """
 import re
 from pathlib import Path
@@ -112,6 +121,50 @@ def _unmet_prerequisites(root, fm):
     return unmet
 
 
+def _own_priority(fm):
+    """The priority rank declared in the file, defaulting to `low`."""
+    return PRIORITY_ORDER.get(fm.get("priority", "low"), PRIORITY_ORDER["low"])
+
+
+def _effective_priorities(root):
+    """Map task basename -> effective priority rank, lower being more urgent.
+
+    A blocker inherits the best priority of everything still waiting on it,
+    transitively: if `low` task A is a prerequisite of `high` task B, A is
+    scheduled as `high`, because finishing A is the only way B ever runs.
+
+    Only unfinished dependents propagate. A `done` task is not waiting on
+    anything, so its priority must not keep pinning its old prerequisites at
+    the front of the queue forever.
+
+    Propagation is bounded relaxation rather than recursion: ranks only ever
+    decrease and are bounded below by 0, so the loop terminates even when the
+    prerequisite graph contains a cycle. `_unmet_prerequisites` deliberately
+    does not recurse for the same reason; this function is the one place that
+    walks the graph, and it is written not to trust it.
+    """
+    fms = {}
+    for p in (Path(root) / "tasks").glob("*.md"):
+        if p.name != "TEMPLATE.md":
+            fms[p.stem] = _frontmatter(p)
+
+    eff = {name: _own_priority(fm) for name, fm in fms.items()}
+    # A dependent only pulls its blockers forward while it is still pending.
+    pending = [n for n, fm in fms.items() if fm.get("status") != "done"]
+
+    for _ in range(len(fms) + 1):
+        changed = False
+        for name in pending:
+            rank = eff[name]
+            for prereq in _prereq_names(fms[name]):
+                if prereq in eff and rank < eff[prereq]:
+                    eff[prereq] = rank
+                    changed = True
+        if not changed:
+            break
+    return eff
+
+
 DUTY_PERIODS = ("nightly", "weekly")
 
 
@@ -137,6 +190,7 @@ def _ordered(root, projects, account, max_model, sched_class=None):
     Every other eligibility rule is shared, so the classes cannot drift apart
     from the queue on prerequisites, model floors or account routing."""
     ceiling = MODEL_RANK.get(max_model, 0)
+    effective = _effective_priorities(root)
     found = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -161,7 +215,7 @@ def _ordered(root, projects, account, max_model, sched_class=None):
         else:
             local_only = proj["local_only_default"]
         key = (proj["priority"],
-               PRIORITY_ORDER.get(fm.get("priority", "low"), 2),
+               effective.get(p.stem, _own_priority(fm)),
                fm.get("created", "9999"), p.name)
         found.append((key, {"path": str(p), "model": model,
                             "effort": fm.get("effort", "low"),

@@ -177,6 +177,62 @@ class TestPick(unittest.TestCase):
                    priority="high")
         self.assertTrue(self.pick()["path"].endswith("main.md"))
 
+    def test_blocker_inherits_its_dependent_priority(self):
+        # The whole point: a low blocker under a high task must not sit behind
+        # unrelated medium work, or the high task can never become eligible.
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-05")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-01",
+                   prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("blocker.md"))
+
+    def test_priority_inheritance_is_transitive(self):
+        write_task(self.root, "root.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-05")
+        write_task(self.root, "middle.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-04",
+                   prerequisites="root")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-01",
+                   prerequisites="middle")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("root.md"))
+
+    def test_done_dependent_does_not_keep_promoting_its_prerequisite(self):
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-05")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="done", priority="high", created="2026-08-01",
+                   prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("unrelated.md"))
+
+    def test_inheritance_never_demotes_a_blocker(self):
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-05")
+        write_task(self.root, "lazy.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-01", prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("blocker.md"))
+
+    def test_prerequisite_cycle_does_not_hang(self):
+        # A cycle is a misconfiguration, but it must not wedge the gatekeeper.
+        write_task(self.root, "a.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01", prerequisites="b")
+        write_task(self.root, "b.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-02", prerequisites="a")
+        write_task(self.root, "ok.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-03")
+        # Both cycle members stay ineligible (unmet prerequisites); the run
+        # terminates and the unblocked task is picked.
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
+
     def test_blocked_reports_unmet_prerequisites(self):
         write_task(self.root, "dep1.md", project="side-projects", status="ready",
                    priority="high")

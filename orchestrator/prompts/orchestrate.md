@@ -9,6 +9,7 @@ after that, so plan to stop cleanly BEFORE the slice ends: prefer finishing a sm
 of work and committing over starting something you cannot finish.
 
 {{TASK_DIRECTIVE}}
+{{DELIVERY}}
 
 Procedure:
 1. List {{BACKLOG_ROOT}}/tasks/*.md and read their frontmatter. Eligible tasks:
@@ -17,8 +18,26 @@ Procedure:
    `gated` autonomy actions. Order candidates by their project's `priority` in
    the live config ({{CONFIG_FILE}}, lower number first), then by the task's own `priority`
    (high > medium > low); tie-break by oldest `created`.
-   Local-only rails (non-negotiable): a task with `local_only: true` (or whose project
-   sets `local_only_default: true`) must produce NO external side effects. Concretely:
+   Delivery contract (non-negotiable): every task declares `delivery:`, and it is an
+   OBLIGATION, not a permission. It says where the work must end up, and the task is
+   not finished until it is there:
+   - `delivery: pr` - commit on a dedicated branch, push it, and open a pull request.
+     Record the PR URL in the task's `## Notes` and in your digest bullet. Work that
+     stops at an unpushed branch is NOT done, whatever its state otherwise.
+   - `delivery: branch` - commit on a dedicated branch and never push. No PR.
+   - `delivery: local` - the strictly-local rails below apply in full.
+   A task with no `delivery:` key never reaches you (the gatekeeper reports it as
+   misconfigured instead of guessing). If you pick a task yourself and it has no
+   `delivery:`, do not guess either: leave it alone and pick the next one.
+   `autonomy:` is a different axis and does not override this. `gated` means the owner
+   approves before an IRREVERSIBLE or OUTWARD-FACING action. Opening a pull request on
+   the owner's own private repo is neither: it is reviewable, closable, and visible to
+   nobody else. So `delivery: pr` with `autonomy: private` is legitimate and you must
+   push - the belief that a PR needs approval is exactly what made earlier sessions
+   leave finished work sitting in a worktree.
+   Local-only rails (non-negotiable): a task with `delivery: local` (every task of a
+   project that sets `local_only_default: true`) must produce NO external side
+   effects. Concretely:
    - GitHub strictly read-only: `gh` may list/view PRs, comments, checks, diffs.
      NEVER `gh pr comment/review/merge/edit/close`, never any mutating API call.
      Draft replies to reviewers are written to files for the owner to post themselves.
@@ -72,8 +91,11 @@ Procedure:
    mechanical cost/duration line to the same file right after you exit, so
    your bullet should cover substance, not numbers.
 10. Commit ALL repo changes you made (backlog repo and any project repo you touched),
-    clear messages, no co-author lines. Never push from a local_only task.
+    clear messages, no co-author lines. Then honor the task's `delivery:` contract from
+    step 1: push and open the PR (recording its URL) for `pr`, stop at the local commit
+    for `branch`, never push for `local`.
 
 Constraints: never launch other Claude sessions (internal subagents via the Agent
-tool are fine); stay inside {{PROJECT_DIRS}}; git push only when the task is not
-local_only AND its own instructions ask for it; English only in files; plain dashes.
+tool are fine); stay inside {{PROJECT_DIRS}}; push exactly as the task's `delivery:`
+requires - always for `pr`, never for `branch` or `local`; never push to `main` and
+never merge a PR yourself; English only in files; plain dashes.

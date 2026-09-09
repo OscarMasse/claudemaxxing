@@ -171,8 +171,10 @@ accounts:
 #                      flow-style list [a, b], ~ expands to $HOME
 #   priority           optional integer, LOWER is preferred (default 100);
 #                      orders projects within an account before per-task rules
-#   local_only_default optional; tasks in this project default to
-#                      local_only: true (a task can still say local_only: false)
+#   local_only_default optional; marks the project strictly local. This is a
+#                      FLOOR, not a default: every task here must declare
+#                      `delivery: local`, and one declaring `branch` or `pr`
+#                      is reported as misconfigured rather than downgraded.
 projects:
   - name: side-projects
     account: personal

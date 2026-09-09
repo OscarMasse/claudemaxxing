@@ -4,6 +4,7 @@ project: side-projects
 status: ready
 priority: medium
 autonomy: private
+delivery: pr
 model: sonnet
 effort: low
 token_budget: 200k

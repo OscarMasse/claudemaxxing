@@ -335,7 +335,8 @@ def tick_account(p, acct, projs):
     if d.action == "run":
         for t in picked:
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
-                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)}")
+                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)} "
+                  f"{t['delivery']}")
             if t["sched"] == "duty":
                 record_duty(state, t["path"], t["period_key"])
     else:
@@ -352,8 +353,8 @@ def tick(p):
     # Logged every tick, not just in `status`: a task the engine refuses to
     # schedule is otherwise indistinguishable from one that is simply not its
     # turn yet, and the whole point of refusing is to be noticed.
-    for task_name, model in tasks.misconfigured(p["root"]):
-        log(p, f"unschedulable task={task_name}: unknown model {model!r}")
+    for task_name, problem in tasks.misconfigured(p["root"], projs):
+        log(p, f"unschedulable task={task_name}: {problem}")
     # Before any account is scheduled, so a task freed here is eligible in the
     # very same tick rather than waiting 30 minutes for the next one.
     for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,
@@ -455,8 +456,8 @@ def status(p):
     # Printed once, after the accounts: these tasks belong to none of them.
     for task_name, project in tasks.orphaned(p["root"], projs):
         print(f"orphaned task={task_name} project={project}")
-    for task_name, model in tasks.misconfigured(p["root"]):
-        print(f"misconfigured task={task_name} model={model}")
+    for task_name, problem in tasks.misconfigured(p["root"], projs):
+        print(f"misconfigured task={task_name} {problem}")
 
 
 def plan(p):

@@ -21,7 +21,7 @@ gatekeeper-loop.sh  --every 5 min-->   gatekeeper.sh   digest-wrapper.sh
                                         gate.py tick         |
                                             |                |
               +-----------------------------+                |
-              |  per account: ccusage quota data, that       |
+              |  per account: token usage read from that       |
               |  profile's transcript activity, cost ledger, |
               |  RUNNING locks; plus config.yaml, task        |
               |  frontmatter, PAUSED                         |
@@ -71,15 +71,20 @@ A legacy flat config with no `accounts`/`projects` sections still works: a `defa
 
 ## Install
 
-Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.11+, the Claude Code CLI, Node (for `npx ccusage`).
+Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.11+, the Claude Code CLI.
 Nothing to install on the Python side: standard library only, no virtualenv, no pip.
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).
 2. Declare your `accounts` and `projects` in `orchestrator/config.yaml` (fully documented example in the file).
-3. Calibrate each account's token numbers: compare `/usage` against `npx ccusage blocks --json` for a few days.
+3. Calibrate each account's token numbers from `orchestrator/gate.py status` over a few days.
+   They are coarse pacing knobs and nothing more: the account's limit is not linear in the tokens that can be counted locally, so no calibration makes them predictive (`orchestrator/lib/quota.py` carries the measurement).
+   Set `promo_until` whenever the caps were read during a promotional period, so `status` keeps asking for a fresh reading once it lapses.
 4. Create a task in `tasks/` (see `examples/tasks/`) with `status: ready` and a matching `project:`.
 5. Run `orchestrator/install.sh`; it registers the gatekeeper loop and the daily digest job, and prints the one manual `pmset` step for nightly wake.
 6. Optional: a fine-grained PAT in `~/.config/backlog-agents/github-token` enables background git pushes.
+7. Optional: `brew install terminal-notifier` makes the "backlog needs you" notifications clickable, opening `NEEDS-HUMAN.md` with `notify_open_cmd`.
+   macOS attributes `osascript` notifications to Script Editor and gives them no click action, so without it the alert still shows but leads nowhere.
+   terminal-notifier needs its own switch in System Settings > Notifications; when it is refused the adapter silently falls back to `osascript`.
 
 Manual trigger: `orchestrator/run.sh <minutes> [--account <name>]`.
 Dry run: `dry_run: true` in the config, then watch `state/gatekeeper.log` for a night.
@@ -101,6 +106,13 @@ Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a del
 **Budget controller.**
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
 Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
+Consumption is measured by reading Claude Code's own transcript files (`lib/transcripts.py`), de-duplicated per billed message, with the real 5h window start (the first token, not the top of that hour).
+
+**Quota exhaustion is observed, not predicted.**
+The budget paces the week; it cannot tell you when a model is about to be refused, because the account's limit is not linear in the tokens that can be counted locally - over 95% of local volume is cache reads, discounted by an unpublished factor, and the observed `/usage` bars cannot be reproduced by any non-negative weighting of the four token components (`lib/quota.py` carries the measurement).
+So the wall is learned by hitting it: a session that dies on `You've hit your <scope> limit - resets <time>` has that fact recorded per model family in `state/<account>/exhausted.json`, and later ticks stop offering that model until the stated reset.
+It is per model on purpose - the night this was built, Fable was refused at 02:25 while Sonnet kept working in the same window - and any other failure records nothing, so an ordinary crash never costs a model its eligibility.
+`max_fable_slots` caps how many of a tick's slots the strongest model may take (1 by default): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
 
 **Per-night allocation.**
 A night spends its own share of the weekly surplus, not the whole of it, or the first night of the week drains the ones that follow.
@@ -118,6 +130,7 @@ Whatever needs no reasoning (commit and push a directory, prune caches) belongs 
 **The ledger is the memory.**
 Every session's result JSON is appended to `state/<account>/costs.jsonl`; the measured cost per (task, model) feeds the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
 Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_tokens`) is in the same unit as the learned figure.
+The one number that cannot be learned is the weekly cap itself: it only exists on the `/usage` screen, so `gate.py status` prints a `promo` line that warns three days before `promo_until` and then every day after it, until a human re-reads the limit and updates the config.
 
 ## FAQ
 

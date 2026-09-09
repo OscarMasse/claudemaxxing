@@ -18,9 +18,10 @@ ORCH_DIR="$(pwd)"
 # the same config and state paths (config resolution lives in lib/config.py).
 export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
-# launchd hands down a bare PATH (/usr/bin:/bin:...), so node/npx are missing
-# and anything the session shells out to that needs them (gate.py status ->
-# ccusage via npx) dies with FileNotFoundError. Same export as gatekeeper.sh.
+# launchd hands down a bare PATH (/usr/bin:/bin:...), so node and the homebrew
+# tools are missing and anything the session shells out to that needs them (a
+# hook, an MCP server, a project's test command) dies with FileNotFoundError.
+# Same export as gatekeeper.sh.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # GitHub credentials for background sessions: a fine-grained PAT scoped to the
@@ -82,7 +83,7 @@ LOCK="$STATE/RUNNING.$SLOT"
 trap 'rm -f "$LOCK"' EXIT INT TERM
 
 
-# The account's Claude profile drives the invocation AND where ccusage /
+# The account's Claude profile drives the invocation AND where usage /
 # activity detection read, so each subscription is fully self-contained.
 export CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
 CLAUDE_BIN="$(cfg account "$ACCOUNT" claude_bin)"
@@ -142,14 +143,31 @@ if [ ! -x "$KEEP_AWAKE" ]; then KEEP_AWAKE=""; fi
 # The prompt goes through stdin: --add-dir is variadic and would swallow a
 # positional prompt argument. JSON output feeds the per-account cost ledger.
 OUT_JSON="$STATE/result.$SLOT.json"
+# stderr goes to a per-slot file first, then into the shared runs.out. It used
+# to append straight to runs.out, which meant a session's own error text could
+# not be told from the other three slots' - and the one line that matters
+# ("You've hit your session limit - resets 4:20am") was therefore unusable.
+ERR_FILE="$STATE/err.$SLOT.txt"
+: > "$ERR_FILE"
 printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   python3 lib/with_timeout.py "$TIMEOUT_S" -- \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
   "${ADD_DIRS[@]}" \
-  > "$OUT_JSON" 2>> "$STATE_ROOT/runs.out"
+  > "$OUT_JSON" 2> "$ERR_FILE"
 CODE=$?
+cat "$ERR_FILE" >> "$STATE_ROOT/runs.out"
+# A failed session may have been refused by the account rather than have
+# crashed: record which model is out of quota and until when, so the gatekeeper
+# stops relaunching into a wall it has already hit. Only the model that failed
+# is affected - the night that motivated this had Fable exhausted while Sonnet
+# still ran fine.
+if [ "$CODE" -ne 0 ]; then
+  python3 lib/quota.py record "$STATE" "$MODEL" "$ERR_FILE" \
+    >> "$STATE_ROOT/runs.out" 2>&1
+fi
+rm -f "$ERR_FILE"
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
   "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_TOKENS" \

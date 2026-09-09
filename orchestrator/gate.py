@@ -18,7 +18,7 @@ Env overrides (tests / manual runs):
   ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.yaml and
   the repo default; see lib/config.resolve_path),
   ORCH_NOW (ISO), ORCH_IDLE_MIN, ORCH_IDLE_MIN_<ACCOUNT>,
-  ORCH_CCUSAGE_JSON, ORCH_CCUSAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
+  ORCH_USAGE_JSON, ORCH_USAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
   ORCH_PLATFORM (<ACCOUNT> = name upper-cased, non-alphanumerics -> _)
 """
 import hashlib
@@ -27,12 +27,12 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import activity, config, controller, ledger, tasks, usage  # noqa: E402
+from lib import activity, config, controller, ledger, quota, tasks, usage  # noqa: E402
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -99,13 +99,22 @@ def log(p, msg):
         f.write(f"{stamp} {msg}\n")
 
 
-def notify_duty(p, idle):
+def notify_duty(p, idle, open_cmd=None):
     """One user notification per new unchecked question, only when the owner
     is present. Delivery goes through the platform notify.sh hook; a missing
-    hook is not an error, the question still lands in NEEDS-HUMAN.md."""
+    hook is not an error, the question still lands in NEEDS-HUMAN.md.
+
+    The hook is handed NEEDS-HUMAN.md so the notification can open it: the
+    question is a checkbox to answer and tick, and a notification that cannot
+    take the owner to it makes them hunt for the file. `open_cmd` is passed
+    through as ORCH_NOTIFY_OPEN (`notify_open_cmd` in config.yaml).
+    """
     if idle is None or idle > PRESENT_MIN or not p["needs"].exists():
         return
     hook = Path(__file__).resolve().parent / "platform" / platform_name() / "notify.sh"
+    env = dict(os.environ)
+    if open_cmd:
+        env["ORCH_NOTIFY_OPEN"] = str(open_cmd)
     seen = set()
     if p["notified"].exists():
         seen = set(p["notified"].read_text().splitlines())
@@ -118,8 +127,8 @@ def notify_duty(p, idle):
             new.append((h, line.strip()[6:].strip()))
     for h, question in new:
         if not notifications_disabled() and hook.exists():
-            subprocess.run([str(hook), "Backlog needs you", question[:120]],
-                           capture_output=True)
+            subprocess.run([str(hook), "Backlog needs you", question[:120],
+                            str(p["needs"])], capture_output=True, env=env)
         p["state"].mkdir(parents=True, exist_ok=True)
         with open(p["notified"], "a") as f:
             f.write(h + "\n")
@@ -242,6 +251,14 @@ def tick_account(p, acct, projs):
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
+    # Models the account has told us it will refuse (lib/quota.py). The night
+    # of 2026-09-09 spent three of its last four slots relaunching Fable
+    # sessions into a Fable limit that had already answered `You've hit your
+    # session limit` at 02:25 - the engine had no memory of being told.
+    out_of_quota = quota.blocked(state, now)
+    for family, until in sorted(out_of_quota.items()):
+        log(p, f"account={name} out of quota model={family} "
+               f"until={until.isoformat()}")
     picked = []
     if d.action == "run":
         max_floor = "fable" if d.regime == "night" else d.model
@@ -267,9 +284,28 @@ def tick_account(p, acct, projs):
         measured = ledger.session_costs(state)
         default_cost = float(acct.get("est_session_tokens", 2500000))
         budget = d.budget_tokens
+        # How many of this tick's slots the strongest model may take. It is a
+        # pacing tool, unlike max_parallel_sessions: the binding constraint on
+        # a Fable night is the account's Fable limit, not wall-clock time, and
+        # four Fable sessions racing each other exhaust it in under two hours
+        # (measured 2026-09-09), leaving nothing for the rest of the night and
+        # no slot for the cheaper models that were nowhere near their own
+        # limit. Serialising them costs almost nothing - a night fits only
+        # three or four sessions per slot anyway - and keeps the other slots
+        # doing useful work. It applies in the pre-reset burn-down as well:
+        # that regime upgrades sessions to Fable, and the wall it would run
+        # into is the same one.
+        fable_slots = int(acct.get("max_fable_slots", 1))
+        fable_taken = 0
         for cand in candidates:
             if tasks.MODEL_RANK[d.model] > tasks.MODEL_RANK[cand["model"]]:
                 cand["model"] = d.model
+            if cand["model"] in out_of_quota:
+                continue
+            if cand["model"] == "fable":
+                if fable_taken >= fable_slots:
+                    continue
+                fable_taken += 1
             est_burn = measured.get((cand["path"], cand["model"]), default_cost)
             # Budget rules per scheduling class. A duty is mandatory: charged
             # to the budget, never gated by it. A queue task is exempt when it
@@ -327,7 +363,37 @@ def tick(p):
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))
     known = [i for i in idles if i is not None]
-    notify_duty(p, min(known) if known else None)
+    notify_duty(p, min(known) if known else None, cfg.get("notify_open_cmd"))
+
+
+PROMO_WARN_DAYS = 3
+
+
+def promo_note(acct, now):
+    """One line about the weekly-cap promo, for the digest to relay.
+
+    The cap is a hand-calibrated number: it cannot be derived from local data
+    (see lib/quota.py), so it is only ever as right as the last time someone
+    read it off `/usage`. A promo silently expiring therefore leaves the engine
+    pacing against a cap that no longer exists, and a promo silently STARTING
+    leaves a large surplus unspent - both invisible, both only fixable by a
+    human looking at the screen. Hence a line the digest must carry, from three
+    days before the date and forever after it, until `promo_until` is updated.
+    """
+    tz = ZoneInfo(acct["reset_tz"])
+    today = now.astimezone(tz).date()
+    until = date.fromisoformat(str(acct["promo_until"]))
+    left = (until - today).days
+    if left < 0:
+        return (f"promo EXPIRED {until.isoformat()} ({-left}d ago) "
+                f"NEEDS-HUMAN: read the weekly limit off /usage and update "
+                f"weekly_cap_tokens + promo_until in config.yaml")
+    if left <= PROMO_WARN_DAYS:
+        return (f"promo ENDS {until.isoformat()} (in {left}d) x{acct['promo_multiplier']} "
+                f"NEEDS-HUMAN: after it lapses, re-read the weekly limit off "
+                f"/usage and update weekly_cap_tokens + promo_until")
+    return (f"promo active until {until.isoformat()} (in {left}d) "
+            f"x{acct['promo_multiplier']}")
 
 
 def status(p):
@@ -352,6 +418,13 @@ def status(p):
         print(f"cap={cap:.0f} reserve={reserve:.0f} available={available:.0f}")
         print(f"next_reset={reset.isoformat()} days_remaining={days:.2f}")
         print(f"idle_min={idle} promo_until={acct['promo_until']}")
+        print(promo_note(acct, now))
+        for family, tokens in sorted(snap.get("week_by_family", {}).items()):
+            print(f"week_model={family} tokens={tokens}")
+        for family, until in sorted(quota.blocked(p["state"] / name, now).items()):
+            print(f"out_of_quota model={family} until={until.isoformat()}")
+        for model_id in snap.get("unknown_models", []):
+            print(f"unknown_model id={model_id} (counted, family unrecognized)")
         for task_name, unmet in tasks.blocked(p["root"], projs, name):
             print(f"blocked task={task_name} unmet={' '.join(unmet)}")
         # Tonight's allocation, so the digest can see the plan, not just the cap.

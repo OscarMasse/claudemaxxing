@@ -28,9 +28,10 @@ echo '{"total_cost_usd":0.11,"num_turns":3,"duration_ms":120000,"usage":{"input_
 STUB
 chmod +x "$SANDBOX/claude-stub.sh"
 
-# Quota fixture: ccusage output with a closed, empty block (week_tokens = 0).
-cat > "$SANDBOX/ccusage.json" <<'FIXTURE'
-{"blocks":[{"startTime":"2026-09-01T08:00:00.000Z","endTime":"2026-09-01T13:00:00.000Z","isActive":false,"isGap":false,"totalTokens":0}]}
+# Quota fixture: a usage snapshot with no consumption and no open 5h window,
+# so the sandbox night starts from a full budget.
+cat > "$SANDBOX/usage.json" <<'FIXTURE'
+{"week_tokens":0,"week_by_family":{},"block":null,"unknown_models":[]}
 FIXTURE
 
 # Small token units keep the arithmetic readable in the output.
@@ -77,7 +78,7 @@ task sync.md low "duty: nightly"
 task tidy.md low "filler: true"
 
 export BACKLOG_ROOT="$SANDBOX" ORCH_ROOT="$SANDBOX" ORCH_CONFIG="$SANDBOX/config.yaml"
-export ORCH_IDLE_MIN=999 ORCH_NO_NOTIFY=1 ORCH_CCUSAGE_JSON="$SANDBOX/ccusage.json"
+export ORCH_IDLE_MIN=999 ORCH_NO_NOTIFY=1 ORCH_USAGE_JSON="$SANDBOX/usage.json"
 
 echo "sandbox: $SANDBOX"
 echo

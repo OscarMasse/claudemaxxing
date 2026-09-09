@@ -221,6 +221,85 @@ class TestGate(unittest.TestCase):
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
         self.assertEqual(len(lines), 1, r.stdout)  # 2 slots - 1 active = 1 launch
 
+    def test_out_of_quota_model_is_not_launched(self):
+        # The account said "You've hit your session limit" for fable at 02:25;
+        # the engine must remember that instead of spending its remaining
+        # slots relaunching into the same wall (2026-09-09).
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00",
+            "seen": "2026-08-11T02:25:00+02:00"}}))
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
+                        r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("out of quota model=fable", log)
+
+    def test_out_of_quota_model_does_not_block_the_others(self):
+        # Fable dead, sonnet fine: the night must keep working. This is what
+        # the per-model signal buys over a global backoff.
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
+        self.assertIn("t1.md sonnet low", r.stdout)
+
+    def test_expired_exhaustion_record_no_longer_blocks(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T01:00:00+02:00"}}))
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\n---\n")
+        r = run_gate(self.root, self.env)  # tick at 02:30, reset was 01:00
+        self.assertIn("t1.md fable low", r.stdout)
+
+    def test_fable_is_serialised_even_when_slots_and_budget_allow_more(self):
+        # Fable's binding constraint is its own token limit, not wall-clock
+        # time, so parallel fable sessions only race each other to the wall.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 1, r.stdout)
+
+    def test_the_fable_cap_leaves_the_slots_to_cheaper_models(self):
+        # The point of the cap: one fable session, and the slots it does not
+        # take go to models that are nowhere near their own limit.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        self.write_task("t1.md", "---\ntitle: A\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        self.write_task("t2.md", "---\ntitle: B\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-02\n"
+                        "parallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len([l for l in lines if " fable " in l]), 1, r.stdout)
+        self.assertGreaterEqual(len([l for l in lines if " sonnet " in l]), 1,
+                                r.stdout)
+
+    def test_fable_cap_is_configurable(self):
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 2\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 2, r.stdout)
+
     def test_dry_run_suppresses(self):
         cfg = self.root / "config.yml"
         cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
@@ -273,6 +352,54 @@ class TestGate(unittest.TestCase):
         self.assertIn("week_tokens", r.stdout)
         self.assertIn("available", r.stdout)
 
+    def test_status_relays_the_promo_state_and_the_per_model_split(self):
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-30\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo active until 2026-08-30", r.stdout)
+
+    def test_status_warns_before_the_promo_ends(self):
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-12\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo ENDS 2026-08-12 (in 1d)", r.stdout)
+        self.assertIn("NEEDS-HUMAN", r.stdout)
+
+    def test_status_keeps_asking_after_the_promo_expired(self):
+        # The cap can only be re-read off /usage by a human, so this line does
+        # not go away on its own: it repeats until promo_until is updated.
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-01\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo EXPIRED 2026-08-01 (10d ago)", r.stdout)
+        self.assertIn("NEEDS-HUMAN", r.stdout)
+
+    def test_status_reports_per_model_usage_and_unknown_ids(self):
+        # An id the engine cannot classify still spends the owner's quota, so
+        # it is counted and reported rather than silently free.
+        fx = self.root / "snapshot.json"
+        fx.write_text(json.dumps({
+            "week_tokens": 30,
+            "week_by_family": {"fable": 20, "sonnet": 10},
+            "block": None,
+            "unknown_models": ["claude-something-new"]}))
+        r = run_gate(self.root, {"ORCH_USAGE_JSON": str(fx)}, arg="status")
+        self.assertIn("week_model=fable tokens=20", r.stdout)
+        self.assertIn("week_model=sonnet tokens=10", r.stdout)
+        self.assertIn("unknown_model id=claude-something-new", r.stdout)
+
+    def test_status_reports_an_exhausted_model(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("out_of_quota model=fable until=2026-08-11T04:20:00+02:00",
+                      r.stdout)
+
     def test_status_shows_blocked_task_with_unmet_prerequisites(self):
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -323,6 +450,41 @@ class TestPlatformSeam(unittest.TestCase):
         # Pre-seam name, kept for one release.
         with mock.patch.dict(os.environ, {"ORCH_NO_OSASCRIPT": "1"}, clear=True):
             self.assertTrue(gate.notifications_disabled())
+
+
+class TestNotifyHookCall(unittest.TestCase):
+    """What the platform notify hook is handed, so the alert is actionable."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "orchestrator" / "state").mkdir(parents=True)
+        self.needs = root / "NEEDS-HUMAN.md"
+        self.needs.write_text("# Needs human\n\n- [ ] task-x: which color?\n")
+        self.p = {"state": root / "orchestrator" / "state",
+                  "needs": self.needs,
+                  "notified": root / "orchestrator" / "state" / "notified.txt"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def call(self, open_cmd):
+        with mock.patch.dict(os.environ, {"ORCH_PLATFORM": "macos"}), \
+             mock.patch.object(gate.subprocess, "run") as run:
+            gate.notify_duty(self.p, 1, open_cmd)
+        self.assertEqual(run.call_count, 1)
+        return run.call_args
+
+    def test_hook_receives_the_file_to_open(self):
+        # A question is a checkbox to answer and tick; a notification that
+        # cannot take the owner to it makes them hunt for the file.
+        args, kwargs = self.call("zed")
+        self.assertEqual(args[0][3], str(self.needs))
+        self.assertEqual(kwargs["env"]["ORCH_NOTIFY_OPEN"], "zed")
+
+    def test_no_open_command_configured_leaves_the_default_to_the_hook(self):
+        _args, kwargs = self.call(None)
+        self.assertNotIn("ORCH_NOTIFY_OPEN", kwargs["env"])
 
 
 class TestGateMultiAccount(unittest.TestCase):

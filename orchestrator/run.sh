@@ -1,6 +1,7 @@
 #!/bin/bash
 # Launch one background orchestrator session (or the morning digest).
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
+#                                [est_tokens]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
@@ -17,9 +18,10 @@ ORCH_DIR="$(pwd)"
 # the same config and state paths (config resolution lives in lib/config.py).
 export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
-# launchd hands down a bare PATH (/usr/bin:/bin:...), so node/npx are missing
-# and anything the session shells out to that needs them (gate.py status ->
-# ccusage via npx) dies with FileNotFoundError. Same export as gatekeeper.sh.
+# launchd hands down a bare PATH (/usr/bin:/bin:...), so node and the homebrew
+# tools are missing and anything the session shells out to that needs them (a
+# hook, an MCP server, a project's test command) dies with FileNotFoundError.
+# Same export as gatekeeper.sh.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # GitHub credentials for background sessions: a fine-grained PAT scoped to the
@@ -45,6 +47,9 @@ done
 SLICE_MIN="${ARGS[0]:-15}"
 TASK_FILE="${ARGS[1]:-}"; MODEL_OVR="${ARGS[2]:-}"; EFFORT_OVR="${ARGS[3]:-}"
 PROJECT="${ARGS[4]:-}"
+# What the gatekeeper predicted this slice would burn. Recorded in the ledger
+# next to the actual usage so the estimate can be scored (ledger.accuracy).
+EST_TOKENS="${ARGS[5]:-0}"
 if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; fi
 
 # All config access goes through lib/config.py (accounts inherit flat keys).
@@ -54,7 +59,31 @@ CONFIG_FILE="$(python3 lib/config.py resolve)"
 cfg() { python3 lib/config.py "$CONFIG_FILE" "$@"; }
 if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi
 
-# The account's Claude profile drives the invocation AND where ccusage /
+# Slot-based locks, namespaced per account: up to 8 concurrent sessions (the
+# gatekeeper caps how many get launched per regime and per account; manual
+# runs take a slot like any other). Accounts never contend for slots.
+#
+# Claimed HERE, as the first thing this script does after resolving its
+# account, and deliberately ahead of every other config read. The lock is what
+# makes two launches of the same slot impossible, so every millisecond between
+# process start and lock acquisition is a window in which a second launcher
+# can pass the same check. The profile, dirs and digest lookups below are one
+# python3 subprocess each - about a second in total, which is a wide enough
+# window to matter once the gatekeeper ticks every few minutes.
+STATE="$STATE_ROOT/$ACCOUNT"
+mkdir -p "$STATE"
+SLOT=""
+for i in 1 2 3 4 5 6 7 8; do
+  if ( set -o noclobber; echo "$$ $(date +%s)" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
+    SLOT=$i; break
+  fi
+done
+if [ -z "$SLOT" ]; then echo "no free slot account=$ACCOUNT" >> "$STATE_ROOT/runs.log"; exit 0; fi
+LOCK="$STATE/RUNNING.$SLOT"
+trap 'rm -f "$LOCK"' EXIT INT TERM
+
+
+# The account's Claude profile drives the invocation AND where usage /
 # activity detection read, so each subscription is fully self-contained.
 export CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
 CLAUDE_BIN="$(cfg account "$ACCOUNT" claude_bin)"
@@ -87,21 +116,6 @@ else
   DIGEST_FILE="$(cfg digest-file)"
 fi
 
-# Slot-based locks, namespaced per account: up to 8 concurrent sessions (the
-# gatekeeper caps how many get launched per regime and per account; manual
-# runs take a slot like any other). Accounts never contend for slots.
-STATE="$STATE_ROOT/$ACCOUNT"
-mkdir -p "$STATE"
-SLOT=""
-for i in 1 2 3 4 5 6 7 8; do
-  if ( set -o noclobber; echo "$$ $(date +%s)" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
-    SLOT=$i; break
-  fi
-done
-if [ -z "$SLOT" ]; then echo "no free slot account=$ACCOUNT" >> "$STATE_ROOT/runs.log"; exit 0; fi
-LOCK="$STATE/RUNNING.$SLOT"
-trap 'rm -f "$LOCK"' EXIT INT TERM
-
 if [ -n "$TASK_FILE" ]; then
   DIRECTIVE="The gatekeeper already selected the task for this slice: $TASK_FILE. Work ONLY on that task and skip the selection in step 1."
 else
@@ -129,17 +143,35 @@ if [ ! -x "$KEEP_AWAKE" ]; then KEEP_AWAKE=""; fi
 # The prompt goes through stdin: --add-dir is variadic and would swallow a
 # positional prompt argument. JSON output feeds the per-account cost ledger.
 OUT_JSON="$STATE/result.$SLOT.json"
+# stderr goes to a per-slot file first, then into the shared runs.out. It used
+# to append straight to runs.out, which meant a session's own error text could
+# not be told from the other three slots' - and the one line that matters
+# ("You've hit your session limit - resets 4:20am") was therefore unusable.
+ERR_FILE="$STATE/err.$SLOT.txt"
+: > "$ERR_FILE"
 printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   python3 lib/with_timeout.py "$TIMEOUT_S" -- \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
   "${ADD_DIRS[@]}" \
-  > "$OUT_JSON" 2>> "$STATE_ROOT/runs.out"
+  > "$OUT_JSON" 2> "$ERR_FILE"
 CODE=$?
+cat "$ERR_FILE" >> "$STATE_ROOT/runs.out"
+# A failed session may have been refused by the account rather than have
+# crashed: record which model is out of quota and until when, so the gatekeeper
+# stops relaunching into a wall it has already hit. Only the model that failed
+# is affected - the night that motivated this had Fable exhausted while Sonnet
+# still ran fine.
+if [ "$CODE" -ne 0 ]; then
+  python3 lib/quota.py record "$STATE" "$MODEL" "$ERR_FILE" \
+    >> "$STATE_ROOT/runs.out" 2>&1
+fi
+rm -f "$ERR_FILE"
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
-  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" >> "$STATE_ROOT/runs.out" 2>&1
+  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_TOKENS" \
+  >> "$STATE_ROOT/runs.out" 2>&1
 # Cost and duration for the digest journal's mechanical line, read from the
 # result JSON before it is deleted.
 read -r COST_USD DURATION_MIN < <(python3 lib/ledger.py fields "$OUT_JSON")

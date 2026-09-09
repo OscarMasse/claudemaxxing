@@ -23,8 +23,8 @@ FIXTURE = {"blocks": [
 BASE_CFG = (
     "dry_run: false\n"
     "night_start: 02:00\nnight_end: 06:00\nmorning_guard: 08:30\n"
-    "prereset_burn_hours: 8\nactivity_idle_day_min: 60\nactivity_idle_night_min: 40\n"
-    "day_slice_min: 15\nnight_slice_min: 50\nday_window_max_frac: 0.4\n"
+    "prereset_burn_hours: 8\nactivity_idle_night_min: 40\n"
+    "night_slice_min: 50\n"
     "claude_bin: /usr/local/bin/claude\nclaude_model: sonnet\nclaude_effort: low\n"
 )
 
@@ -52,7 +52,7 @@ PROJECTS = (
 def run_gate(root, extra_env=None, arg="tick"):
     env = dict(os.environ,
                ORCH_ROOT=str(root),
-               ORCH_NOW="2026-08-12T15:00:00+02:00",  # Wednesday afternoon
+               ORCH_NOW="2026-08-11T02:30:00+02:00",  # Tuesday night
                ORCH_IDLE_MIN="999",
                ORCH_NO_NOTIFY="1")
     # A developer shell may carry these; they must not leak into the tests.
@@ -97,26 +97,35 @@ class TestGate(unittest.TestCase):
 
     def test_run_decision_and_log(self):
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("RUN personal 15"), r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout + r.stderr)
         self.assertIn("t1.md sonnet low side-projects", r.stdout)
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("account=personal", log)
-        self.assertIn("day surplus regime", log)
+        self.assertIn("night regime", log)
 
-    def test_opus_task_not_picked_during_day(self):
-        # Make the only task an opus one: daytime surplus must not launch it.
+    def test_fable_task_picked_at_night(self):
+        # Every model the engine knows is reachable at night. The ceiling used
+        # to be opus, which made a fable floor schedulable only in the pre-reset
+        # burn-down: the tasks that ask for the strongest model waited days for
+        # a window they could miss entirely. What a night may spend is the
+        # budget's decision, not a second gate on the model name.
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
-                        "model: opus\n---\n")
+                        "model: fable\n---\n")
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
+        self.assertIn("t1.md fable low side-projects", r.stdout)
+
+    def test_daytime_tick_never_runs(self):
+        env = dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00")
+        r = run_gate(self.root, env)
+        self.assertTrue(r.stdout.startswith("SKIP personal day:"), r.stdout)
 
     def test_opus_task_picked_at_night(self):
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: opus\neffort: medium\n---\n")
-        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")  # Tuesday night
-        r = run_gate(self.root, env)
+        r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
         self.assertIn("opus medium", r.stdout)
 
@@ -139,23 +148,51 @@ class TestGate(unittest.TestCase):
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
 
-    def test_parallel_slots_at_night(self):
-        # Cheap estimated rate: 3 sessions fit the night budget (15 tokens).
-        self.append_cfg("night_parallel: 3\nday_parallel: 1\n"
-                        "est_rate_sonnet_per_min: 0.05\n")
+    def test_night_slot_count_is_budget_driven(self):
+        # Tuesday night's allocation is 5.5 tokens (see TestNightBudget); at an
+        # estimated 2.5 per session, 2 sessions fit and a 3rd does not. The
+        # slot ceiling (4) is not what decides this.
+        self.append_cfg("max_parallel_sessions: 4\n"
+                        "est_session_tokens: 2.5\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
-        self.assertEqual(len(lines), 3, r.stdout)  # one parallel task fills 3 slots
+        self.assertEqual(len(lines), 2, r.stdout)
+
+    def test_cheap_tasks_fill_more_slots_than_one_budget_would_allow(self):
+        # Same night, ten times cheaper: the count rises with the budget, up to
+        # the safety ceiling. This is the point of the redesign - the metric is
+        # tokens, not a fixed task count.
+        self.append_cfg("max_parallel_sessions: 4\n"
+                        "est_session_tokens: 0.25\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "parallel: true\n---\n")
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        r = run_gate(self.root, env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 4, r.stdout)
+
+    def test_safety_ceiling_caps_the_slot_count(self):
+        # Budget for many, machine for two: the ceiling wins.
+        self.append_cfg("max_parallel_sessions: 2\n"
+                        "est_session_tokens: 0.25\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "parallel: true\n---\n")
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        r = run_gate(self.root, env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 2, r.stdout)
 
     def test_heavy_task_limits_parallelism(self):
-        # One session's estimated burn (1.0 x 50min = 50) exceeds the night
-        # budget (15): parallelizing is pointless, exactly one session runs.
-        self.append_cfg("night_parallel: 3\nday_parallel: 1\n"
-                        "est_rate_sonnet_per_min: 1.0\n")
+        # One session's estimated burn (50) exceeds the night allocation:
+        # parallelizing is pointless, exactly one session runs.
+        self.append_cfg("max_parallel_sessions: 4\n"
+                        "est_session_tokens: 50\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -164,8 +201,15 @@ class TestGate(unittest.TestCase):
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
         self.assertEqual(len(lines), 1, r.stdout)
 
+    def test_run_line_carries_the_launch_estimate(self):
+        self.append_cfg("max_parallel_sessions: 1\nest_session_tokens: 2.5\n")
+        env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
+        r = run_gate(self.root, env)
+        self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # int(2.5)
+
     def test_parallel_respects_active_slots(self):
-        self.append_cfg("night_parallel: 2\nday_parallel: 1\n")
+        self.append_cfg("max_parallel_sessions: 2\n"
+                        "est_session_tokens: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -176,6 +220,85 @@ class TestGate(unittest.TestCase):
         r = run_gate(self.root, env)
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
         self.assertEqual(len(lines), 1, r.stdout)  # 2 slots - 1 active = 1 launch
+
+    def test_out_of_quota_model_is_not_launched(self):
+        # The account said "You've hit your session limit" for fable at 02:25;
+        # the engine must remember that instead of spending its remaining
+        # slots relaunching into the same wall (2026-09-09).
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00",
+            "seen": "2026-08-11T02:25:00+02:00"}}))
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
+                        r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("out of quota model=fable", log)
+
+    def test_out_of_quota_model_does_not_block_the_others(self):
+        # Fable dead, sonnet fine: the night must keep working. This is what
+        # the per-model signal buys over a global backoff.
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
+        self.assertIn("t1.md sonnet low", r.stdout)
+
+    def test_expired_exhaustion_record_no_longer_blocks(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T01:00:00+02:00"}}))
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\n---\n")
+        r = run_gate(self.root, self.env)  # tick at 02:30, reset was 01:00
+        self.assertIn("t1.md fable low", r.stdout)
+
+    def test_fable_is_serialised_even_when_slots_and_budget_allow_more(self):
+        # Fable's binding constraint is its own token limit, not wall-clock
+        # time, so parallel fable sessions only race each other to the wall.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 1, r.stdout)
+
+    def test_the_fable_cap_leaves_the_slots_to_cheaper_models(self):
+        # The point of the cap: one fable session, and the slots it does not
+        # take go to models that are nowhere near their own limit.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        self.write_task("t1.md", "---\ntitle: A\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        self.write_task("t2.md", "---\ntitle: B\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-02\n"
+                        "parallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len([l for l in lines if " fable " in l]), 1, r.stdout)
+        self.assertGreaterEqual(len([l for l in lines if " sonnet " in l]), 1,
+                                r.stdout)
+
+    def test_fable_cap_is_configurable(self):
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 2\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\nparallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len(lines), 2, r.stdout)
 
     def test_dry_run_suppresses(self):
         cfg = self.root / "config.yml"
@@ -195,7 +318,7 @@ class TestGate(unittest.TestCase):
         # config.yml, tasks/ and state/.
         env = dict(os.environ,
                    BACKLOG_ROOT=str(self.root),
-                   ORCH_NOW="2026-08-12T15:00:00+02:00",
+                   ORCH_NOW="2026-08-11T02:30:00+02:00",
                    ORCH_IDLE_MIN="999",
                    ORCH_NO_NOTIFY="1")
         env.pop("ORCH_ROOT", None)
@@ -203,7 +326,7 @@ class TestGate(unittest.TestCase):
         env.update(self.env)
         r = subprocess.run(["python3", str(ORCH / "gate.py"), "tick"],
                            capture_output=True, text=True, env=env, cwd=ORCH)
-        self.assertTrue(r.stdout.startswith("RUN personal 15"),
+        self.assertTrue(r.stdout.startswith("RUN personal 50"),
                         r.stdout + r.stderr)
         self.assertIn(str(self.root / "tasks" / "t1.md"), r.stdout)
         log = self.root / "orchestrator" / "state" / "gatekeeper.log"
@@ -211,6 +334,7 @@ class TestGate(unittest.TestCase):
         self.assertIn("account=personal", log.read_text())
 
     def test_stale_lock_broken_fresh_lock_respected(self):
+        self.append_cfg("max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         lock = state / "RUNNING.1"
@@ -227,6 +351,54 @@ class TestGate(unittest.TestCase):
         self.assertIn("account=personal", r.stdout)
         self.assertIn("week_tokens", r.stdout)
         self.assertIn("available", r.stdout)
+
+    def test_status_relays_the_promo_state_and_the_per_model_split(self):
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-30\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo active until 2026-08-30", r.stdout)
+
+    def test_status_warns_before_the_promo_ends(self):
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-12\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo ENDS 2026-08-12 (in 1d)", r.stdout)
+        self.assertIn("NEEDS-HUMAN", r.stdout)
+
+    def test_status_keeps_asking_after_the_promo_expired(self):
+        # The cap can only be re-read off /usage by a human, so this line does
+        # not go away on its own: it repeats until promo_until is updated.
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + "    promo_multiplier: 1.5\n"
+                         "    promo_until: 2026-08-01\n" + PROJECTS)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("promo EXPIRED 2026-08-01 (10d ago)", r.stdout)
+        self.assertIn("NEEDS-HUMAN", r.stdout)
+
+    def test_status_reports_per_model_usage_and_unknown_ids(self):
+        # An id the engine cannot classify still spends the owner's quota, so
+        # it is counted and reported rather than silently free.
+        fx = self.root / "snapshot.json"
+        fx.write_text(json.dumps({
+            "week_tokens": 30,
+            "week_by_family": {"fable": 20, "sonnet": 10},
+            "block": None,
+            "unknown_models": ["claude-something-new"]}))
+        r = run_gate(self.root, {"ORCH_USAGE_JSON": str(fx)}, arg="status")
+        self.assertIn("week_model=fable tokens=20", r.stdout)
+        self.assertIn("week_model=sonnet tokens=10", r.stdout)
+        self.assertIn("unknown_model id=claude-something-new", r.stdout)
+
+    def test_status_reports_an_exhausted_model(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"fable": {
+            "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("out_of_quota model=fable until=2026-08-11T04:20:00+02:00",
+                      r.stdout)
 
     def test_status_shows_blocked_task_with_unmet_prerequisites(self):
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
@@ -280,6 +452,41 @@ class TestPlatformSeam(unittest.TestCase):
             self.assertTrue(gate.notifications_disabled())
 
 
+class TestNotifyHookCall(unittest.TestCase):
+    """What the platform notify hook is handed, so the alert is actionable."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "orchestrator" / "state").mkdir(parents=True)
+        self.needs = root / "NEEDS-HUMAN.md"
+        self.needs.write_text("# Needs human\n\n- [ ] task-x: which color?\n")
+        self.p = {"state": root / "orchestrator" / "state",
+                  "needs": self.needs,
+                  "notified": root / "orchestrator" / "state" / "notified.txt"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def call(self, open_cmd):
+        with mock.patch.dict(os.environ, {"ORCH_PLATFORM": "macos"}), \
+             mock.patch.object(gate.subprocess, "run") as run:
+            gate.notify_duty(self.p, 1, open_cmd)
+        self.assertEqual(run.call_count, 1)
+        return run.call_args
+
+    def test_hook_receives_the_file_to_open(self):
+        # A question is a checkbox to answer and tick; a notification that
+        # cannot take the owner to it makes them hunt for the file.
+        args, kwargs = self.call("zed")
+        self.assertEqual(args[0][3], str(self.needs))
+        self.assertEqual(kwargs["env"]["ORCH_NOTIFY_OPEN"], "zed")
+
+    def test_no_open_command_configured_leaves_the_default_to_the_hook(self):
+        _args, kwargs = self.call(None)
+        self.assertNotIn("ORCH_NOTIFY_OPEN", kwargs["env"])
+
+
 class TestGateMultiAccount(unittest.TestCase):
     """Two accounts scheduled in the same tick, fully isolated."""
 
@@ -327,9 +534,9 @@ class TestGateMultiAccount(unittest.TestCase):
         r = run_gate(self.root, self.env)
         lines = self.lines(r)
         self.assertEqual(len(lines), 2, r.stdout + r.stderr)
-        self.assertIn("RUN personal 15", lines[0])
+        self.assertIn("RUN personal 50", lines[0])
         self.assertIn("p.md sonnet low side-projects", lines[0])
-        self.assertIn("RUN work 15", lines[1])
+        self.assertIn("RUN work 50", lines[1])
         self.assertIn("w.md sonnet low job", lines[1])
 
     def test_budget_isolation(self):
@@ -358,6 +565,8 @@ class TestGateMultiAccount(unittest.TestCase):
         self.assertTrue(lines[1].startswith("RUN work"), r.stdout)
 
     def test_running_lock_is_per_account(self):
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text() + "max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "work"
         state.mkdir(parents=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -406,8 +615,121 @@ class TestGateLegacyConfig(unittest.TestCase):
 
     def test_legacy_flat_config_still_runs(self):
         r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("RUN default 15"), r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("RUN default 50"), r.stdout + r.stderr)
         self.assertIn("t1.md sonnet low default", r.stdout)
+
+
+class TestGateDuties(unittest.TestCase):
+    """Recurring classes at the gate: mandatory duties, surplus-only fillers."""
+
+    NIGHT = "2026-08-11T02:30:00+02:00"  # Tuesday night, allocation 5.5 tokens
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "orchestrator" / "state").mkdir(parents=True)
+        (self.root / "tasks").mkdir()
+        (self.root / "fixture.json").write_text(json.dumps(FIXTURE))
+        self.env = {"ORCH_CCUSAGE_JSON": str(self.root / "fixture.json"),
+                    "ORCH_NOW": self.NIGHT}
+        (self.root / "config.yml").write_text(
+            BASE_CFG + "max_parallel_sessions: 4\n"
+            + PERSONAL + PROJECTS)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def task(self, name, extra=""):
+        (self.root / "tasks" / name).write_text(
+            "---\ntitle: X\nproject: side-projects\nstatus: ready\n"
+            "priority: high\ncreated: 2026-08-01\n" + extra + "---\n")
+
+    def cost(self, per_session):
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text() + f"est_session_tokens: {per_session}\n")
+
+    def runs(self, r):
+        return [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+
+    def served(self):
+        f = self.root / "orchestrator" / "state" / "personal" / "duties.json"
+        return json.loads(f.read_text()) if f.exists() else {}
+
+    def test_duty_runs_even_when_the_budget_is_gone(self):
+        # Each session is estimated at 50, far over the 8.6 allocation. The queue task is squeezed out; the duty is not.
+        self.cost(50)
+        self.task("queue.md")
+        self.task("sync.md", "duty: nightly\n")
+        lines = self.runs(run_gate(self.root, self.env))
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("sync.md", lines[0])
+
+    def test_duty_launch_is_recorded_once_per_night(self):
+        self.cost(2.5)
+        self.task("sync.md", "duty: nightly\n")
+        self.assertEqual(len(self.runs(run_gate(self.root, self.env))), 1)
+        self.assertEqual(list(self.served().values()), ["2026-08-11"])
+        # A second tick the same night must not relaunch it.
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
+                        r.stdout)
+
+    def test_duty_is_due_again_the_next_night(self):
+        self.cost(2.5)
+        self.task("sync.md", "duty: nightly\n")
+        run_gate(self.root, self.env)
+        env = dict(self.env, ORCH_NOW="2026-08-12T02:30:00+02:00")
+        self.assertEqual(len(self.runs(run_gate(self.root, env))), 1)
+
+    def test_dry_run_does_not_consume_the_duty_period(self):
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
+        self.cost(2.5)
+        self.task("sync.md", "duty: nightly\n")
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
+        self.assertEqual(self.served(), {})
+
+    def test_nightly_duty_is_not_launched_during_the_day(self):
+        # Belt and braces: the daytime tick skips before selection anyway, but
+        # the period key is also absent, so nothing can pick the duty up.
+        self.cost(2.5)
+        self.task("sync.md", "duty: nightly\n")
+        day = gate.now_from_env.__globals__["datetime"].fromisoformat(
+            "2026-08-12T15:00:00+02:00")
+        acct = {"reset_tz": "Europe/Warsaw", "reset_weekday": 3,
+                "reset_time": "05:59", "night_start": "02:00", "night_end": "06:00"}
+        self.assertNotIn("nightly", gate.period_keys(acct, day))
+        r = run_gate(self.root, dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00"))
+        self.assertTrue(r.stdout.startswith("SKIP personal day:"), r.stdout)
+
+    def test_filler_runs_on_leftover_budget(self):
+        self.cost(2.5)
+        self.task("queue.md")
+        self.task("tidy.md", "filler: true\n")
+        lines = self.runs(run_gate(self.root, self.env))
+        self.assertEqual(len(lines), 2, lines)
+        self.assertIn("queue.md", lines[0])
+        self.assertIn("tidy.md", lines[1])
+
+    def test_filler_never_runs_on_borrowed_budget(self):
+        # The queue task alone overshoots the allocation: unlike a queue task,
+        # a filler never gets the "first session always runs" exemption.
+        self.cost(50)
+        self.task("queue.md")
+        self.task("tidy.md", "filler: true\n")
+        lines = self.runs(run_gate(self.root, self.env))
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("queue.md", lines[0])
+
+    def test_status_reports_duties_and_fillers(self):
+        self.task("sync.md", "duty: nightly\n")
+        self.task("daily.md", "duty: daily\n")
+        self.task("tidy.md", "filler: true\n")
+        out = run_gate(self.root, self.env, arg="status").stdout
+        self.assertIn("duty task=sync.md period=nightly supported=yes due=yes", out)
+        self.assertIn("duty task=daily.md period=daily supported=NO due=no", out)
+        self.assertIn("filler task=tidy.md", out)
 
 
 if __name__ == "__main__":

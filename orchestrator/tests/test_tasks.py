@@ -1,4 +1,6 @@
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from lib import tasks
@@ -175,6 +177,62 @@ class TestPick(unittest.TestCase):
                    priority="high")
         self.assertTrue(self.pick()["path"].endswith("main.md"))
 
+    def test_blocker_inherits_its_dependent_priority(self):
+        # The whole point: a low blocker under a high task must not sit behind
+        # unrelated medium work, or the high task can never become eligible.
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-05")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-01",
+                   prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("blocker.md"))
+
+    def test_priority_inheritance_is_transitive(self):
+        write_task(self.root, "root.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-05")
+        write_task(self.root, "middle.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-04",
+                   prerequisites="root")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-01",
+                   prerequisites="middle")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("root.md"))
+
+    def test_done_dependent_does_not_keep_promoting_its_prerequisite(self):
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="low", created="2026-08-05")
+        write_task(self.root, "urgent.md", project="side-projects",
+                   status="done", priority="high", created="2026-08-01",
+                   prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("unrelated.md"))
+
+    def test_inheritance_never_demotes_a_blocker(self):
+        write_task(self.root, "blocker.md", project="side-projects",
+                   status="ready", priority="high", created="2026-08-05")
+        write_task(self.root, "lazy.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-01", prerequisites="blocker")
+        write_task(self.root, "unrelated.md", project="side-projects",
+                   status="ready", priority="medium", created="2026-08-01")
+        self.assertTrue(self.pick()["path"].endswith("blocker.md"))
+
+    def test_prerequisite_cycle_does_not_hang(self):
+        # A cycle is a misconfiguration, but it must not wedge the gatekeeper.
+        write_task(self.root, "a.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01", prerequisites="b")
+        write_task(self.root, "b.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-02", prerequisites="a")
+        write_task(self.root, "ok.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-03")
+        # Both cycle members stay ineligible (unmet prerequisites); the run
+        # terminates and the unblocked task is picked.
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
+
     def test_blocked_reports_unmet_prerequisites(self):
         write_task(self.root, "dep1.md", project="side-projects", status="ready",
                    priority="high")
@@ -216,6 +274,194 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "w.md", project="work", status="ready")
         self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
 
+    def test_unknown_model_makes_the_task_unschedulable_and_reported(self):
+        # The regression this guards: `claude-fable-5` (a CLI model id, not an
+        # engine model name) used to be rewritten to sonnet, so tasks written
+        # for Fable ran on Sonnet and every log line said "sonnet".
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", priority="high", model="claude-fable-5")
+        write_task(self.root, "ok.md", project="side-projects",
+                   status="ready", priority="low")
+        self.assertTrue(self.pick(max_model="fable")["path"].endswith("ok.md"))
+        self.assertEqual(tasks.misconfigured(self.root),
+                         [("ghost.md", "claude-fable-5")])
+
+    def test_known_models_are_not_reported_as_misconfigured(self):
+        for i, model in enumerate(("sonnet", "opus", "fable")):
+            write_task(self.root, f"m{i}.md", project="side-projects",
+                       status="ready", model=model)
+        write_task(self.root, "none.md", project="side-projects", status="ready")
+        self.assertEqual(tasks.misconfigured(self.root), [])
+
+
+class TestSchedulingClasses(unittest.TestCase):
+    """Duties (mandatory) and fillers (surplus only) versus the priority queue."""
+
+    KEYS = {"nightly": "2026-08-12", "weekly": "2026-08-06"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+        # A high-priority queue task: whatever a duty does, it must beat this.
+        write_task(self.root, "queue.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def order(self, count=3, done=None):
+        return tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", count,
+                                  done=done or {}, period_keys=self.KEYS)
+
+    def names(self, picked):
+        return [Path(t["path"]).name for t in picked]
+
+    def path(self, name):
+        return str(self.root / "tasks" / name)
+
+    def test_duty_runs_before_a_higher_priority_queue_task(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   priority="low", created="2026-09-01", duty="nightly")
+        self.assertEqual(self.names(self.order()), ["sync.md", "queue.md"])
+
+    def test_duty_is_not_relaunched_within_the_same_period(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        done = {self.path("sync.md"): "2026-08-12"}
+        self.assertEqual(self.names(self.order(done=done)), ["queue.md"])
+
+    def test_duty_is_due_again_in_the_next_period(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        done = {self.path("sync.md"): "2026-08-11"}
+        self.assertIn("sync.md", self.names(self.order(done=done)))
+
+    def test_nightly_duty_not_schedulable_outside_the_night(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", 3,
+                                    done={}, period_keys={"weekly": "2026-08-06"})
+        self.assertEqual(self.names(picked), ["queue.md"])
+
+    def test_unsupported_duty_period_is_never_scheduled(self):
+        # "daily" is among these: it was dropped for behaving like "nightly".
+        for period in ("hourly", "daily", "montly"):
+            with self.subTest(period=period):
+                write_task(self.root, "recur.md", project="life", status="ready",
+                           duty=period, created="2026-09-01")
+                self.assertEqual(self.names(self.order()), ["queue.md"])
+                self.assertIn((self.path("recur.md"), period, False),
+                              tasks.duties(self.root, PROJECTS, "personal"))
+
+    def test_filler_only_once_the_queue_is_exhausted(self):
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", filler="true")
+        self.assertEqual(self.names(self.order(count=1)), ["queue.md"])
+        self.assertEqual(self.names(self.order(count=2)), ["queue.md", "tidy.md"])
+
+    def test_filler_beats_parallel_padding(self):
+        # Padding only duplicates work already picked, so it goes last.
+        write_task(self.root, "queue.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01", parallel="true")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   created="2026-08-01", filler="true")
+        self.assertEqual(self.names(self.order(count=3)),
+                         ["queue.md", "tidy.md", "queue.md"])
+
+    def test_classes_are_excluded_from_the_ordinary_queue(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", duty="nightly")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   priority="high", created="2026-08-01", filler="true")
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 5)
+        self.assertEqual(self.names(picked), ["queue.md"])
+
+    def test_classes_are_tagged_for_the_caller(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   filler="true", created="2026-09-01")
+        got = {Path(t["path"]).name: t["sched"] for t in self.order(count=5)}
+        self.assertEqual(got, {"sync.md": "duty", "queue.md": None,
+                               "tidy.md": "filler"})
+
+    def test_duty_still_obeys_prerequisites_and_model_floor(self):
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01", model="opus")
+        self.assertEqual(self.names(self.order()), ["queue.md"])
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", created="2026-09-01",
+                   prerequisites="missing.md")
+        self.assertEqual(self.names(self.order()), ["queue.md"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRepairStuck(unittest.TestCase):
+    """Tasks left `in-progress` by a session that died are reset to `ready`."""
+
+    TTL = 4.5 * 3600
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def stale(self, name, body, age_s):
+        p = self.root / "tasks" / name
+        p.write_text(body)
+        os.utime(p, (time.time() - age_s, time.time() - age_s))
+        return p
+
+    def repair(self):
+        return tasks.repair_stuck(self.root, time.time(), self.TTL, "2026-09-08")
+
+    def test_old_in_progress_task_becomes_ready_again(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Notes\n\n- 2026-08-01: started\n", 10 * 3600)
+        repaired = self.repair()
+        self.assertEqual([n for n, _ in repaired], ["t.md"])
+        self.assertIn("status: ready", p.read_text())
+        self.assertNotIn("status: in-progress", p.read_text())
+        # The last note the dead session left must survive: the repaired task
+        # is resumed from it, not restarted.
+        self.assertIn("- 2026-08-01: started", p.read_text())
+        self.assertIn("auto-repaired by the gatekeeper", p.read_text())
+
+    def test_recent_in_progress_task_is_left_alone(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n", 60)
+        self.assertEqual(self.repair(), [])
+        self.assertIn("status: in-progress", p.read_text())
+
+    def test_other_statuses_are_never_touched(self):
+        for status in ("ready", "done", "blocked", "inbox"):
+            p = self.stale(f"{status}.md",
+                           f"---\ntitle: X\nstatus: {status}\n---\n", 10 * 3600)
+            self.assertEqual(self.repair(), [])
+            self.assertIn(f"status: {status}", p.read_text())
+
+    def test_a_task_without_a_notes_section_gets_one(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Context\n\nsomething\n", 10 * 3600)
+        self.assertEqual([n for n, _ in self.repair()], ["t.md"])
+        text = p.read_text()
+        self.assertIn("## Notes", text)
+        self.assertIn("## Context", text)
+
+    def test_a_status_line_in_the_body_is_not_rewritten(self):
+        p = self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n\n"
+                               "## Context\n\nRun `gate.py status: in-progress`\n",
+                       10 * 3600)
+        self.repair()
+        self.assertIn("Run `gate.py status: in-progress`", p.read_text())
+
+    def test_repair_is_idempotent(self):
+        self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n", 10 * 3600)
+        self.assertEqual(len(self.repair()), 1)
+        self.assertEqual(self.repair(), [])

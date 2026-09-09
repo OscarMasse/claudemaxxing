@@ -6,6 +6,7 @@
                        SKIP <account> <reason>
                      (plus a global "SKIP paused" when the kill switch is set)
   gate.py status  -> human-readable per-account quota summary for the digest
+  gate.py plan    -> dry projection of the remaining nights' token allocations
 
 Every account is scheduled independently: its own quota budget, its own
 activity lock (idle = interactive use of THAT account's Claude profile), its
@@ -17,22 +18,24 @@ Env overrides (tests / manual runs):
   ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.yaml and
   the repo default; see lib/config.resolve_path),
   ORCH_NOW (ISO), ORCH_IDLE_MIN, ORCH_IDLE_MIN_<ACCOUNT>,
-  ORCH_CCUSAGE_JSON, ORCH_CCUSAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
+  ORCH_USAGE_JSON, ORCH_USAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
   ORCH_PLATFORM (<ACCOUNT> = name upper-cased, non-alphanumerics -> _)
 """
 import hashlib
+import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import activity, config, controller, ledger, tasks, usage  # noqa: E402
+from lib import activity, config, controller, ledger, quota, tasks, usage  # noqa: E402
 
 LOCK_TTL_S = 4.5 * 3600
+MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
 PRESENT_MIN = 10  # idle threshold under which the owner counts as "at the PC"
 
 
@@ -96,13 +99,22 @@ def log(p, msg):
         f.write(f"{stamp} {msg}\n")
 
 
-def notify_duty(p, idle):
+def notify_duty(p, idle, open_cmd=None):
     """One user notification per new unchecked question, only when the owner
     is present. Delivery goes through the platform notify.sh hook; a missing
-    hook is not an error, the question still lands in NEEDS-HUMAN.md."""
+    hook is not an error, the question still lands in NEEDS-HUMAN.md.
+
+    The hook is handed NEEDS-HUMAN.md so the notification can open it: the
+    question is a checkbox to answer and tick, and a notification that cannot
+    take the owner to it makes them hunt for the file. `open_cmd` is passed
+    through as ORCH_NOTIFY_OPEN (`notify_open_cmd` in config.yaml).
+    """
     if idle is None or idle > PRESENT_MIN or not p["needs"].exists():
         return
     hook = Path(__file__).resolve().parent / "platform" / platform_name() / "notify.sh"
+    env = dict(os.environ)
+    if open_cmd:
+        env["ORCH_NOTIFY_OPEN"] = str(open_cmd)
     seen = set()
     if p["notified"].exists():
         seen = set(p["notified"].read_text().splitlines())
@@ -115,8 +127,8 @@ def notify_duty(p, idle):
             new.append((h, line.strip()[6:].strip()))
     for h, question in new:
         if not notifications_disabled() and hook.exists():
-            subprocess.run([str(hook), "Backlog needs you", question[:120]],
-                           capture_output=True)
+            subprocess.run([str(hook), "Backlog needs you", question[:120],
+                            str(p["needs"])], capture_output=True, env=env)
         p["state"].mkdir(parents=True, exist_ok=True)
         with open(p["notified"], "a") as f:
             f.write(h + "\n")
@@ -140,6 +152,65 @@ def active_slots(p, state_dir):
     return n
 
 
+def night_start_dt(acct, now):
+    """Tonight's night_start as an aware datetime, or None outside the night.
+
+    The night window does not cross midnight (see config `night_start` /
+    `night_end`), so the occurrence in progress is always today's."""
+    def at(hhmm):
+        h, m = str(hhmm).split(":")
+        return now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+    start = at(acct["night_start"])
+    return start if start <= now < at(acct["night_end"]) else None
+
+
+def spent_tonight(state, acct, now):
+    """Tokens this night has already burned, for the night allocator."""
+    start = night_start_dt(acct, now)
+    return ledger.spent_since(state, start) if start else 0
+
+
+def period_keys(acct, now):
+    """Identifier of the period in progress, per duty period.
+
+    A duty is due when its recorded key differs from the current one, so these
+    keys are what makes "once per night" mean once per night and not once per
+    tick.
+
+    A period is ABSENT when the current tick is outside its window, which is
+    what makes a nightly duty night-only: no key, not due. `weekly` is keyed on
+    the quota week (the last reset), so it is always present.
+    """
+    tz = ZoneInfo(acct["reset_tz"])
+    keys = {"weekly": controller.prev_reset(acct, now).date().isoformat()}
+    start = night_start_dt(acct, now)
+    if start:
+        keys["nightly"] = start.astimezone(tz).date().isoformat()
+    return keys
+
+
+def duties_served(state):
+    """task path -> period key last launched for it."""
+    f = state / "duties.json"
+    if not f.exists():
+        return {}
+    try:
+        return json.loads(f.read_text())
+    except (ValueError, OSError):
+        return {}
+
+
+def record_duty(state, path, key):
+    """Mark a duty served for this period. Written at LAUNCH, not on success: a
+    failing duty must not relaunch every tick until the period ends."""
+    served = duties_served(state)
+    served[path] = key
+    state.mkdir(parents=True, exist_ok=True)
+    tmp = state / "duties.json.tmp"
+    tmp.write_text(json.dumps(served, indent=2, sort_keys=True))
+    tmp.replace(state / "duties.json")
+
+
 def tick_account(p, acct, projs):
     """One scheduling decision for one account. Returns the account's idle
     minutes (for the presence-gated notifications)."""
@@ -147,48 +218,113 @@ def tick_account(p, acct, projs):
     now = now_from_env(acct)
     idle = idle_for_account(p["root"], acct)
     snap = usage.snapshot(acct, now)
-    d = controller.decide(acct, now, snap, idle)
     state = p["state"] / name
-    # Parallel slots: several sessions may run at once, up to the regime's
-    # per-account cap.
-    cap_slots = int(acct.get("night_parallel", 1)) if d.regime in ("night", "prereset") \
-        else int(acct.get("day_parallel", 1))
+    # The night allocator needs to know what tonight already cost, so its
+    # budget is a remainder rather than a fresh grant on every tick.
+    snap["spent_tonight"] = spent_tonight(state, acct, now)
+    d = controller.decide(acct, now, snap, idle)
+    # Parallel slots. At night and in the burn-down the count is decided by the
+    # budget alone (see the fill loop below): the real metric is tokens, not a
+    # task count, so a night may be one heavy session or many small ones.
+    # `max_parallel_sessions` is a SAFETY ceiling, not a pacing tool - it
+    # protects the machine (each session may run docker builds, test suites and
+    # Playwright) and bounds how many sessions can contend on the same repos.
+    # run.sh only allocates RUNNING.1..8 lock slots, so 8 is the hard structural
+    # limit however high this is set.
+    cap_slots = min(int(acct.get("max_parallel_sessions", 4)), MAX_SLOTS)
     free = cap_slots - active_slots(p, state)
     if d.action == "run" and free <= 0:
         print(f"SKIP {name} running")
         return idle
     # Task selection happens here (not in the session): the tasks' declared
     # models must be known before launch. A task's model is a floor: the
-    # ceiling per regime is sonnet (day), opus (night), or the margin-driven
-    # tick model (prereset), and each session launches at max(floor, tick
-    # model) - upgrades in the burn-down, never downgrades.
+    # ceiling is every model the engine knows at night, and the margin-driven
+    # tick model in the burn-down, and each session launches at
+    # max(floor, tick model) - upgrades in the burn-down, never downgrades.
+    # The night ceiling used to be opus, which quietly made a `fable` floor
+    # unschedulable except in the burn-down: the strongest model was reachable
+    # only in the last hours of the week, so the tasks that asked for it (deep
+    # research, architecture, taste) waited days for a window they might miss
+    # entirely. What a night may spend is a budget question, and the budget
+    # already answers it below - the model ceiling was a second, blunter
+    # answer to the same question.
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
+    # Models the account has told us it will refuse (lib/quota.py). The night
+    # of 2026-09-09 spent three of its last four slots relaunching Fable
+    # sessions into a Fable limit that had already answered `You've hit your
+    # session limit` at 02:25 - the engine had no memory of being told.
+    out_of_quota = quota.blocked(state, now)
+    for family, until in sorted(out_of_quota.items()):
+        log(p, f"account={name} out of quota model={family} "
+               f"until={until.isoformat()}")
     picked = []
     if d.action == "run":
-        max_floor = {"day": "sonnet", "night": "opus"}.get(d.regime, d.model)
-        candidates = tasks.pick_multi(p["root"], projs, name,
-                                      max_model=max_floor, count=free)
-        measured = ledger.rates(state)
-        defaults = {"sonnet": float(acct.get("est_rate_sonnet_per_min", 400000)),
-                    "opus": float(acct.get("est_rate_opus_per_min", 800000)),
-                    "fable": float(acct.get("est_rate_fable_per_min", 1200000))}
+        max_floor = "fable" if d.regime == "night" else d.model
+        keys = period_keys(acct, now)
+        candidates = tasks.launch_order(p["root"], projs, name,
+                                        max_model=max_floor, count=free,
+                                        done=duties_served(state),
+                                        period_keys=keys)
+        # What a session costs is a property of the work, not of the slice it
+        # was allotted: sessions do not fill their slice (measured median
+        # utilisation here: 3%), so both the measured figure and the cold-start
+        # default are per SESSION. This used to be a per-minute rate multiplied
+        # by the slice, which was accidentally right for a task with ledger
+        # history (the divide and the multiply cancelled) and ~30x too high for
+        # one without - 400k/min x 50min = 20M against a measured median of
+        # 726k. That single wrong number capped most nights at one session,
+        # since every candidate after the first was gated on it.
+        # One default, not one per model: the measurement says session cost is
+        # driven by the task, which is why the learned figure is keyed on
+        # (task, model). A per-model prior is not supported by the data here
+        # (opus and fable sessions measured CHEAPER than sonnet ones), so
+        # inventing three numbers would only look more precise than it is.
+        measured = ledger.session_costs(state)
+        default_cost = float(acct.get("est_session_tokens", 2500000))
         budget = d.budget_tokens
+        # How many of this tick's slots the strongest model may take. It is a
+        # pacing tool, unlike max_parallel_sessions: the binding constraint on
+        # a Fable night is the account's Fable limit, not wall-clock time, and
+        # four Fable sessions racing each other exhaust it in under two hours
+        # (measured 2026-09-09), leaving nothing for the rest of the night and
+        # no slot for the cheaper models that were nowhere near their own
+        # limit. Serialising them costs almost nothing - a night fits only
+        # three or four sessions per slot anyway - and keeps the other slots
+        # doing useful work. It applies in the pre-reset burn-down as well:
+        # that regime upgrades sessions to Fable, and the wall it would run
+        # into is the same one.
+        fable_slots = int(acct.get("max_fable_slots", 1))
+        fable_taken = 0
         for cand in candidates:
             if tasks.MODEL_RANK[d.model] > tasks.MODEL_RANK[cand["model"]]:
                 cand["model"] = d.model
-            rate = measured.get((cand["path"], cand["model"])) \
-                or defaults.get(cand["model"], defaults["sonnet"])
-            est_burn = rate * d.slice_min
-            if picked and est_burn > budget:
-                break  # the first session always runs; extras must fit the budget
+            if cand["model"] in out_of_quota:
+                continue
+            if cand["model"] == "fable":
+                if fable_taken >= fable_slots:
+                    continue
+                fable_taken += 1
+            est_burn = measured.get((cand["path"], cand["model"]), default_cost)
+            # Budget rules per scheduling class. A duty is mandatory: charged
+            # to the budget, never gated by it. A queue task is exempt when it
+            # is the tick's first session, or a task heavier than a whole night
+            # could never start at all. A filler is pure surplus: no exemption,
+            # it only ever runs on budget that is already there.
+            exempt = cand["sched"] == "duty" or (
+                not picked and cand["sched"] != "filler")
+            if not exempt and est_burn > budget:
+                break
+            cand["est_tokens"] = int(est_burn)
             picked.append(cand)
             budget -= est_burn
     log(p, f"account={name} {d.action} reason={d.reason!r} slice={d.slice_min} "
            f"regime={d.regime} model={d.model} week={snap['week_tokens']} "
            f"idle={idle} free_slots={free} "
-           f"tasks={[t['path'] for t in picked] or '-'}")
+           f"duties={[t['path'] for t in picked if t['sched'] == 'duty'] or '-'} "
+           f"fillers={[t['path'] for t in picked if t['sched'] == 'filler'] or '-'} "
+           f"tasks={[t['path'] for t in picked if not t['sched']] or '-'}")
     if d.action == "run" and not picked:
         print(f"SKIP {name} no eligible task")
         return idle
@@ -199,7 +335,9 @@ def tick_account(p, acct, projs):
     if d.action == "run":
         for t in picked:
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
-                  f"{t['effort']} {t['project']}")
+                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)}")
+            if t["sched"] == "duty":
+                record_duty(state, t["path"], t["period_key"])
     else:
         print(f"SKIP {name} {d.reason}")
     return idle
@@ -211,11 +349,51 @@ def tick(p):
         return
     cfg = config.load(p["config"])
     projs = config.projects(cfg)
+    # Logged every tick, not just in `status`: a task the engine refuses to
+    # schedule is otherwise indistinguishable from one that is simply not its
+    # turn yet, and the whole point of refusing is to be noticed.
+    for task_name, model in tasks.misconfigured(p["root"]):
+        log(p, f"unschedulable task={task_name}: unknown model {model!r}")
+    # Before any account is scheduled, so a task freed here is eligible in the
+    # very same tick rather than waiting 30 minutes for the next one.
+    for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,
+                                               datetime.now().strftime("%F")):
+        log(p, f"repaired stuck task={task_name} in-progress for {hours:.1f}h")
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))
     known = [i for i in idles if i is not None]
-    notify_duty(p, min(known) if known else None)
+    notify_duty(p, min(known) if known else None, cfg.get("notify_open_cmd"))
+
+
+PROMO_WARN_DAYS = 3
+
+
+def promo_note(acct, now):
+    """One line about the weekly-cap promo, for the digest to relay.
+
+    The cap is a hand-calibrated number: it cannot be derived from local data
+    (see lib/quota.py), so it is only ever as right as the last time someone
+    read it off `/usage`. A promo silently expiring therefore leaves the engine
+    pacing against a cap that no longer exists, and a promo silently STARTING
+    leaves a large surplus unspent - both invisible, both only fixable by a
+    human looking at the screen. Hence a line the digest must carry, from three
+    days before the date and forever after it, until `promo_until` is updated.
+    """
+    tz = ZoneInfo(acct["reset_tz"])
+    today = now.astimezone(tz).date()
+    until = date.fromisoformat(str(acct["promo_until"]))
+    left = (until - today).days
+    if left < 0:
+        return (f"promo EXPIRED {until.isoformat()} ({-left}d ago) "
+                f"NEEDS-HUMAN: read the weekly limit off /usage and update "
+                f"weekly_cap_tokens + promo_until in config.yaml")
+    if left <= PROMO_WARN_DAYS:
+        return (f"promo ENDS {until.isoformat()} (in {left}d) x{acct['promo_multiplier']} "
+                f"NEEDS-HUMAN: after it lapses, re-read the weekly limit off "
+                f"/usage and update weekly_cap_tokens + promo_until")
+    return (f"promo active until {until.isoformat()} (in {left}d) "
+            f"x{acct['promo_multiplier']}")
 
 
 def status(p):
@@ -234,21 +412,82 @@ def status(p):
                  else 1.0)
         cap = acct["weekly_cap_tokens"] * promo
         reserve = acct["p90_daily_tokens"] * days
-        available = cap - snap["week_tokens"] - reserve
+        available = controller.surplus(acct, now, snap["week_tokens"])
         print(f"account={name}")
         print(f"week_tokens={snap['week_tokens']}")
         print(f"cap={cap:.0f} reserve={reserve:.0f} available={available:.0f}")
         print(f"next_reset={reset.isoformat()} days_remaining={days:.2f}")
         print(f"idle_min={idle} promo_until={acct['promo_until']}")
+        print(promo_note(acct, now))
+        for family, tokens in sorted(snap.get("week_by_family", {}).items()):
+            print(f"week_model={family} tokens={tokens}")
+        for family, until in sorted(quota.blocked(p["state"] / name, now).items()):
+            print(f"out_of_quota model={family} until={until.isoformat()}")
+        for model_id in snap.get("unknown_models", []):
+            print(f"unknown_model id={model_id} (counted, family unrecognized)")
         for task_name, unmet in tasks.blocked(p["root"], projs, name):
             print(f"blocked task={task_name} unmet={' '.join(unmet)}")
+        # Tonight's allocation, so the digest can see the plan, not just the cap.
+        # Outside the night, the upcoming one is already in _nights_remaining;
+        # counting it twice would understate every allocation by a factor r.
+        in_night = night_start_dt(acct, now) is not None
+        tonight = controller.night_budget(acct, now, available,
+                                          spent_tonight(p["state"] / name, acct, now),
+                                          in_night=in_night)
+        print(f"night_budget={tonight:.0f} "
+              f"nights_remaining={controller.nights_remaining(acct, now, in_night)}")
+        keys = period_keys(acct, now)
+        served = duties_served(p["state"] / name)
+        for path, period, supported in tasks.duties(p["root"], projs, name):
+            due = supported and served.get(path) != keys.get(period)
+            print(f"duty task={Path(path).name} period={period} "
+                  f"supported={'yes' if supported else 'NO'} "
+                  f"due={'yes' if due else 'no'}")
+        for t in tasks.fillers(p["root"], projs, name, "fable"):
+            print(f"filler task={Path(t['path']).name}")
+        for task, a in sorted(ledger.accuracy(p["state"] / name).items()):
+            print(f"estimate task={task} runs={a['runs']} est={a['est_tokens']} "
+                  f"actual={a['actual_tokens']} ratio={a['ratio']:.2f}")
         costs = ledger.stats(p["state"] / name)
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "
                   f"out_tokens={s['out_tokens']} total_tokens={s['total_tokens']}")
-    # Printed once, after the accounts: an orphaned task belongs to none of them.
+    # Printed once, after the accounts: these tasks belong to none of them.
     for task_name, project in tasks.orphaned(p["root"], projs):
         print(f"orphaned task={task_name} project={project}")
+    for task_name, model in tasks.misconfigured(p["root"]):
+        print(f"misconfigured task={task_name} model={model}")
+
+
+def plan(p):
+    """Dry projection of the nights left before the reset, per account.
+
+    Answers "where is my quota going?" without launching anything and without
+    waiting for 02:00: for each remaining night it prints the allocation the
+    controller would grant, assuming nothing else consumes quota in between.
+    Reality will differ (that is the point of recomputing every tick), but the
+    SHAPE of the plan - back-loaded, open bar on the last night - is visible
+    here, and so is a misconfigured `night_budget_ratio`.
+    """
+    cfg = config.load(p["config"])
+    for acct in config.accounts(cfg):
+        name = acct["name"]
+        now = now_from_env(acct)
+        snap = usage.snapshot(acct, now)
+        reset = controller.next_reset(acct, now)
+        left = controller.nights_remaining(acct, now, night_start_dt(acct, now) is not None)
+        print(f"account={name} nights_remaining={left} reset={reset.isoformat()}")
+        pool = None
+        # Walk the nights from the current one to the last, keeping the pool the
+        # allocator would see after each night spent its share.
+        for i in range(left, 0, -1):
+            probe = reset - timedelta(days=i - 1, hours=3)
+            if pool is None:
+                pool = controller.surplus(acct, probe, snap["week_tokens"])
+            share = controller.night_budget(acct, probe, pool, 0, in_night=True)
+            print(f"  night {probe.date().isoformat()} nights_left={i} "
+                  f"budget={share:.0f} pool={max(pool, 0.0):.0f}")
+            pool -= share
 
 
 def main():
@@ -258,6 +497,8 @@ def main():
         tick(p)
     elif cmd == "status":
         status(p)
+    elif cmd == "plan":
+        plan(p)
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)
         sys.exit(2)

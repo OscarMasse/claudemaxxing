@@ -13,18 +13,26 @@ mkdir -p "$STATE_ROOT"
 DECISION="$(python3 gate.py tick 2>> "$STATE_ROOT/gatekeeper.log")" || exit 0
 # One RUN line per session to launch (parallel slots, possibly on several
 # accounts in the same tick). Format:
-#   RUN <account> <slice> <task> <model> <effort> <project>
+#   RUN <account> <slice> <task> <model> <effort> <project> <est_tokens>
 LAUNCHED=0
 while IFS= read -r line; do
   case "$line" in
     RUN\ *)
       read -r _ ACCOUNT REST <<< "$line"
-      # Word splitting of REST is intentional: "<slice> <task> <model> <effort> <project>".
+      # Word splitting of REST is intentional:
+      # "<slice> <task> <model> <effort> <project> <est_tokens>".
       ./run.sh --account "$ACCOUNT" $REST &
       LAUNCHED=1
       ;;
   esac
 done <<< "$DECISION"
-# Wait for children: launchd kills the process group when this script exits.
-[ "$LAUNCHED" = "1" ] && wait
+# Deliberately NOT waiting for the children. This used to `wait`, which made a
+# tick last as long as its longest session and turned the whole night into a
+# batch: with four slots launched at 02:00 and one session running 20 minutes,
+# the loop slept until 02:50 and the other three slots sat idle for 78 of every
+# 80 minutes. Returning immediately makes it a pipeline instead - the next tick
+# refills whatever slot has come free.
+# The children survive because launchd's job is gatekeeper-loop.sh, which never
+# exits: the process group outlives this script. Do not register gatekeeper.sh
+# directly with launchd, or its exit will kill the sessions it just launched.
 exit 0

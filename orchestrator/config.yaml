@@ -21,11 +21,23 @@
 # key route to the project named "default" when one exists, so old configs and
 # old task files keep working unchanged.
 #
-# All *_tokens figures are in ccusage-estimated token units.
+# All *_tokens figures are in the unit lib/transcripts.py counts: input +
+# output + cache read + cache write, summed over Claude Code's own transcript
+# files and de-duplicated per billed message.
 # IMPORTANT: the token numbers below are EXAMPLE calibration values from real
-# Max accounts. Calibrate your own: compare /usage percentages against
-# `npx ccusage blocks --json` totals over a few days, then scale.
+# Max accounts. Calibrate your own from `gate.py status` over a few days.
+# No calibration makes them PREDICTIVE: the account's limit is not linear in
+# these tokens (lib/quota.py carries the measurement), so they pace the week
+# and nothing more. Running out of a model's quota is observed from the
+# account's own limit message, not predicted from these numbers.
 dry_run: false
+# Notifications. A new unchecked question in NEEDS-HUMAN.md raises one user
+# notification, and clicking it opens that file with this command. `open` hands
+# the file to whatever application macOS has registered for it; set an editor
+# binary (zed, code, subl) to force one. Clickable notifications need
+# terminal-notifier on the PATH (`brew install terminal-notifier`); without it
+# the notification is still shown, just not clickable.
+notify_open_cmd: open
 # Night regime hours (local time).
 night_start: 02:00
 night_end: 06:00
@@ -35,31 +47,51 @@ morning_guard: 08:30
 # finishing run journals into TODAY's digest file; at or after, TOMORROW's
 # (today's digest has already been curated by then).
 digest_time: 07:37
-# Pre-reset burn-down starts this many hours before the reset.
+# Pre-reset burn-down starts this many hours before the reset. Also sets what
+# the last night can absorb (ceil(hours / 5) quota windows), which is what the
+# per-night plan hoards for it.
 prereset_burn_hours: 8
-# Activity lock thresholds (minutes since last interactive session write on
+# Activity lock threshold (minutes since the last interactive session write on
 # the account being scheduled; each account has its own idle clock).
-activity_idle_day_min: 60
 activity_idle_night_min: 40
-# Slice sizes (wall-clock minutes handed to the claude session).
-day_slice_min: 15
+# Slice size (wall-clock minutes handed to the claude session).
 night_slice_min: 50
-# Parallel session slots per regime, PER ACCOUNT (hard ceilings; the actual
-# count is budget-driven: estimated per-session burn must fit the slice budget).
-night_parallel: 3
-day_parallel: 1
-# Default burn estimates (ccusage token units per minute) used until the cost
-# ledger has measured real rates for a (task, model) pair.
-est_rate_sonnet_per_min: 400000
-est_rate_opus_per_min: 800000
-est_rate_fable_per_min: 1200000
+# Session slots. The count is decided by the budget alone; this is a SAFETY
+# ceiling for the machine, not a pacing tool (8 max: run.sh allocates
+# RUNNING.1..8). Start conservative, read the `estimate` and `cost` lines of
+# `gate.py status`, then raise it.
+max_parallel_sessions: 4
+# Pacing ceiling on how many Fable sessions may run at the same time.
+# Unlike max_parallel_sessions this is not about machine safety: Fable has its
+# own, much tighter limit, and it is a token limit rather than a time limit.
+# Running Fable sessions in parallel therefore buys nothing (a session uses a
+# small fraction of its slice, and the gatekeeper refills the slot 5 minutes
+# later) while it risks spending several slots relaunching into the same wall
+# and starving the cheaper models of slots. Applies to the pre-reset burn-down
+# too, which upgrades sessions to Fable and would hit that same wall.
+max_fable_slots: 1
+
+# Shape of the per-night allocation of the weekly surplus. Night j of the n left
+# before the reset gets weight r^(j-1), so the plan is back-loaded: unspent
+# quota is worth less the closer the reset gets, and the last night is open bar.
+# r = 1 degenerates to a flat split.
+# Raise this cautiously: the share is (r-1)/(r^n - 1), which collapses fast. At
+# r = 2 with 7 nights left the first night gets 1/127 of the pool - measured on
+# a real backlog that was less than one median session, so most nights of the
+# week could not fund a single session out of their own allocation.
+night_budget_ratio: 1.0
+# Cold-start estimate of what one session costs (see the token unit above), used
+# until the ledger has measured a real figure for a (task, model) pair. Per
+# session, not per minute: sessions do not fill their slice, so the slice
+# length says nothing about the cost. Calibrate from `gate.py status`
+# (`cost task=...`) once a few nights have run; a p75 of the measured
+# distribution is a reasonable prior, the mean is dragged by a long tail.
+est_session_tokens: 2500000
 # Pre-reset polarization: the burn-down upgrades sessions to the strongest
 # model the doomed surplus can justify (task `model:` is a floor, never a
-# ceiling). Thresholds in ccusage token units, to calibrate from the ledger.
+# ceiling). Thresholds in the token unit above, to calibrate from the ledger.
 fable_min_surplus_tokens: 100000000
 opus_min_surplus_tokens: 30000000
-# Daytime surplus: max fraction of the current window already consumed for a go.
-day_window_max_frac: 0.4
 # Claude invocation defaults (an account may override claude_bin). Use an
 # absolute path if claude is not on the PATH that run.sh exports (launchd
 # hands down a bare one).
@@ -86,14 +118,25 @@ max_session_usd: 15
 #                     where activity/usage are read)
 #   claude_bin        optional, defaults to the shared top-level claude_bin
 #   weekly_cap_tokens, window_cap_tokens, p90_daily_tokens
-#                     quota calibration for this subscription
+#                     quota calibration for this subscription, in the unit
+#                     lib/transcripts.py counts (input + output + cache read +
+#                     cache write, de-duplicated). These are COARSE PACING
+#                     knobs and cannot be derived from local data: the
+#                     account's limit is not linear in these tokens (see
+#                     lib/quota.py). They keep background work off the owner's
+#                     daytime reserve; the real wall is observed, not predicted.
 #   reset_weekday (0=Monday), reset_time, reset_tz
 #                     this subscription's weekly reset (check /usage:
 #                     "Resets <date> at <time>")
 #   promo_multiplier, promo_until
 #                     optional temporary quota multiplier; the multiplier
 #                     applies only until promo_until (inclusive), then falls
-#                     back to 1.0 automatically
+#                     back to 1.0 automatically. Set promo_until even when the
+#                     multiplier is 1.0 because the caps already include the
+#                     promotion: `gate.py status` prints a `promo` line that
+#                     warns three days ahead and then every day after expiry,
+#                     since the post-promo limit can only be read off `/usage`
+#                     by a human.
 accounts:
   - name: personal
     claude_config_dir: ~/.claude

@@ -69,7 +69,7 @@ projects:
 CFG
 
 task() {  # task <file> <priority> [extra frontmatter line]
-  printf -- '---\ntitle: %s\nproject: demo\nstatus: ready\npriority: %s\ncreated: 2026-08-01\n%s---\n\nBody.\n' \
+  printf -- '---\ntitle: %s\nproject: demo\nstatus: ready\npriority: %s\ndelivery: branch\ncreated: 2026-08-01\n%s---\n\nBody.\n' \
     "$1" "$2" "${3:+$3
 }" > "$SANDBOX/tasks/$1"
 }

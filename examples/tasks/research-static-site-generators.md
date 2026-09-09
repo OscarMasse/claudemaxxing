@@ -4,6 +4,7 @@ project: side-projects
 status: ready
 priority: low
 autonomy: private
+delivery: branch
 model: sonnet
 effort: low
 token_budget: 150k

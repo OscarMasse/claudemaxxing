@@ -13,13 +13,20 @@ def proj(name, account, priority=100, local_only_default=False):
 
 PROJECTS = {
     "side-projects": proj("side-projects", "personal", priority=10),
-    "life": proj("life", "personal", priority=50, local_only_default=True),
+    "life": proj("life", "personal", priority=50),
     "work": proj("work", "employer", priority=10, local_only_default=True),
 }
 
 
 def write_task(root, name, **fm):
-    lines = ["---"] + [f"{k}: {v}" for k, v in fm.items()] + ["---", ""]
+    """`delivery` defaults to `branch` here because it is mandatory in the
+    files and almost every test is about something else. Pass
+    `delivery=None` to write a task without the key, and any explicit value
+    to exercise the contract itself."""
+    fm.setdefault("delivery", "branch")
+    lines = (["---"]
+             + [f"{k}: {v}" for k, v in fm.items() if v is not None]
+             + ["---", ""])
     (root / "tasks" / name).write_text("\n".join(lines))
 
 
@@ -49,7 +56,7 @@ class TestPick(unittest.TestCase):
         self.assertEqual(picked["project"], "side-projects")
 
     def test_project_routes_to_account(self):
-        write_task(self.root, "w.md", project="work", status="ready", priority="high")
+        write_task(self.root, "w.md", project="work", status="ready", delivery="local", priority="high")
         write_task(self.root, "p.md", project="side-projects", status="ready",
                    priority="low")
         picked = self.pick(account="employer")
@@ -58,7 +65,7 @@ class TestPick(unittest.TestCase):
         self.assertTrue(picked["path"].endswith("p.md"))
 
     def test_other_accounts_tasks_never_fill_slots(self):
-        write_task(self.root, "w.md", project="work", status="ready", priority="high")
+        write_task(self.root, "w.md", project="work", status="ready", delivery="local", priority="high")
         write_task(self.root, "p.md", project="side-projects", status="ready",
                    priority="low")
         picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 3)
@@ -81,23 +88,56 @@ class TestPick(unittest.TestCase):
         # life has project priority 50, side-projects 10: a low-priority
         # side-projects task still beats a high-priority life task.
         write_task(self.root, "l.md", project="life", status="ready",
-                   priority="high", created="2026-08-01")
+                   priority="high", delivery="local", created="2026-08-01")
         write_task(self.root, "s.md", project="side-projects", status="ready",
                    priority="low", created="2026-08-05")
         picked = self.pick()
         self.assertTrue(picked["path"].endswith("s.md"))
 
-    def test_local_only_inherits_project_default(self):
-        write_task(self.root, "l.md", project="life", status="ready", priority="high")
-        self.assertIs(self.pick()["local_only"], True)
+    def test_each_delivery_value_is_carried_to_the_session(self):
+        for value in ("branch", "pr"):
+            write_task(self.root, "d.md", project="side-projects",
+                       status="ready", priority="high", delivery=value)
+            picked = self.pick()
+            self.assertEqual(picked["delivery"], value)
+            self.assertIs(picked["local_only"], False)
 
-    def test_local_only_task_overrides_project_default(self):
-        write_task(self.root, "l.md", project="life", status="ready",
-                   priority="high", local_only="false")
-        self.assertIs(self.pick()["local_only"], False)
-        write_task(self.root, "l.md", project="side-projects", status="ready",
-                   priority="high", local_only="true")
-        self.assertIs(self.pick()["local_only"], True)
+    def test_delivery_local_is_what_drives_the_local_only_rails(self):
+        # `local_only` is no longer declared: it is exactly `delivery: local`,
+        # so the two can never contradict each other.
+        write_task(self.root, "d.md", project="side-projects", status="ready",
+                   priority="high", delivery="local")
+        picked = self.pick()
+        self.assertEqual(picked["delivery"], "local")
+        self.assertIs(picked["local_only"], True)
+
+    def test_missing_delivery_makes_the_task_unschedulable(self):
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", priority="high", delivery=None)
+        write_task(self.root, "ok.md", project="side-projects", status="ready",
+                   priority="low")
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
+
+    def test_unknown_delivery_value_makes_the_task_unschedulable(self):
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", priority="high", delivery="PR")
+        self.assertIsNone(self.pick())
+
+    def test_a_local_only_project_refuses_a_task_that_would_leave_the_machine(self):
+        # The floor is not a downgrade: the task is not quietly run as `local`,
+        # it does not run at all until the contradiction is fixed.
+        for value in ("pr", "branch"):
+            write_task(self.root, "w.md", project="work", status="ready",
+                       priority="high", delivery=value)
+            self.assertIsNone(self.pick(account="employer"))
+        write_task(self.root, "w.md", project="work", status="ready",
+                   priority="high", delivery="local")
+        self.assertTrue(self.pick(account="employer")["path"].endswith("w.md"))
+
+    def test_a_leftover_local_only_key_is_not_obeyed_but_refused(self):
+        write_task(self.root, "old.md", project="side-projects", status="ready",
+                   priority="high", delivery="pr", local_only="true")
+        self.assertIsNone(self.pick())
 
     def test_model_floor_gated_by_max_model(self):
         write_task(self.root, "big.md", project="side-projects", status="ready",
@@ -271,7 +311,7 @@ class TestPick(unittest.TestCase):
 
     def test_orphaned_empty_when_every_project_resolves(self):
         write_task(self.root, "a.md", project="side-projects", status="ready")
-        write_task(self.root, "w.md", project="work", status="ready")
+        write_task(self.root, "w.md", project="work", status="ready", delivery="local")
         self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
 
     def test_unknown_model_makes_the_task_unschedulable_and_reported(self):
@@ -283,15 +323,47 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "ok.md", project="side-projects",
                    status="ready", priority="low")
         self.assertTrue(self.pick(max_model="fable")["path"].endswith("ok.md"))
-        self.assertEqual(tasks.misconfigured(self.root),
-                         [("ghost.md", "claude-fable-5")])
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
+                         [("ghost.md", "model=claude-fable-5")])
+
+    def test_absent_delivery_is_reported_not_guessed(self):
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", delivery=None)
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
+                         [("ghost.md", "delivery=<missing>")])
+
+    def test_unknown_delivery_value_is_reported_with_its_value(self):
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", delivery="pull-request")
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
+                         [("ghost.md", "delivery=pull-request")])
+
+    def test_delivery_breaching_the_local_only_floor_is_reported(self):
+        write_task(self.root, "leak.md", project="work", status="ready",
+                   delivery="pr")
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
+                         [("leak.md", "delivery=pr in local-only project work")])
+
+    def test_a_leftover_local_only_key_is_reported(self):
+        write_task(self.root, "old.md", project="side-projects", status="ready",
+                   delivery="pr", local_only="true")
+        self.assertEqual(
+            tasks.misconfigured(self.root, PROJECTS),
+            [("old.md", "local_only= (replaced by delivery:, remove the key)")])
+
+    def test_only_ready_tasks_are_reported(self):
+        # An inbox task without `delivery:` is not misconfigured, it is simply
+        # not written yet; reporting it would make the list permanent noise.
+        write_task(self.root, "later.md", project="side-projects",
+                   status="inbox", delivery=None)
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
 
     def test_known_models_are_not_reported_as_misconfigured(self):
         for i, model in enumerate(("sonnet", "opus", "fable")):
             write_task(self.root, f"m{i}.md", project="side-projects",
                        status="ready", model=model)
         write_task(self.root, "none.md", project="side-projects", status="ready")
-        self.assertEqual(tasks.misconfigured(self.root), [])
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
 
 
 class TestSchedulingClasses(unittest.TestCase):

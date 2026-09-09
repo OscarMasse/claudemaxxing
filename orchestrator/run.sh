@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch one background orchestrator session (or the morning digest).
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
-#                                [est_tokens]
+#                                [est_tokens] [delivery]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
@@ -50,7 +50,12 @@ PROJECT="${ARGS[4]:-}"
 # What the gatekeeper predicted this slice would burn. Recorded in the ledger
 # next to the actual usage so the estimate can be scored (ledger.accuracy).
 EST_TOKENS="${ARGS[5]:-0}"
-if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; fi
+# The task's declared delivery contract (branch|pr|local), passed down so the
+# session is told its obligation instead of re-deriving it - and so a slice can
+# never push work the task did not ask to be pushed. Empty only when no task
+# was pre-selected; the session then reads the key from the task it picks.
+DELIVERY="${ARGS[6]:-}"
+if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; DELIVERY=""; fi
 
 # All config access goes through lib/config.py (accounts inherit flat keys).
 # The live config file is resolved once, in the single place that owns the
@@ -121,6 +126,12 @@ if [ -n "$TASK_FILE" ]; then
 else
   DIRECTIVE="No task was pre-selected: pick one yourself per step 1."
 fi
+case "$DELIVERY" in
+  pr)     DELIVERY_DIRECTIVE="Delivery for this task is \`pr\`: you MUST push the branch and open a pull request, and record the PR URL in the task notes and in the digest. The task is not done until that PR exists." ;;
+  branch) DELIVERY_DIRECTIVE="Delivery for this task is \`branch\`: commit on a dedicated branch and do NOT push. No PR." ;;
+  local)  DELIVERY_DIRECTIVE="Delivery for this task is \`local\`: the strictly-local rails apply in full, nothing leaves the machine." ;;
+  *)      DELIVERY_DIRECTIVE="No delivery was passed down: read the \`delivery:\` key of the task you pick and apply the contract in step 1." ;;
+esac
 PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
               -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
               -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \
@@ -128,6 +139,7 @@ PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECT
               -e "s|{{ACCOUNT}}|$ACCOUNT|g" \
               -e "s|{{ACCOUNT_PROJECTS}}|${ACCOUNT_PROJECTS% }|g" \
               -e "s|{{PROJECT_DIRS}}|$BACKLOG_ROOT $DIRS|g" \
+              -e "s|{{DELIVERY}}|$DELIVERY_DIRECTIVE|g" \
               -e "s|{{DIGEST_FILE}}|$DIGEST_FILE|g" "prompts/$MODE.md")"
 TIMEOUT_S=$(( (SLICE_MIN + 10) * 60 ))
 START="$(date '+%F %T')"

@@ -88,6 +88,12 @@ class TestGate(unittest.TestCase):
         cfg.write_text(cfg.read_text() + text)
 
     def write_task(self, name, text):
+        """`delivery:` is mandatory in the files, and these tests are about
+        scheduling rather than about the delivery contract, so a task written
+        without the key gets `branch`. The tests that do exercise the contract
+        write the key themselves."""
+        if "\ndelivery:" not in text:
+            text = text.replace("\nstatus:", "\ndelivery: branch\nstatus:", 1)
         (self.root / "tasks" / name).write_text(text)
 
     def test_paused_wins(self):
@@ -205,7 +211,8 @@ class TestGate(unittest.TestCase):
         self.append_cfg("max_parallel_sessions: 1\nest_session_tokens: 2.5\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
-        self.assertTrue(r.stdout.rstrip().endswith(" 2"), r.stdout)  # int(2.5)
+        # "... <est_tokens> <delivery>": the estimate is int(2.5).
+        self.assertTrue(r.stdout.rstrip().endswith(" 2 branch"), r.stdout)
 
     def test_parallel_respects_active_slots(self):
         self.append_cfg("max_parallel_sessions: 2\n"
@@ -238,6 +245,34 @@ class TestGate(unittest.TestCase):
                         r.stdout)
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("out of quota model=fable", log)
+
+    def test_run_line_carries_the_declared_delivery(self):
+        # run.sh turns this last field into the session's delivery obligation,
+        # so the session is told to push (or not) instead of deciding.
+        for value in ("branch", "pr", "local"):
+            self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                            f"status: ready\ndelivery: {value}\n"
+                            "priority: high\ncreated: 2026-08-01\n---\n")
+            r = run_gate(self.root, self.env)
+            self.assertTrue(r.stdout.rstrip().endswith(f" {value}"), r.stdout)
+
+    def test_a_task_without_delivery_is_not_launched_but_logged(self):
+        # Written directly, bypassing write_task's `delivery: branch` default.
+        (self.root / "tasks" / "t1.md").write_text(
+            "---\ntitle: X\nproject: side-projects\nstatus: ready\n"
+            "priority: high\ncreated: 2026-08-01\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
+                        r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("unschedulable task=t1.md: delivery=<missing>", log)
+
+    def test_status_reports_the_misconfigured_delivery(self):
+        (self.root / "tasks" / "t1.md").write_text(
+            "---\ntitle: X\nproject: side-projects\nstatus: ready\n"
+            "delivery: pull-request\npriority: high\ncreated: 2026-08-01\n---\n")
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("misconfigured task=t1.md delivery=pull-request", r.stdout)
 
     def test_out_of_quota_model_does_not_block_the_others(self):
         # Fable dead, sonnet fine: the night must keep working. This is what
@@ -516,10 +551,10 @@ class TestGateMultiAccount(unittest.TestCase):
             BASE_CFG + PERSONAL + self.WORK + PROJECTS + self.WORK_PROJECT)
         (self.root / "tasks" / "p.md").write_text(
             "---\ntitle: P\nproject: side-projects\nstatus: ready\n"
-            "priority: high\ncreated: 2026-08-01\n---\n")
+            "delivery: branch\npriority: high\ncreated: 2026-08-01\n---\n")
         (self.root / "tasks" / "w.md").write_text(
             "---\ntitle: W\nproject: job\nstatus: ready\n"
-            "priority: high\ncreated: 2026-08-01\n---\n")
+            "delivery: branch\npriority: high\ncreated: 2026-08-01\n---\n")
         fx = self.root / "fixture.json"
         fx.write_text(json.dumps(FIXTURE))
         self.env = {"ORCH_CCUSAGE_JSON": str(fx)}
@@ -605,7 +640,8 @@ class TestGateLegacyConfig(unittest.TestCase):
             "extra_dirs: ~/projects\n")
         # A legacy task: no `project:` key at all.
         (self.root / "tasks" / "t1.md").write_text(
-            "---\ntitle: X\nstatus: ready\npriority: high\ncreated: 2026-08-01\n---\n")
+            "---\ntitle: X\nstatus: ready\ndelivery: branch\n"
+            "priority: high\ncreated: 2026-08-01\n---\n")
         fx = self.root / "fixture.json"
         fx.write_text(json.dumps(FIXTURE))
         self.env = {"ORCH_CCUSAGE_JSON": str(fx)}
@@ -642,7 +678,8 @@ class TestGateDuties(unittest.TestCase):
     def task(self, name, extra=""):
         (self.root / "tasks" / name).write_text(
             "---\ntitle: X\nproject: side-projects\nstatus: ready\n"
-            "priority: high\ncreated: 2026-08-01\n" + extra + "---\n")
+            "delivery: branch\npriority: high\ncreated: 2026-08-01\n"
+            + extra + "---\n")
 
     def cost(self, per_session):
         cfg = self.root / "config.yml"

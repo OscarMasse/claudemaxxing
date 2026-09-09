@@ -2,8 +2,9 @@
 
 Selection is deterministic and happens in the gatekeeper (not in the session),
 because the task's declared model must be known before launching the session.
-Frontmatter keys honored: status, project, local_only, priority, created,
-model (sonnet|opus|fable, default sonnet), effort (low|medium|high, default low),
+Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
+priority, created, model (sonnet|opus|fable, default sonnet),
+effort (low|medium|high, default low),
 prerequisites (space-separated task basenames, `.md` suffix optional).
 
 Eligibility: `status: ready`, and the task's `project:` must exist in the
@@ -17,9 +18,28 @@ so a typo or a renamed project does not silently swallow work.
 Ordering within an account: project `priority` (integer, lower preferred),
 then task `priority` (high/medium/low), then oldest `created`, then filename.
 
-`local_only` is per task; when absent it inherits the project's
-`local_only_default`. It is carried through to the session prompt, which
-enforces the strictly-local rails (nothing leaves the machine).
+`delivery` states where the task's output must end up, and it is mandatory:
+
+  `branch` - commit locally on a dedicated branch, never push.
+  `pr`     - push the branch and open a pull request. The task is not done
+             until the PR exists and its URL is recorded.
+  `local`  - nothing leaves the machine (the strictly-local rails).
+
+It is an obligation carried through to the session prompt, not a permission:
+leaving it to the session's judgement is what produced the night of
+2026-09-09, where four of five tasks stopped at an unpushed branch and one
+opened a PR, with nothing in the tasks distinguishing them.
+
+`delivery` REPLACES the former per-task `local_only` key rather than living
+next to it: two keys able to describe the same thing (`local_only: true` plus
+`delivery: pr`) can contradict each other, and one of them would then have to
+win silently. A ready task still carrying `local_only` is unschedulable and
+reported by `misconfigured` so the key gets removed rather than obeyed.
+The project-level `local_only_default` stays, redefined as a FLOOR instead of
+a default: in a local-only project (work), a task declaring `pr` or `branch`
+is a contradiction that is reported, never a task quietly downgraded to
+`local` nor one quietly allowed to push. A floor cannot supply a default here,
+because "no `delivery:` key" is an error in every project.
 
 The declared `model:` is a FLOOR, never a ceiling: a task may be upgraded to a
 stronger model by the gatekeeper (pre-reset burn-down), never downgraded. A task
@@ -65,6 +85,7 @@ from lib import config
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "normal": 1, "low": 2}
 MODEL_RANK = {"sonnet": 0, "opus": 1, "fable": 2}
+DELIVERY_VALUES = ("branch", "pr", "local")
 
 
 def _frontmatter(path):
@@ -98,6 +119,32 @@ def _declared_model(fm):
     if raw is None:
         return "sonnet"
     return raw if raw in MODEL_RANK else None
+
+
+def _declared_delivery(fm):
+    """The task's declared delivery mode, or None when the key is absent or
+    names something the engine does not know.
+
+    There is no default, not even for an absent key - which is stricter than
+    `model:`, on purpose. A missing `model:` has one obviously safe reading
+    (the cheapest one); a missing `delivery:` has none: guessing `branch`
+    hides finished work in a worktree nobody looks at, and guessing `pr`
+    publishes something the owner never asked to publish. Both are the owner's
+    call, so the task becomes unschedulable and `misconfigured()` reports it.
+    """
+    raw = fm.get("delivery")
+    return raw if raw in DELIVERY_VALUES else None
+
+
+def _breaches_local_floor(delivery, proj):
+    """True when the task's delivery mode breaches its project's local-only
+    floor. `local_only_default: true` marks a project whose work must never
+    leave the machine (the employer's repos), so `branch` and `pr` are both
+    refused there. `branch` is refused too, not just `pr`: it commits locally
+    like `local` does, but it does not carry the rest of the strictly-local
+    rails (read-only `gh`, no external call of any kind), so accepting it
+    would silently relax them."""
+    return bool(proj["local_only_default"]) and delivery != "local"
 
 
 def _prereq_names(fm):
@@ -210,17 +257,21 @@ def _ordered(root, projects, account, max_model, sched_class=None):
             continue  # a hard prerequisite is not done yet
         if _sched_class(fm) != sched_class:
             continue  # a different scheduling class handles this one
+        delivery = _declared_delivery(fm)
+        if delivery is None:
+            continue  # no delivery contract, reported by misconfigured()
+        if _breaches_local_floor(delivery, proj):
+            continue  # contradicts the project's local-only floor, same
         if "local_only" in fm:
-            local_only = fm["local_only"] == "true"
-        else:
-            local_only = proj["local_only_default"]
+            continue  # superseded key, also reported by misconfigured()
         key = (proj["priority"],
                effective.get(p.stem, _own_priority(fm)),
                fm.get("created", "9999"), p.name)
         found.append((key, {"path": str(p), "model": model,
                             "effort": fm.get("effort", "low"),
                             "project": proj["name"],
-                            "local_only": local_only,
+                            "delivery": delivery,
+                            "local_only": delivery == "local",
                             "parallel": fm.get("parallel") == "true",
                             "sched": _sched_class(fm),
                             "duty_period": str(fm.get("duty", "")).strip() or None}))
@@ -368,16 +419,24 @@ def repair_stuck(root, now, ttl_s, date):
     return out
 
 
-def misconfigured(root):
-    """Ready tasks the engine refuses to schedule because their `model:` names
-    a model it does not know: list of (task filename, the unreadable value).
+def misconfigured(root, projects):
+    """Ready tasks the engine refuses to schedule because a frontmatter value
+    it interprets is unreadable: list of (task filename, `key=problem`).
 
-    Plays the same role for models that `orphaned` plays for projects. Both
+    Plays the same role for values that `orphaned` plays for projects. Both
     conditions make a task invisible rather than merely unscheduled: it enters
     no account's queue, so no `blocked` report ever mentions it, and this is
-    the only place it surfaces. Model names the engine accepts: the keys of
-    MODEL_RANK (sonnet, opus, fable), never CLI model ids.
-    Account-independent by construction, so gate.py prints it once."""
+    the only place it surfaces. Reported here:
+
+    - `model:` naming something outside MODEL_RANK (sonnet, opus, fable),
+      typically a CLI model id.
+    - `delivery:` absent, or naming something outside DELIVERY_VALUES.
+    - `delivery:` breaching the project's local-only floor.
+    - a leftover `local_only:` key, which `delivery:` replaced.
+
+    One task can be reported for several of these; each line names its key, so
+    fixing the file needs no guessing. Account-independent by construction, so
+    gate.py prints it once."""
     out = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -386,13 +445,23 @@ def misconfigured(root):
         if fm.get("status") != "ready":
             continue
         if _declared_model(fm) is None:
-            out.append((p.name, fm["model"]))
+            out.append((p.name, f"model={fm['model']}"))
+        delivery = _declared_delivery(fm)
+        proj = projects.get(fm.get("project", "default"))
+        if delivery is None:
+            out.append((p.name, f"delivery={fm.get('delivery', '<missing>')}"))
+        elif proj is not None and _breaches_local_floor(delivery, proj):
+            out.append((p.name, f"delivery={delivery} in local-only project "
+                                f"{proj['name']}"))
+        if "local_only" in fm:
+            out.append((p.name, "local_only= (replaced by delivery:, "
+                                "remove the key)"))
     return out
 
 
 def pick(root, projects, account, max_model):
     """Best task for the account: {"path", "model", "effort", "project",
-    "local_only", "parallel"} or None."""
+    "delivery", "local_only", "parallel"} or None."""
     picked = pick_multi(root, projects, account, max_model, 1)
     return picked[0] if picked else None
 

@@ -4,6 +4,7 @@ project: side-projects
 status: ready
 priority: low
 autonomy: private
+delivery: pr
 model: sonnet
 effort: low
 recurring: true

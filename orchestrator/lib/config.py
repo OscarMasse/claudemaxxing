@@ -24,7 +24,8 @@ Accessors:
                     keys, so shared knobs (regimes, slices, rates) are written
                     once while calibration lives per account.
   projects(cfg)  -> {name: {name, account, dirs (expanded list), priority,
-                    local_only_default}}.
+                    local_only_default}}. `local_only_default` is a floor on
+                    the tasks' `delivery:` key, see lib/tasks.py.
 
 Backward compatibility: when the sections are absent, accounts() synthesizes a
 single account named "default" (profile ~/.claude, calibration from the flat

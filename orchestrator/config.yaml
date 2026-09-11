@@ -87,11 +87,6 @@ night_budget_ratio: 1.0
 # (`cost task=...`) once a few nights have run; a p75 of the measured
 # distribution is a reasonable prior, the mean is dragged by a long tail.
 est_session_tokens: 2500000
-# Pre-reset polarization: the burn-down upgrades sessions to the strongest
-# model the doomed surplus can justify (task `model:` is a floor, never a
-# ceiling). Thresholds in the token unit above, to calibrate from the ledger.
-fable_min_surplus_tokens: 100000000
-opus_min_surplus_tokens: 30000000
 # Claude invocation defaults (an account may override claude_bin). Use an
 # absolute path if claude is not on the PATH that run.sh exports (launchd
 # hands down a bare one).

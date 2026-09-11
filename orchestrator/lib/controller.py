@@ -13,8 +13,11 @@ from collections import namedtuple
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-Decision = namedtuple("Decision", "action reason slice_min regime budget_tokens model",
-                      defaults=("", 0, "sonnet"))
+# No `model` field: the model a session runs is the one its task declares
+# (lib/tasks.py), never a property of the tick. The regime decides whether
+# and how much to run, not what to run it on.
+Decision = namedtuple("Decision", "action reason slice_min regime budget_tokens",
+                      defaults=("", 0))
 
 WINDOW = timedelta(hours=5)  # a Max quota session window
 
@@ -153,16 +156,6 @@ def _today_at(now, hhmm):
     return now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
 
 
-def _prereset_model(cfg, available):
-    """Polarized burn-down: the bigger the doomed surplus, the stronger the
-    model. Fable/opus only ever run here (plus opus floors at night)."""
-    if available >= float(cfg.get("fable_min_surplus_tokens", 100000000)):
-        return "fable"
-    if available >= float(cfg.get("opus_min_surplus_tokens", 30000000)):
-        return "opus"
-    return "sonnet"
-
-
 def _window_headroom(cfg, block):
     """Tokens left in the current 5h window (full cap if no window is open)."""
     cap = float(cfg["window_cap_tokens"])
@@ -185,17 +178,30 @@ def decide(cfg, now, usage, idle_min):
              < _today_at(now, cfg["night_end"]).timetz())
 
     if prereset:
-        # Burn-down: no reserve, no morning guard; only the activity lock protects the owner.
-        available = cap - week
-        if available <= 0:
-            return Decision("skip", f"prereset: nothing left (available={available:.0f})", 0, "prereset")
+        # Burn-down: no reserve, no budget, no model arbitration, no morning
+        # guard. Only the activity lock protects the owner.
+        #
+        # Measured weekly consumption is an estimate, and its error is only
+        # tolerable because during the week it merely paces spending: an
+        # overestimate costs a few sessions and the next tick re-measures.
+        # On the last night that same error is the one thing standing between
+        # a large unspent surplus and the work it could buy, and the surplus
+        # is worth exactly zero once the reset passes. On 2026-09-10 the
+        # estimate read 91% of the week consumed where `/usage` read about
+        # 50%, so the tick capped itself at opus and skipped every
+        # `model: fable` task for the fifth week running. At this hour there
+        # is nothing left to protect, so nothing is predicted.
+        #
+        # The real limit is observed instead: a session that hits the
+        # account's wall records it (lib/quota.py) and later ticks stop
+        # launching that model. A task cut mid-slice is not a loss either -
+        # it resumes at the start of the next week.
         if idle < float(cfg["activity_idle_night_min"]):
             return Decision("skip", f"prereset: activity {idle:.0f}min ago", 0, "prereset")
         minutes_to_reset = (reset - now).total_seconds() / 60
-        budget = min(available, _window_headroom(cfg, block))
         return Decision("run", "prereset burn-down",
                         max(5, min(int(cfg["night_slice_min"]), int(minutes_to_reset))),
-                        "prereset", budget, _prereset_model(cfg, available))
+                        "prereset", float("inf"))
 
     if not night:
         # Outside the night window and outside the burn-down, the system does

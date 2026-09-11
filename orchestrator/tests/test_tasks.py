@@ -39,8 +39,8 @@ class TestPick(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def pick(self, account="personal", max_model="sonnet", projects=PROJECTS):
-        return tasks.pick(self.root, projects, account, max_model)
+    def pick(self, account="personal", projects=PROJECTS):
+        return tasks.pick(self.root, projects, account)
 
     def test_picks_highest_priority_oldest(self):
         write_task(self.root, "a.md", project="side-projects", status="ready",
@@ -68,7 +68,7 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "w.md", project="work", status="ready", delivery="local", priority="high")
         write_task(self.root, "p.md", project="side-projects", status="ready",
                    priority="low")
-        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 3)
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", 3)
         self.assertEqual(len(picked), 1)
         self.assertTrue(picked[0]["path"].endswith("p.md"))
 
@@ -139,42 +139,44 @@ class TestPick(unittest.TestCase):
                    priority="high", delivery="pr", local_only="true")
         self.assertIsNone(self.pick())
 
-    def test_model_floor_gated_by_max_model(self):
+    def test_the_declared_model_never_orders_the_queue(self):
+        # Selection is priority, then age. The model is carried along for the
+        # launcher and the cost estimate, and takes part in no comparison:
+        # ranking the models is what used to filter `fable` tasks out of the
+        # queue for weeks at a time.
         write_task(self.root, "big.md", project="side-projects", status="ready",
-                   priority="high", model="opus", created="2026-08-01")
+                   priority="low", model="fable", created="2026-08-01")
         write_task(self.root, "small.md", project="side-projects", status="ready",
-                   priority="low", created="2026-08-02")
-        day = self.pick(max_model="sonnet")
-        self.assertTrue(day["path"].endswith("small.md"))  # opus floor skipped
-        night = self.pick(max_model="opus")
-        self.assertTrue(night["path"].endswith("big.md"))
-        self.assertEqual(night["model"], "opus")
+                   priority="high", created="2026-08-02")
+        self.assertTrue(self.pick()["path"].endswith("small.md"))
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", 2)
+        self.assertEqual([t["model"] for t in picked], ["sonnet", "fable"])
 
-    def test_fable_floor_only_under_fable_ceiling(self):
-        write_task(self.root, "f.md", project="side-projects", status="ready",
-                   priority="high", model="fable")
-        self.assertIsNone(self.pick(max_model="opus"))  # never downgraded
-        picked = self.pick(max_model="fable")
-        self.assertEqual(picked["model"], "fable")
+    def test_every_known_model_is_schedulable(self):
+        for model in tasks.MODELS:
+            with self.subTest(model=model):
+                write_task(self.root, "f.md", project="side-projects",
+                           status="ready", priority="high", model=model)
+                self.assertEqual(self.pick()["model"], model)
 
     def test_non_ready_ignored(self):
         write_task(self.root, "x.md", project="side-projects", status="blocked",
                    priority="high")
-        self.assertIsNone(self.pick(max_model="fable"))
+        self.assertIsNone(self.pick())
 
     def test_pick_multi_distinct_then_parallel_fill(self):
         write_task(self.root, "a.md", project="side-projects", status="ready",
                    priority="high", created="2026-08-01", parallel="true")
         write_task(self.root, "b.md", project="side-projects", status="ready",
                    priority="low", created="2026-08-02")
-        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 3)
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", 3)
         paths = [p["path"].rsplit("/", 1)[1] for p in picked]
         self.assertEqual(paths, ["a.md", "b.md", "a.md"])  # distinct first, then fill
 
     def test_pick_multi_no_fill_without_parallel_flag(self):
         write_task(self.root, "a.md", project="side-projects", status="ready",
                    priority="high", created="2026-08-01")
-        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 3)
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", 3)
         self.assertEqual(len(picked), 1)
 
     def test_unmet_prerequisite_excludes_task(self):
@@ -322,7 +324,7 @@ class TestPick(unittest.TestCase):
                    status="ready", priority="high", model="claude-fable-5")
         write_task(self.root, "ok.md", project="side-projects",
                    status="ready", priority="low")
-        self.assertTrue(self.pick(max_model="fable")["path"].endswith("ok.md"))
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
         self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
                          [("ghost.md", "model=claude-fable-5")])
 
@@ -383,7 +385,7 @@ class TestSchedulingClasses(unittest.TestCase):
         self.tmp.cleanup()
 
     def order(self, count=3, done=None):
-        return tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", count,
+        return tasks.launch_order(self.root, PROJECTS, "personal", count,
                                   done=done or {}, period_keys=self.KEYS)
 
     def names(self, picked):
@@ -412,7 +414,7 @@ class TestSchedulingClasses(unittest.TestCase):
     def test_nightly_duty_not_schedulable_outside_the_night(self):
         write_task(self.root, "sync.md", project="life", status="ready",
                    duty="nightly", created="2026-09-01")
-        picked = tasks.launch_order(self.root, PROJECTS, "personal", "sonnet", 3,
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", 3,
                                     done={}, period_keys={"weekly": "2026-08-06"})
         self.assertEqual(self.names(picked), ["queue.md"])
 
@@ -446,7 +448,7 @@ class TestSchedulingClasses(unittest.TestCase):
                    priority="high", created="2026-08-01", duty="nightly")
         write_task(self.root, "tidy.md", project="life", status="ready",
                    priority="high", created="2026-08-01", filler="true")
-        picked = tasks.pick_multi(self.root, PROJECTS, "personal", "sonnet", 5)
+        picked = tasks.pick_multi(self.root, PROJECTS, "personal", 5)
         self.assertEqual(self.names(picked), ["queue.md"])
 
     def test_classes_are_tagged_for_the_caller(self):
@@ -458,10 +460,7 @@ class TestSchedulingClasses(unittest.TestCase):
         self.assertEqual(got, {"sync.md": "duty", "queue.md": None,
                                "tidy.md": "filler"})
 
-    def test_duty_still_obeys_prerequisites_and_model_floor(self):
-        write_task(self.root, "sync.md", project="life", status="ready",
-                   duty="nightly", created="2026-09-01", model="opus")
-        self.assertEqual(self.names(self.order()), ["queue.md"])
+    def test_duty_still_obeys_prerequisites(self):
         write_task(self.root, "sync.md", project="life", status="ready",
                    duty="nightly", created="2026-09-01",
                    prerequisites="missing.md")

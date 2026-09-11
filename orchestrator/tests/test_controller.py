@@ -15,7 +15,6 @@ CFG = {
     "prereset_burn_hours": 8,
     "activity_idle_night_min": 40, "night_slice_min": 50,
     "reset_weekday": 3, "reset_time": "05:59", "reset_tz": "Europe/Warsaw",
-    "fable_min_surplus_tokens": 50, "opus_min_surplus_tokens": 20,
 }
 
 
@@ -105,26 +104,34 @@ class TestDecide(unittest.TestCase):
         self.assertEqual(d.action, "skip")
         self.assertIn("activity", d.reason)
 
-    def test_prereset_nothing_left(self):
+    def test_prereset_ignores_the_estimate_entirely(self):
+        # Wednesday 23:00, reset in <8h. Whatever the measurement says - a
+        # full week untouched, or 50% past the cap - the burn-down runs, with
+        # no budget. The estimate is not accurate enough to be worth obeying
+        # at the hour where the alternative is losing the surplus, and the
+        # account's real wall is observed by lib/quota.py, not predicted here.
         now = datetime(2026, 8, 12, 23, 0, tzinfo=TZ)
-        d = controller.decide(CFG, now, usage(week=150), idle_min=999)
+        for week in (0, 60, 90, 150):
+            d = controller.decide(CFG, now, usage(week=week), idle_min=999)
+            self.assertEqual((d.action, d.regime), ("run", "prereset"))
+            self.assertEqual(d.budget_tokens, float("inf"))
+
+    def test_prereset_still_yields_to_the_owner(self):
+        # The activity lock is the one guard the burn-down keeps.
+        now = datetime(2026, 8, 12, 23, 0, tzinfo=TZ)
+        d = controller.decide(CFG, now, usage(week=0), idle_min=1)
         self.assertEqual(d.action, "skip")
+        self.assertIn("activity", d.reason)
 
-    def test_prereset_model_polarization(self):
-        # Wednesday 23:00, reset in <8h. Model scales with the doomed surplus:
-        # week=0 -> available 100 >= 50 -> fable; week=60 -> 40 -> opus;
-        # week=90 -> 10 < 20 -> sonnet.
-        now = datetime(2026, 8, 12, 23, 0, tzinfo=TZ)
-        self.assertEqual(controller.decide(CFG, now, usage(week=0), idle_min=999).model, "fable")
-        self.assertEqual(controller.decide(CFG, now, usage(week=60), idle_min=999).model, "opus")
-        self.assertEqual(controller.decide(CFG, now, usage(week=90), idle_min=999).model, "sonnet")
-
-    def test_night_never_upgrades_the_tick_model(self):
-        # Only the burn-down polarizes the model; a plain night ticks at sonnet
-        # and lets a task's `model:` floor raise its own session.
-        night = controller.decide(CFG, datetime(2026, 8, 11, 2, 30, tzinfo=TZ),
-                                  usage(week=0), idle_min=999)
-        self.assertEqual((night.action, night.model), ("run", "sonnet"))
+    def test_a_decision_never_names_a_model(self):
+        # The surplus used to pick a model for the tick, which then acted as a
+        # floor every picked task was upgraded to - Fable tokens spent on work
+        # that asked for Sonnet. The model belongs to the task; a Decision has
+        # no say in it and no field for it.
+        now = datetime(2026, 8, 11, 2, 30, tzinfo=TZ)
+        d = controller.decide(CFG, now, usage(week=0), idle_min=999)
+        self.assertEqual((d.action, d.regime), ("run", "night"))
+        self.assertNotIn("model", d._fields)
 
     def test_promo_multiplier_active(self):
         cfg = dict(CFG, promo_multiplier=1.5, promo_until="2026-08-19")

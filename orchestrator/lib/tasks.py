@@ -41,9 +41,11 @@ is a contradiction that is reported, never a task quietly downgraded to
 `local` nor one quietly allowed to push. A floor cannot supply a default here,
 because "no `delivery:` key" is an error in every project.
 
-The declared `model:` is a FLOOR, never a ceiling: a task may be upgraded to a
-stronger model by the gatekeeper (pre-reset burn-down), never downgraded. A task
-whose floor exceeds what the current regime/budget allows is skipped.
+The declared `model:` is simply the model the session runs on. It is neither a
+floor nor a ceiling: no regime upgrades it, none filters a task out for being
+too strong, and the scheduler only reads it to estimate what the session will
+cost. Ranking the models against each other is what made a `fable` task
+unschedulable for weeks at a time, so nothing here orders them any more.
 It must name one of `sonnet`, `opus`, `fable` - the engine's own names, not CLI
 model ids. Anything else makes the task unschedulable and is reported by
 `misconfigured`; see `_declared_model` for why there is no fallback.
@@ -84,7 +86,7 @@ from pathlib import Path
 from lib import config
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "normal": 1, "low": 2}
-MODEL_RANK = {"sonnet": 0, "opus": 1, "fable": 2}
+MODELS = ("sonnet", "opus", "fable")
 DELIVERY_VALUES = ("branch", "pr", "local")
 
 
@@ -101,8 +103,8 @@ def _frontmatter(path):
 
 
 def _declared_model(fm):
-    """The task's declared model floor, or None when it names one the engine
-    does not know.
+    """The task's declared model, or None when it names one the engine does
+    not know.
 
     There is deliberately no fallback. An unrecognized `model:` value used to
     be rewritten to sonnet, silently: five tasks written for Fable ran on
@@ -118,7 +120,7 @@ def _declared_model(fm):
     raw = fm.get("model")
     if raw is None:
         return "sonnet"
-    return raw if raw in MODEL_RANK else None
+    return raw if raw in MODELS else None
 
 
 def _declared_delivery(fm):
@@ -229,14 +231,13 @@ def _sched_class(fm):
     return None
 
 
-def _ordered(root, projects, account, max_model, sched_class=None):
+def _ordered(root, projects, account, sched_class=None):
     """Eligible tasks for `account` in launch order.
 
     `sched_class` selects which scheduling class to return: None for the
     ordinary priority queue, "duty" or "filler" for the recurring classes.
     Every other eligibility rule is shared, so the classes cannot drift apart
-    from the queue on prerequisites, model floors or account routing."""
-    ceiling = MODEL_RANK.get(max_model, 0)
+    from the queue on prerequisites or account routing."""
     effective = _effective_priorities(root)
     found = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
@@ -251,8 +252,6 @@ def _ordered(root, projects, account, max_model, sched_class=None):
         model = _declared_model(fm)
         if model is None:
             continue  # unknown model name, reported by misconfigured()
-        if MODEL_RANK[model] > ceiling:
-            continue  # floor above what this tick may launch
         if _unmet_prerequisites(root, fm):
             continue  # a hard prerequisite is not done yet
         if _sched_class(fm) != sched_class:
@@ -278,7 +277,7 @@ def _ordered(root, projects, account, max_model, sched_class=None):
     return [t for _, t in sorted(found, key=lambda x: x[0])]
 
 
-def duties_due(root, projects, account, max_model, done, period_keys):
+def duties_due(root, projects, account, done, period_keys):
     """Mandatory recurring tasks whose period has not been served yet.
 
     `done` maps task path -> the period key last recorded for it, and
@@ -289,7 +288,7 @@ def duties_due(root, projects, account, max_model, done, period_keys):
 
     The clock stays with the caller - this module reads files, not time."""
     out = []
-    for t in _ordered(root, projects, account, max_model, sched_class="duty"):
+    for t in _ordered(root, projects, account, sched_class="duty"):
         key = period_keys.get(t["duty_period"])
         if key is None:
             continue  # unknown or out-of-window period, reported by duties()
@@ -301,21 +300,21 @@ def duties_due(root, projects, account, max_model, done, period_keys):
 
 def duties(root, projects, account):
     """All ready duty tasks routed to `account`: (path, period, supported).
-    Model ceiling ignored - this is observability for gate.py status."""
+    Observability for gate.py status."""
     return [(t["path"], t["duty_period"], t["duty_period"] in DUTY_PERIODS)
-            for t in _ordered(root, projects, account, "fable", sched_class="duty")]
+            for t in _ordered(root, projects, account, sched_class="duty")]
 
 
-def fillers(root, projects, account, max_model):
+def fillers(root, projects, account):
     """Opportunistic recurring tasks, in queue order. Callers must only launch
     these once the ordinary queue is served and budget is left over."""
-    return _ordered(root, projects, account, max_model, sched_class="filler")
+    return _ordered(root, projects, account, sched_class="filler")
 
 
 def blocked(root, projects, account):
     """Ready tasks routed to `account` whose prerequisites are unmet: list of
-    (task filename, [unmet prerequisite names]). Model ceiling is irrelevant
-    here, this is pure observability for gate.py status."""
+    (task filename, [unmet prerequisite names]). Pure observability for
+    gate.py status."""
     out = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -428,7 +427,7 @@ def misconfigured(root, projects):
     no account's queue, so no `blocked` report ever mentions it, and this is
     the only place it surfaces. Reported here:
 
-    - `model:` naming something outside MODEL_RANK (sonnet, opus, fable),
+    - `model:` naming something outside MODELS (sonnet, opus, fable),
       typically a CLI model id.
     - `delivery:` absent, or naming something outside DELIVERY_VALUES.
     - `delivery:` breaching the project's local-only floor.
@@ -459,10 +458,10 @@ def misconfigured(root, projects):
     return out
 
 
-def pick(root, projects, account, max_model):
+def pick(root, projects, account):
     """Best task for the account: {"path", "model", "effort", "project",
     "delivery", "local_only", "parallel"} or None."""
-    picked = pick_multi(root, projects, account, max_model, 1)
+    picked = pick_multi(root, projects, account, 1)
     return picked[0] if picked else None
 
 
@@ -478,14 +477,14 @@ def _pad_parallel(out, queue, count):
     return out
 
 
-def pick_multi(root, projects, account, max_model, count):
+def pick_multi(root, projects, account, count):
     """Up to `count` session assignments from the ordinary priority queue:
     distinct tasks first, then parallel shards."""
-    queue = _ordered(root, projects, account, max_model)
+    queue = _ordered(root, projects, account)
     return _pad_parallel(queue[:count], queue, count)
 
 
-def launch_order(root, projects, account, max_model, count,
+def launch_order(root, projects, account, count,
                  done=None, period_keys=None):
     """Up to `count` session assignments for one tick, in launch order.
 
@@ -503,10 +502,10 @@ def launch_order(root, projects, account, max_model, count,
     apply the budget rule that matches the class."""
     if count <= 0:
         return []
-    out = duties_due(root, projects, account, max_model,
+    out = duties_due(root, projects, account,
                      done or {}, period_keys or {})[:count]
-    queue = _ordered(root, projects, account, max_model)
+    queue = _ordered(root, projects, account)
     out += queue[:count - len(out)]
     if len(out) < count:
-        out += fillers(root, projects, account, max_model)[:count - len(out)]
+        out += fillers(root, projects, account)[:count - len(out)]
     return _pad_parallel(out, queue, count)

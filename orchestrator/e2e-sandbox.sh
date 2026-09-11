@@ -46,8 +46,6 @@ night_slice_min: 50
 max_parallel_sessions: 4
 night_budget_ratio: 2.0
 est_session_tokens: 2.5
-fable_min_surplus_tokens: 100000000
-opus_min_surplus_tokens: 30000000
 claude_bin: $SANDBOX/claude-stub.sh
 claude_model: sonnet
 claude_effort: low

@@ -135,19 +135,27 @@ class TestGate(unittest.TestCase):
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
         self.assertIn("opus medium", r.stdout)
 
-    def test_prereset_upgrades_to_fable_with_margin(self):
-        self.append_cfg("fable_min_surplus_tokens: 50\nopus_min_surplus_tokens: 20\n")
+    def test_prereset_runs_each_task_on_its_own_model(self):
+        # The burn-down used to upgrade every session it launched to the
+        # strongest model the doomed surplus justified, which spends Fable
+        # tokens on work that asked for Sonnet. A dying surplus buys more
+        # sessions, not dearer ones.
         env = dict(self.env, ORCH_NOW="2026-08-12T23:00:00+02:00")  # <8h to reset
         r = run_gate(self.root, env)
         self.assertTrue(r.stdout.startswith("RUN"), r.stdout + r.stderr)
-        self.assertIn("t1.md fable", r.stdout)  # sonnet floor upgraded
+        self.assertIn("t1.md sonnet", r.stdout)
 
-    def test_prereset_small_margin_stays_sonnet(self):
-        self.append_cfg("fable_min_surplus_tokens: 5000\nopus_min_surplus_tokens: 4000\n")
+    def test_prereset_admits_a_fable_task(self):
+        # ... and the other half of the same rule: a declared fable floor is
+        # schedulable in the burn-down. A ceiling derived from the surplus
+        # used to filter these tasks out of the one regime meant to run them.
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "model: fable\n---\n")
         env = dict(self.env, ORCH_NOW="2026-08-12T23:00:00+02:00")
         r = run_gate(self.root, env)
         self.assertTrue(r.stdout.startswith("RUN"), r.stdout + r.stderr)
-        self.assertIn("t1.md sonnet", r.stdout)
+        self.assertIn("t1.md fable", r.stdout)
 
     def test_no_eligible_task(self):
         (self.root / "tasks" / "t1.md").unlink()

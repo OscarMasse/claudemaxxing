@@ -237,17 +237,9 @@ def tick_account(p, acct, projs):
         print(f"SKIP {name} running")
         return idle
     # Task selection happens here (not in the session): the tasks' declared
-    # models must be known before launch. A task's model is a floor: the
-    # ceiling is every model the engine knows at night, and the margin-driven
-    # tick model in the burn-down, and each session launches at
-    # max(floor, tick model) - upgrades in the burn-down, never downgrades.
-    # The night ceiling used to be opus, which quietly made a `fable` floor
-    # unschedulable except in the burn-down: the strongest model was reachable
-    # only in the last hours of the week, so the tasks that asked for it (deep
-    # research, architecture, taste) waited days for a window they might miss
-    # entirely. What a night may spend is a budget question, and the budget
-    # already answers it below - the model ceiling was a second, blunter
-    # answer to the same question.
+    # models must be known before launch, because the model is what the cost
+    # estimate below is keyed on. That is the only thing the scheduler does
+    # with it - a session always runs the model its task declares.
     # Slot count is budget-driven: estimated burn per session (measured rates
     # from the ledger, per-model defaults otherwise) must fit the slice budget.
     # A heavy task that alone consumes the budget gets exactly one session.
@@ -261,10 +253,19 @@ def tick_account(p, acct, projs):
                f"until={until.isoformat()}")
     picked = []
     if d.action == "run":
-        max_floor = "fable" if d.regime == "night" else d.model
+        # Neither the tick nor the regime ranks the models. Two rules used
+        # to: a ceiling capped a tick at its own budget-derived model, so on
+        # 2026-09-10 a surplus just under the Fable threshold filtered every
+        # `model: fable` task out of the very regime meant to run them - five
+        # weeks running - and a floor then upgraded whatever did get picked to
+        # that same model, burning Fable tokens on work that asked for Sonnet.
+        # Both are gone, and with them the ordering that made them expressible:
+        # a task's model says what its session runs on, and what the tick can
+        # afford is answered once, by the budget, below. Several models in one
+        # night is the normal case; `max_fable_slots` paces the one model with
+        # its own separate limit.
         keys = period_keys(acct, now)
-        candidates = tasks.launch_order(p["root"], projs, name,
-                                        max_model=max_floor, count=free,
+        candidates = tasks.launch_order(p["root"], projs, name, count=free,
                                         done=duties_served(state),
                                         period_keys=keys)
         # What a session costs is a property of the work, not of the slice it
@@ -293,13 +294,10 @@ def tick_account(p, acct, projs):
         # limit. Serialising them costs almost nothing - a night fits only
         # three or four sessions per slot anyway - and keeps the other slots
         # doing useful work. It applies in the pre-reset burn-down as well:
-        # that regime upgrades sessions to Fable, and the wall it would run
-        # into is the same one.
+        # the wall it would run into there is the same one.
         fable_slots = int(acct.get("max_fable_slots", 1))
         fable_taken = 0
         for cand in candidates:
-            if tasks.MODEL_RANK[d.model] > tasks.MODEL_RANK[cand["model"]]:
-                cand["model"] = d.model
             if cand["model"] in out_of_quota:
                 continue
             if cand["model"] == "fable":
@@ -320,7 +318,7 @@ def tick_account(p, acct, projs):
             picked.append(cand)
             budget -= est_burn
     log(p, f"account={name} {d.action} reason={d.reason!r} slice={d.slice_min} "
-           f"regime={d.regime} model={d.model} week={snap['week_tokens']} "
+           f"regime={d.regime} week={snap['week_tokens']} "
            f"idle={idle} free_slots={free} "
            f"duties={[t['path'] for t in picked if t['sched'] == 'duty'] or '-'} "
            f"fillers={[t['path'] for t in picked if t['sched'] == 'filler'] or '-'} "
@@ -444,7 +442,7 @@ def status(p):
             print(f"duty task={Path(path).name} period={period} "
                   f"supported={'yes' if supported else 'NO'} "
                   f"due={'yes' if due else 'no'}")
-        for t in tasks.fillers(p["root"], projs, name, "fable"):
+        for t in tasks.fillers(p["root"], projs, name):
             print(f"filler task={Path(t['path']).name}")
         for task, a in sorted(ledger.accuracy(p["state"] / name).items()):
             print(f"estimate task={task} runs={a['runs']} est={a['est_tokens']} "

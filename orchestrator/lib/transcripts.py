@@ -5,7 +5,8 @@ weighs tokens by price: on the night of 2026-09-12, 14M local tokens of Fable
 and Opus moved the weekly `/usage` bar 4 points while 22M tokens of Sonnet
 moved it 1 - about a 5x difference per token, the ratio of the list prices.
 Raw token counts could not pace that; `sum(tokens x price)` lines up with the
-bars (specs/2026-09-12-usd-budget.md carries the four readings).
+bars (specs/2026-09-12-usd-budget.md, in the backlog root, carries the four
+readings).
 
 This replaces `npx ccusage blocks --json`, which was the source until
 2026-09-09. Three reasons, in order of how much they cost:

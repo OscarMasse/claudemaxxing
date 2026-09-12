@@ -19,10 +19,14 @@ Procedure:
      drawn from the `## Runs` journal bullets.
    - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each.
    - `## Done` - tasks completed autonomously, drawn from the journal bullets.
-   - `## Quota` - the gate.py status output, one block per account (it includes
-     per-task cost lines from each account's ledger: runs, USD, tokens - keep them,
-     they inform planning), plus one line per account whose promo_until is within
-     3 days: "Promo expires <date> - config falls back to 1.0 automatically."
+   - `## Quota` - the gate.py status output, one block per account. Budgets are
+     in USD at list price. Keep the `usage_week_pct` and `usage_window_pct` lines
+     verbatim and the per-task `cost` lines from each account's ledger (runs, USD,
+     tokens - they inform planning), plus one line per account whose promo_until
+     is within 3 days: "Promo expires <date> - config falls back to 1.0
+     automatically." Then one line asking the owner to compare the two
+     percentages with `/usage` and correct `weekly_cap_usd` / `window_cap_usd`
+     in config.yaml if they drift.
    - `## Runs` - the raw journal, UNCHANGED, moved to the bottom of the file as the
      source record the sections above were built from.
    Keep the whole file readable in under ten minutes. If a section is empty

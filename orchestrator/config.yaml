@@ -25,10 +25,11 @@
 # locally from Claude Code's own transcript files with the per-family price
 # table in lib/transcripts.py. Not what the subscription bills (a flat fee):
 # it is the weighting the account's limit demonstrably applies, measured on
-# 2026-09-12 (specs/2026-09-12-usd-budget.md). The token-era keys
-# (weekly_cap_tokens, window_cap_tokens, p90_daily_tokens, est_session_tokens,
-# *_min_surplus_tokens) are retired: an account still carrying one is reported
-# as misconfigured and not scheduled, never silently converted.
+# 2026-09-12 (specs/2026-09-12-usd-budget.md in the backlog root). The
+# token-era keys (weekly_cap_tokens, window_cap_tokens, p90_daily_tokens,
+# est_session_tokens, *_min_surplus_tokens) are retired: an account still
+# carrying one is reported as misconfigured and not scheduled, never silently
+# converted.
 # IMPORTANT: the numbers below are EXAMPLE calibration values from one real Max
 # account, one night of readings, so coarse. The digest relays the engine's
 # weekly and window percentages every morning: compare them with `/usage` and

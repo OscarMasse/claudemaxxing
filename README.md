@@ -77,8 +77,8 @@ Nothing to install on the Python side: standard library only, no virtualenv, no 
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).
 2. Declare your `accounts` and `projects` in `orchestrator/config.yaml` (fully documented example in the file).
-3. Calibrate each account's token numbers from `orchestrator/gate.py status` over a few days.
-   They are coarse pacing knobs and nothing more: the account's limit is not linear in the tokens that can be counted locally, so no calibration makes them predictive (`orchestrator/lib/quota.py` carries the measurement).
+3. Calibrate each account's USD caps (`weekly_cap_usd`, `window_cap_usd`, `p90_daily_usd`) against `/usage`: the digest relays the engine's weekly and window percentages every morning, and the owner corrects the caps when they drift.
+   They are coarse pacing knobs: the calibration is a handful of `/usage` readings, so when a model is about to be refused is still observed, not predicted (`orchestrator/lib/quota.py`).
    Set `promo_until` whenever the caps were read during a promotional period, so `status` keeps asking for a fresh reading once it lapses.
 4. Create a task in `tasks/` (see `examples/tasks/`) with `status: ready` and a matching `project:`.
 5. Run `orchestrator/install.sh`; it registers the gatekeeper loop and the daily digest job, and prints the one manual `pmset` step for nightly wake.
@@ -108,13 +108,17 @@ The account's real limit is observed there rather than predicted: a session that
 Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a deliberate `run.sh` invocation.
 
 **Budget controller.**
+The unit is USD at Anthropic list price, computed locally from the transcripts with a per-family price table (`lib/transcripts.py`), because the account's limit weighs tokens by price: on 2026-09-12, 14M local tokens of Fable and Opus moved the weekly `/usage` bar 4 points while 22M tokens of Sonnet moved it 1, the ratio of their list prices.
+It is not what the subscription bills; it is the weighting the limit applies, and the same unit Claude Code reports per session (`total_cost_usd`).
+The token-era keys (`weekly_cap_tokens`, `window_cap_tokens`, `p90_daily_tokens`, `est_session_tokens`, `*_min_surplus_tokens`) are retired: an account still carrying one is reported as misconfigured and not scheduled, never converted, since no factor turns a model-blind token count into dollars.
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
 Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
 The per-model rules (`max_fable_slots`, a model observed out of quota) are applied inside the selection, while the queue is being cut to the free slot count, not to its output afterwards: a queue head heavy in one model would otherwise leave slots empty that the rest of the queue could fill.
 Consumption is measured by reading Claude Code's own transcript files (`lib/transcripts.py`), de-duplicated per billed message, with the real 5h window start (the first token, not the top of that hour).
 
 **Quota exhaustion is observed, not predicted.**
-The budget paces the week; it cannot tell you when a model is about to be refused, because the account's limit is not linear in the tokens that can be counted locally - over 95% of local volume is cache reads, discounted by an unpublished factor, and the observed `/usage` bars cannot be reproduced by any non-negative weighting of the four token components (`lib/quota.py` carries the measurement).
+The budget paces the week; it does not tell you when a model is about to be refused, because the price weighting is calibrated against `/usage` from a handful of readings on one night (`specs/2026-09-12-usd-budget.md` in the backlog root), which is enough to pace spending and too coarse to call the wall.
+The bars are server-side truth and include usage the transcripts cannot see (other devices, claude.ai).
 So the wall is learned by hitting it: a session that dies on `You've hit your <scope> limit - resets <time>` has that fact recorded per model family in `state/<account>/exhausted.json`, and later ticks stop offering that model until the stated reset.
 It is per model on purpose - the night this was built, Fable was refused at 02:25 while Sonnet kept working in the same window - and any other failure records nothing, so an ordinary crash never costs a model its eligibility.
 `max_fable_slots` caps how many Fable sessions may run concurrently (1 by default): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
@@ -136,7 +140,9 @@ Whatever needs no reasoning (commit and push a directory, prune caches) belongs 
 **The ledger is the memory.**
 Every session's result JSON is appended to `state/<account>/costs.jsonl`; the measured cost per (task, model) feeds the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
 The tick that prints `RUN` for a queue task also claims it - `status: in-progress` plus a dated note - because a session takes minutes to record that itself, and the next tick used to launch a second session onto the still-`ready` task; duties, fillers and `parallel: true` shards are not claimed, they stay `ready` by contract, and a claim no session picks up is undone by the same self-repair that resets any stale `in-progress`.
-Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_tokens`) is in the same unit as the learned figure.
+Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_usd`) is in the same unit as the learned figure.
+The learned figure is the MAX of the last runs per (task, model), not their mean: on 2026-09-12 the actual/estimate ratio ranged from 0.1 to 15, because the mean of a cheap survey slice and an expensive implementation slice keeps quoting the survey, and an under-estimate launches sessions the night cannot pay for while an over-estimate only costs one session until the next tick re-measures.
+The actual cost is Claude Code's own `total_cost_usd`, which includes the subagents a session spawned (pricing the top-level `usage` block alone came out 1.1x to 2.9x under it).
 The one number that cannot be learned is the weekly cap itself: it only exists on the `/usage` screen, so `gate.py status` prints a `promo` line that warns three days before `promo_until` and then every day after it, until a human re-reads the limit and updates the config.
 
 ## FAQ

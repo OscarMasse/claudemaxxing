@@ -12,10 +12,9 @@ ORCH = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ORCH))
 import gate  # noqa: E402
 
-FIXTURE = {"blocks": [
-    {"startTime": "2026-08-07T08:00:00.000Z", "endTime": "2026-08-07T13:00:00.000Z",
-     "isActive": False, "isGap": False, "totalTokens": 40},
-]}
+# $40 consumed this week, no open 5h window. Budgets are USD at list price.
+FIXTURE = {"week_usd": 40, "week_by_family": {}, "block": None,
+           "unknown_models": []}
 
 # Shared knobs are flat; calibration lives in the account. reset_weekday 3
 # makes Wednesday 2026-08-12 the late-week surplus scenario from the
@@ -32,9 +31,9 @@ PERSONAL = (
     "accounts:\n"
     "  - name: personal\n"
     "    claude_config_dir: ~/.claude\n"
-    "    weekly_cap_tokens: 100\n"
-    "    window_cap_tokens: 15\n"
-    "    p90_daily_tokens: 10\n"
+    "    weekly_cap_usd: 100\n"
+    "    window_cap_usd: 15\n"
+    "    p90_daily_usd: 10\n"
     "    reset_weekday: 3\n"
     "    reset_time: 05:59\n"
     "    reset_tz: Europe/Warsaw\n"
@@ -73,7 +72,7 @@ class TestGate(unittest.TestCase):
                         "status: ready\npriority: high\ncreated: 2026-08-01\n---\n")
         fx = self.root / "fixture.json"
         fx.write_text(json.dumps(FIXTURE))
-        self.env = {"ORCH_CCUSAGE_JSON": str(fx)}
+        self.env = {"ORCH_USAGE_JSON": str(fx)}
         self.write_cfg(BASE_CFG + PERSONAL + PROJECTS)
 
     def tearDown(self):
@@ -163,11 +162,11 @@ class TestGate(unittest.TestCase):
         self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"), r.stdout)
 
     def test_night_slot_count_is_budget_driven(self):
-        # Tuesday night's allocation is 5.5 tokens (see TestNightBudget); at an
+        # Tuesday night's allocation is $5.5 (see TestNightBudget); at an
         # estimated 2.5 per session, 2 sessions fit and a 3rd does not. The
         # slot ceiling (4) is not what decides this.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_tokens: 2.5\n")
+                        "est_session_usd: 2.5\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -179,9 +178,9 @@ class TestGate(unittest.TestCase):
     def test_cheap_tasks_fill_more_slots_than_one_budget_would_allow(self):
         # Same night, ten times cheaper: the count rises with the budget, up to
         # the safety ceiling. This is the point of the redesign - the metric is
-        # tokens, not a fixed task count.
+        # dollars, not a fixed task count.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_tokens: 0.25\n")
+                        "est_session_usd: 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -193,7 +192,7 @@ class TestGate(unittest.TestCase):
     def test_safety_ceiling_caps_the_slot_count(self):
         # Budget for many, machine for two: the ceiling wins.
         self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_session_tokens: 0.25\n")
+                        "est_session_usd: 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -206,7 +205,7 @@ class TestGate(unittest.TestCase):
         # One session's estimated burn (50) exceeds the night allocation:
         # parallelizing is pointless, exactly one session runs.
         self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_tokens: 50\n")
+                        "est_session_usd: 50\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -216,15 +215,15 @@ class TestGate(unittest.TestCase):
         self.assertEqual(len(lines), 1, r.stdout)
 
     def test_run_line_carries_the_launch_estimate(self):
-        self.append_cfg("max_parallel_sessions: 1\nest_session_tokens: 2.5\n")
+        self.append_cfg("max_parallel_sessions: 1\nest_session_usd: 2.5\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
-        # "... <est_tokens> <delivery>": the estimate is int(2.5).
-        self.assertTrue(r.stdout.rstrip().endswith(" 2 branch"), r.stdout)
+        # "... <est_usd> <delivery>": money, two decimals.
+        self.assertTrue(r.stdout.rstrip().endswith(" 2.50 branch"), r.stdout)
 
     def test_parallel_respects_active_slots(self):
         self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_session_tokens: 0.25\n")
+                        "est_session_usd: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -307,7 +306,7 @@ class TestGate(unittest.TestCase):
     def test_fable_is_serialised_even_when_slots_and_budget_allow_more(self):
         # Fable's binding constraint is its own token limit, not wall-clock
         # time, so parallel fable sessions only race each other to the wall.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 1\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -319,7 +318,7 @@ class TestGate(unittest.TestCase):
     def test_the_fable_cap_leaves_the_slots_to_cheaper_models(self):
         # The point of the cap: one fable session, and the slots it does not
         # take go to models that are nowhere near their own limit.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 1\n")
         self.write_task("t1.md", "---\ntitle: A\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -338,7 +337,7 @@ class TestGate(unittest.TestCase):
         # 2026-09-12 a Fable session was launched next to one from 11:14 that
         # was still running. run.sh writes the model as the lock's third
         # field so the tick can see what the live sessions run on.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
@@ -369,7 +368,7 @@ class TestGate(unittest.TestCase):
         # 2026-09-12, 11:00: candidates opus, fable, fable, sonnet with 4 free
         # slots and one fable slot launched only 2. The model filter has to
         # run before the queue is cut to the slot count.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 1\n")
         (self.root / "tasks" / "t1.md").unlink()
         for i, model in enumerate(("opus", "fable", "fable", "sonnet", "sonnet")):
@@ -382,7 +381,7 @@ class TestGate(unittest.TestCase):
                          ["opus", "fable", "sonnet", "sonnet"], r.stdout)
 
     def test_an_out_of_quota_family_does_not_eat_a_slot(self):
-        self.append_cfg("max_parallel_sessions: 2\nest_session_tokens: 0.25\n")
+        self.append_cfg("max_parallel_sessions: 2\nest_session_usd: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True)
         (state / "exhausted.json").write_text(json.dumps({"opus": {
@@ -398,7 +397,7 @@ class TestGate(unittest.TestCase):
                          r.stdout)
 
     def test_fable_cap_is_configurable(self):
-        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 2\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -488,8 +487,47 @@ class TestGate(unittest.TestCase):
     def test_status_prints_summary(self):
         r = run_gate(self.root, self.env, arg="status")
         self.assertIn("account=personal", r.stdout)
-        self.assertIn("week_tokens", r.stdout)
+        self.assertIn("week_usd=40.00", r.stdout)
+        self.assertIn("cap=100.00", r.stdout)
         self.assertIn("available", r.stdout)
+
+    def test_status_prints_the_two_usage_percentages(self):
+        # The digest puts these next to the real /usage bars so the owner can
+        # correct the caps when the calibration drifts. No open window: none.
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("usage_week_pct=40.0", r.stdout)
+        self.assertIn("usage_window_pct=none", r.stdout)
+        fx = self.root / "window.json"
+        fx.write_text(json.dumps({
+            "week_usd": 40, "week_by_family": {},
+            "block": {"start": "2026-08-11T00:00:00+02:00",
+                      "end": "2026-08-11T05:00:00+02:00", "usd": 3.0,
+                      "by_family": {"sonnet": 3.0}}}))
+        r = run_gate(self.root, {"ORCH_USAGE_JSON": str(fx)}, arg="status")
+        self.assertIn("usage_window_pct=20.0", r.stdout)  # 3 / 15
+
+    def test_a_retired_token_key_makes_the_account_misconfigured(self):
+        # No conversion factor exists between the old unit and dollars, so a
+        # leftover *_tokens key is refused, not converted, in tick and status.
+        self.append_cfg("est_session_tokens: 2500000\n")
+        r = run_gate(self.root, self.env)
+        expected = ("account=personal misconfigured: retired key "
+                    "est_session_tokens, the unit is USD since 2026-09-12 "
+                    "(see specs)")
+        self.assertTrue(r.stdout.startswith("SKIP personal misconfigured"), r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn(expected, log)
+        self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn(expected, r.stdout)
+        self.assertNotIn("week_usd", r.stdout)
+
+    def test_a_missing_usd_cap_is_an_error_not_a_default(self):
+        self.write_cfg(BASE_CFG + PERSONAL.replace("    weekly_cap_usd: 100\n", "")
+                       + PROJECTS)
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith(
+            "SKIP personal misconfigured: missing key weekly_cap_usd"), r.stdout)
 
     def test_status_relays_the_promo_state_and_the_per_model_split(self):
         self.write_cfg(BASE_CFG + PERSONAL
@@ -521,13 +559,13 @@ class TestGate(unittest.TestCase):
         # it is counted and reported rather than silently free.
         fx = self.root / "snapshot.json"
         fx.write_text(json.dumps({
-            "week_tokens": 30,
+            "week_usd": 30,
             "week_by_family": {"fable": 20, "sonnet": 10},
             "block": None,
             "unknown_models": ["claude-something-new"]}))
         r = run_gate(self.root, {"ORCH_USAGE_JSON": str(fx)}, arg="status")
-        self.assertIn("week_model=fable tokens=20", r.stdout)
-        self.assertIn("week_model=sonnet tokens=10", r.stdout)
+        self.assertIn("week_model=fable usd=20.00", r.stdout)
+        self.assertIn("week_model=sonnet usd=10.00", r.stdout)
         self.assertIn("unknown_model id=claude-something-new", r.stdout)
 
     def test_status_reports_an_exhausted_model(self):
@@ -632,9 +670,9 @@ class TestGateMultiAccount(unittest.TestCase):
     WORK = (
         "  - name: work\n"
         "    claude_config_dir: ~/.claude-work\n"
-        "    weekly_cap_tokens: 100\n"
-        "    window_cap_tokens: 15\n"
-        "    p90_daily_tokens: 10\n"
+        "    weekly_cap_usd: 100\n"
+        "    window_cap_usd: 15\n"
+        "    p90_daily_usd: 10\n"
         "    reset_weekday: 3\n"
         "    reset_time: 05:59\n"
         "    reset_tz: Europe/Warsaw\n"
@@ -661,7 +699,7 @@ class TestGateMultiAccount(unittest.TestCase):
             "delivery: branch\npriority: high\ncreated: 2026-08-01\n---\n")
         fx = self.root / "fixture.json"
         fx.write_text(json.dumps(FIXTURE))
-        self.env = {"ORCH_CCUSAGE_JSON": str(fx)}
+        self.env = {"ORCH_USAGE_JSON": str(fx)}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -681,12 +719,8 @@ class TestGateMultiAccount(unittest.TestCase):
     def test_budget_isolation(self):
         # The work account's week is exhausted; personal still runs.
         heavy = self.root / "heavy.json"
-        heavy.write_text(json.dumps({"blocks": [
-            {"startTime": "2026-08-07T08:00:00.000Z",
-             "endTime": "2026-08-07T13:00:00.000Z",
-             "isActive": False, "isGap": False, "totalTokens": 999},
-        ]}))
-        env = dict(self.env, ORCH_CCUSAGE_JSON_WORK=str(heavy))
+        heavy.write_text(json.dumps(dict(FIXTURE, week_usd=999)))
+        env = dict(self.env, ORCH_USAGE_JSON_WORK=str(heavy))
         r = run_gate(self.root, env)
         lines = self.lines(r)
         self.assertTrue(lines[0].startswith("RUN personal"), r.stdout)
@@ -727,6 +761,24 @@ class TestGateMultiAccount(unittest.TestCase):
         self.assertIn("account=personal", r.stdout)
         self.assertIn("account=work", r.stdout)
 
+    def test_a_misconfigured_account_does_not_stop_the_other(self):
+        # One subscription left in the token unit; the other keeps its night.
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text().replace(
+            "    claude_config_dir: ~/.claude-work\n",
+            "    claude_config_dir: ~/.claude-work\n"
+            "    fable_min_surplus_tokens: 100000000\n"))
+        r = run_gate(self.root, self.env)
+        lines = self.lines(r)
+        self.assertTrue(lines[0].startswith("RUN personal"), r.stdout + r.stderr)
+        self.assertEqual(lines[1], "SKIP work misconfigured: retired key "
+                                   "fable_min_surplus_tokens, the unit is USD "
+                                   "since 2026-09-12 (see specs)", r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("account=work misconfigured: retired key "
+                      "fable_min_surplus_tokens", log)
+        self.assertIn("status: ready", (self.root / "tasks" / "w.md").read_text())
+
 
 class TestGateLegacyConfig(unittest.TestCase):
     """A legacy flat config (no sections) keeps working: one synthesized
@@ -739,7 +791,7 @@ class TestGateLegacyConfig(unittest.TestCase):
         (self.root / "tasks").mkdir()
         (self.root / "config.yml").write_text(
             BASE_CFG +
-            "weekly_cap_tokens: 100\nwindow_cap_tokens: 15\np90_daily_tokens: 10\n"
+            "weekly_cap_usd: 100\nwindow_cap_usd: 15\np90_daily_usd: 10\n"
             "reset_weekday: 3\nreset_time: 05:59\nreset_tz: Europe/Warsaw\n"
             "extra_dirs: ~/projects\n")
         # A legacy task: no `project:` key at all.
@@ -748,7 +800,7 @@ class TestGateLegacyConfig(unittest.TestCase):
             "priority: high\ncreated: 2026-08-01\n---\n")
         fx = self.root / "fixture.json"
         fx.write_text(json.dumps(FIXTURE))
-        self.env = {"ORCH_CCUSAGE_JSON": str(fx)}
+        self.env = {"ORCH_USAGE_JSON": str(fx)}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -762,7 +814,7 @@ class TestGateLegacyConfig(unittest.TestCase):
 class TestGateDuties(unittest.TestCase):
     """Recurring classes at the gate: mandatory duties, surplus-only fillers."""
 
-    NIGHT = "2026-08-11T02:30:00+02:00"  # Tuesday night, allocation 5.5 tokens
+    NIGHT = "2026-08-11T02:30:00+02:00"  # Tuesday night, allocation $5.5
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -770,7 +822,7 @@ class TestGateDuties(unittest.TestCase):
         (self.root / "orchestrator" / "state").mkdir(parents=True)
         (self.root / "tasks").mkdir()
         (self.root / "fixture.json").write_text(json.dumps(FIXTURE))
-        self.env = {"ORCH_CCUSAGE_JSON": str(self.root / "fixture.json"),
+        self.env = {"ORCH_USAGE_JSON": str(self.root / "fixture.json"),
                     "ORCH_NOW": self.NIGHT}
         (self.root / "config.yml").write_text(
             BASE_CFG + "max_parallel_sessions: 4\n"
@@ -787,7 +839,7 @@ class TestGateDuties(unittest.TestCase):
 
     def cost(self, per_session):
         cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text() + f"est_session_tokens: {per_session}\n")
+        cfg.write_text(cfg.read_text() + f"est_session_usd: {per_session}\n")
 
     def runs(self, r):
         return [l for l in r.stdout.splitlines() if l.startswith("RUN")]

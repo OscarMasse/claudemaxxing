@@ -6,7 +6,10 @@
                        SKIP <account> <reason>
                      (plus a global "SKIP paused" when the kill switch is set)
   gate.py status  -> human-readable per-account quota summary for the digest
-  gate.py plan    -> dry projection of the remaining nights' token allocations
+  gate.py plan    -> dry projection of the remaining nights' USD allocations
+
+Every budget figure is USD at Anthropic list price (lib/transcripts.py), the
+weighting the account's limit applies. Money is printed with two decimals.
 
 Every account is scheduled independently: its own quota budget, its own
 activity lock (idle = interactive use of THAT account's Claude profile), its
@@ -187,7 +190,7 @@ def night_start_dt(acct, now):
 
 
 def spent_tonight(state, acct, now):
-    """Tokens this night has already burned, for the night allocator."""
+    """USD this night has already burned, for the night allocator."""
     start = night_start_dt(acct, now)
     return ledger.spent_since(state, start) if start else 0
 
@@ -237,6 +240,14 @@ def tick_account(p, acct, projs):
     """One scheduling decision for one account. Returns the account's idle
     minutes (for the presence-gated notifications)."""
     name = acct["name"]
+    # A budget in a unit the engine no longer has cannot be converted, only
+    # refused: the whole point of the USD unit is that tokens weigh
+    # differently per model, so no factor turns the old number into the new.
+    problem = config.misconfigured_account(acct)
+    if problem:
+        log(p, f"account={name} misconfigured: {problem}")
+        print(f"SKIP {name} misconfigured: {problem}")
+        return None
     now = now_from_env(acct)
     idle = idle_for_account(p["root"], acct)
     snap = usage.snapshot(acct, now)
@@ -246,7 +257,7 @@ def tick_account(p, acct, projs):
     snap["spent_tonight"] = spent_tonight(state, acct, now)
     d = controller.decide(acct, now, snap, idle)
     # Parallel slots. At night and in the burn-down the count is decided by the
-    # budget alone (see the fill loop below): the real metric is tokens, not a
+    # budget alone (see the fill loop below): the real metric is dollars, not a
     # task count, so a night may be one heavy session or many small ones.
     # `max_parallel_sessions` is a SAFETY ceiling, not a pacing tool - it
     # protects the machine (each session may run docker builds, test suites and
@@ -326,9 +337,11 @@ def tick_account(p, acct, projs):
         # (task, model). A per-model prior is not supported by the data here
         # (opus and fable sessions measured CHEAPER than sonnet ones), so
         # inventing three numbers would only look more precise than it is.
+        # 2.85 is the p75 of `cost_usd` over the 131 orchestrate sessions in
+        # the ledger on 2026-09-12 (median 1.46, p90 4.29, max 13.65).
         measured = ledger.session_costs(state)
-        default_cost = float(acct.get("est_session_tokens", 2500000))
-        budget = d.budget_tokens
+        default_cost = float(acct.get("est_session_usd", 2.85))
+        budget = d.budget_usd
         for cand in candidates:
             est_burn = measured.get((cand["path"], cand["model"]), default_cost)
             # Budget rules per scheduling class. A duty is mandatory: charged
@@ -340,11 +353,11 @@ def tick_account(p, acct, projs):
                 not picked and cand["sched"] != "filler")
             if not exempt and est_burn > budget:
                 break
-            cand["est_tokens"] = int(est_burn)
+            cand["est_usd"] = float(est_burn)
             picked.append(cand)
             budget -= est_burn
     log(p, f"account={name} {d.action} reason={d.reason!r} slice={d.slice_min} "
-           f"regime={d.regime} week={snap['week_tokens']} "
+           f"regime={d.regime} week=${snap['week_usd']:.2f} "
            f"idle={idle} free_slots={free} "
            f"duties={[t['path'] for t in picked if t['sched'] == 'duty'] or '-'} "
            f"fillers={[t['path'] for t in picked if t['sched'] == 'filler'] or '-'} "
@@ -359,7 +372,7 @@ def tick_account(p, acct, projs):
     if d.action == "run":
         for t in picked:
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
-                  f"{t['effort']} {t['project']} {t.get('est_tokens', 0)} "
+                  f"{t['effort']} {t['project']} {t.get('est_usd', 0.0):.2f} "
                   f"{t['delivery']}")
             if t["sched"] == "duty":
                 record_duty(state, t["path"], t["period_key"])
@@ -420,11 +433,11 @@ def promo_note(acct, now):
     if left < 0:
         return (f"promo EXPIRED {until.isoformat()} ({-left}d ago) "
                 f"NEEDS-HUMAN: read the weekly limit off /usage and update "
-                f"weekly_cap_tokens + promo_until in config.yaml")
+                f"weekly_cap_usd + promo_until in config.yaml")
     if left <= PROMO_WARN_DAYS:
         return (f"promo ENDS {until.isoformat()} (in {left}d) x{acct['promo_multiplier']} "
                 f"NEEDS-HUMAN: after it lapses, re-read the weekly limit off "
-                f"/usage and update weekly_cap_tokens + promo_until")
+                f"/usage and update weekly_cap_usd + promo_until")
     return (f"promo active until {until.isoformat()} (in {left}d) "
             f"x{acct['promo_multiplier']}")
 
@@ -434,6 +447,11 @@ def status(p):
     projs = config.projects(cfg)
     for acct in config.accounts(cfg):
         name = acct["name"]
+        print(f"account={name}")
+        problem = config.misconfigured_account(acct)
+        if problem:
+            print(f"account={name} misconfigured: {problem}")
+            continue
         now = now_from_env(acct)
         idle = idle_for_account(p["root"], acct)
         snap = usage.snapshot(acct, now)
@@ -443,17 +461,25 @@ def status(p):
                  if now.astimezone(ZoneInfo(acct["reset_tz"])).date().isoformat()
                  <= str(acct["promo_until"])
                  else 1.0)
-        cap = acct["weekly_cap_tokens"] * promo
-        reserve = acct["p90_daily_tokens"] * days
-        available = controller.surplus(acct, now, snap["week_tokens"])
-        print(f"account={name}")
-        print(f"week_tokens={snap['week_tokens']}")
-        print(f"cap={cap:.0f} reserve={reserve:.0f} available={available:.0f}")
+        cap = acct["weekly_cap_usd"] * promo
+        reserve = acct["p90_daily_usd"] * days
+        available = controller.surplus(acct, now, snap["week_usd"])
+        print(f"week_usd={snap['week_usd']:.2f}")
+        print(f"cap={cap:.2f} reserve={reserve:.2f} available={available:.2f}")
+        # The engine's view of the two `/usage` bars, so the digest can put
+        # them next to the real ones. The calibration is one night's readings
+        # (see specs); when these drift from /usage the owner corrects
+        # weekly_cap_usd / window_cap_usd, and this is the line that says so.
+        block = snap.get("block")
+        window_pct = (f"{block['usd'] / acct['window_cap_usd'] * 100:.1f}"
+                      if block and block.get("active") else "none")
+        print(f"usage_week_pct={snap['week_usd'] / cap * 100:.1f}")
+        print(f"usage_window_pct={window_pct}")
         print(f"next_reset={reset.isoformat()} days_remaining={days:.2f}")
         print(f"idle_min={idle} promo_until={acct['promo_until']}")
         print(promo_note(acct, now))
-        for family, tokens in sorted(snap.get("week_by_family", {}).items()):
-            print(f"week_model={family} tokens={tokens}")
+        for family, usd in sorted(snap.get("week_by_family", {}).items()):
+            print(f"week_model={family} usd={usd:.2f}")
         for family, until in sorted(quota.blocked(p["state"] / name, now).items()):
             print(f"out_of_quota model={family} until={until.isoformat()}")
         for model_id in snap.get("unknown_models", []):
@@ -467,7 +493,7 @@ def status(p):
         tonight = controller.night_budget(acct, now, available,
                                           spent_tonight(p["state"] / name, acct, now),
                                           in_night=in_night)
-        print(f"night_budget={tonight:.0f} "
+        print(f"night_budget={tonight:.2f} "
               f"nights_remaining={controller.nights_remaining(acct, now, in_night)}")
         keys = period_keys(acct, now)
         served = duties_served(p["state"] / name)
@@ -479,8 +505,9 @@ def status(p):
         for t in tasks.fillers(p["root"], projs, name):
             print(f"filler task={Path(t['path']).name}")
         for task, a in sorted(ledger.accuracy(p["state"] / name).items()):
-            print(f"estimate task={task} runs={a['runs']} est={a['est_tokens']} "
-                  f"actual={a['actual_tokens']} ratio={a['ratio']:.2f}")
+            ratio = f"{a['ratio']:.2f}" if a["ratio"] is not None else "none"
+            print(f"estimate task={task} runs={a['runs']} est_usd={a['est_usd']:.2f} "
+                  f"actual_usd={a['actual_usd']:.2f} ratio={ratio}")
         costs = ledger.stats(p["state"] / name)
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "
@@ -505,6 +532,10 @@ def plan(p):
     cfg = config.load(p["config"])
     for acct in config.accounts(cfg):
         name = acct["name"]
+        problem = config.misconfigured_account(acct)
+        if problem:
+            print(f"account={name} misconfigured: {problem}")
+            continue
         now = now_from_env(acct)
         snap = usage.snapshot(acct, now)
         reset = controller.next_reset(acct, now)
@@ -516,10 +547,10 @@ def plan(p):
         for i in range(left, 0, -1):
             probe = reset - timedelta(days=i - 1, hours=3)
             if pool is None:
-                pool = controller.surplus(acct, probe, snap["week_tokens"])
+                pool = controller.surplus(acct, probe, snap["week_usd"])
             share = controller.night_budget(acct, probe, pool, 0, in_night=True)
             print(f"  night {probe.date().isoformat()} nights_left={i} "
-                  f"budget={share:.0f} pool={max(pool, 0.0):.0f}")
+                  f"budget={share:.2f} pool={max(pool, 0.0):.2f}")
             pool -= share
 
 

@@ -75,11 +75,18 @@ if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi
 # can pass the same check. The profile, dirs and digest lookups below are one
 # python3 subprocess each - about a second in total, which is a wide enough
 # window to matter once the gatekeeper ticks every few minutes.
+#
+# The lock records `<pid> <epoch> <model>`. The model is the gatekeeper's
+# argument (ARGS[2]), known before the lock and before any config read, so it
+# can be written here; it is empty for the digest and for manual runs that
+# leave it to the config. gate.py reads it to count the Fable sessions that
+# are RUNNING, not just the ones a single tick launches (2026-09-12: a second
+# Fable session was launched next to one five minutes old).
 STATE="$STATE_ROOT/$ACCOUNT"
 mkdir -p "$STATE"
 SLOT=""
 for i in 1 2 3 4 5 6 7 8; do
-  if ( set -o noclobber; echo "$$ $(date +%s)" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
+  if ( set -o noclobber; echo "$$ $(date +%s) ${MODEL_OVR:-}" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
     SLOT=$i; break
   fi
 done

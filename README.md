@@ -116,7 +116,8 @@ Consumption is measured by reading Claude Code's own transcript files (`lib/tran
 The budget paces the week; it cannot tell you when a model is about to be refused, because the account's limit is not linear in the tokens that can be counted locally - over 95% of local volume is cache reads, discounted by an unpublished factor, and the observed `/usage` bars cannot be reproduced by any non-negative weighting of the four token components (`lib/quota.py` carries the measurement).
 So the wall is learned by hitting it: a session that dies on `You've hit your <scope> limit - resets <time>` has that fact recorded per model family in `state/<account>/exhausted.json`, and later ticks stop offering that model until the stated reset.
 It is per model on purpose - the night this was built, Fable was refused at 02:25 while Sonnet kept working in the same window - and any other failure records nothing, so an ordinary crash never costs a model its eligibility.
-`max_fable_slots` caps how many of a tick's slots the strongest model may take (1 by default): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
+`max_fable_slots` caps how many Fable sessions may run concurrently (1 by default): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
+It counts the sessions still RUNNING, not just the tick's own launches: `run.sh` writes the model into the `RUNNING.N` lock, and the tick reads it back, because a session outlives the tick that launched it by many ticks.
 
 **Per-night allocation.**
 A night spends its own share of the weekly surplus, not the whole of it, or the first night of the week drains the ones that follow.

@@ -133,6 +133,7 @@ Whatever needs no reasoning (commit and push a directory, prune caches) belongs 
 
 **The ledger is the memory.**
 Every session's result JSON is appended to `state/<account>/costs.jsonl`; the measured cost per (task, model) feeds the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
+The tick that prints `RUN` for a queue task also claims it - `status: in-progress` plus a dated note - because a session takes minutes to record that itself, and the next tick used to launch a second session onto the still-`ready` task; duties, fillers and `parallel: true` shards are not claimed, they stay `ready` by contract, and a claim no session picks up is undone by the same self-repair that resets any stale `in-progress`.
 Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_tokens`) is in the same unit as the learned figure.
 The one number that cannot be learned is the weekly cap itself: it only exists on the `/usage` screen, so `gate.py status` prints a `promo` line that warns three days before `promo_until` and then every day after it, until a human re-reads the limit and updates the config.
 

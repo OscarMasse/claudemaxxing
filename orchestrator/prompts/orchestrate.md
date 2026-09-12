@@ -14,7 +14,10 @@ of work and committing over starting something you cannot finish.
 Procedure:
 1. List {{BACKLOG_ROOT}}/tasks/*.md and read their frontmatter. Eligible tasks:
    `status: ready` and a
-   `project:` value among this account's projects ({{ACCOUNT_PROJECTS}}). Never touch
+   `project:` value among this account's projects ({{ACCOUNT_PROJECTS}}). A task the
+   gatekeeper pre-selected for you arrives already `status: in-progress`: it claimed
+   the task at launch so the next tick does not launch it twice. That is your task,
+   not someone else's - do not skip it for not being `ready`. Never touch
    `gated` autonomy actions. Order candidates by their project's `priority` in
    the live config ({{CONFIG_FILE}}, lower number first), then by the task's own `priority`
    (high > medium > low); tie-break by oldest `created`.
@@ -60,7 +63,9 @@ Procedure:
    routine: do one bounded pass, never set it `done` - leave it `ready` with a dated
    note describing what the pass covered. Setting such a task `done` silently
    retires a routine the owner expects to keep running.
-4. Set the task's `status: in-progress` and add a dated line in its `## Notes` section.
+4. Confirm the task's `status: in-progress` (the gatekeeper already set it for a
+   pre-selected task; set it yourself only when you picked the task) and add a dated
+   line in its `## Notes` section.
 5. Work on the task within this slice AND within the task's `token_budget`. Follow the
    task's own instructions section ("## Background execution protocol" when present).
 6. If you hit a decision only the owner can make: write the exact question in the task's

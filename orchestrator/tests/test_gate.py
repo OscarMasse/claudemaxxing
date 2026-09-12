@@ -343,6 +343,38 @@ class TestGate(unittest.TestCase):
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
         self.assertEqual(len(lines), 2, r.stdout)
 
+    def test_launch_claims_the_task(self):
+        # The session used to be the one setting `in-progress`, minutes after
+        # launch; on 2026-09-12 the next tick still saw the task `ready` and
+        # launched a twin into the same worktree (4.7M tokens).
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
+        text = (self.root / "tasks" / "t1.md").read_text()
+        self.assertIn("status: in-progress", text)
+        self.assertNotIn("status: ready", text)
+        self.assertIn("claimed by the gatekeeper at launch (sonnet, slice 50 min)",
+                      text)
+        # Same clock, one tick later: the claim is what keeps it off the queue.
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal no eligible task"),
+                        r.stdout)
+
+    def test_dry_run_does_not_claim(self):
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
+        r = run_gate(self.root, self.env)
+        self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
+        self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
+
+    def test_a_duty_is_launched_but_never_claimed(self):
+        # Duties stay `ready` by contract; duties.json is what stops a relaunch.
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "duty: nightly\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertIn("t1.md", r.stdout)
+        self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
+
     def test_dry_run_suppresses(self):
         cfg = self.root / "config.yml"
         cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))

@@ -337,6 +337,14 @@ def tick_account(p, acct, projs):
                   f"{t['delivery']}")
             if t["sched"] == "duty":
                 record_duty(state, t["path"], t["period_key"])
+            elif t["sched"] is None and not t["parallel"]:
+                # Queue tasks are claimed here, at launch, or the next tick
+                # relaunches them (see tasks.claim). Duties and fillers stay
+                # `ready` by contract (duties.json is what paces a duty), and
+                # a `parallel: true` task is shared by design: its shards
+                # coordinate through claims of their own.
+                tasks.claim(t["path"], now.strftime("%F"), t["model"],
+                            d.slice_min)
     else:
         print(f"SKIP {name} {d.reason}")
     return idle

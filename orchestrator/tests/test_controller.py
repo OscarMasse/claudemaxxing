@@ -9,8 +9,8 @@ TZ = ZoneInfo("Europe/Warsaw")
 # Aug 10 = Monday, Aug 13 = Thursday. The real config uses weekday 4; the
 # controller only sees the config value, so the math under test is identical.
 CFG = {
-    "weekly_cap_tokens": 100, "promo_multiplier": 1.0, "promo_until": "2000-01-01",
-    "p90_daily_tokens": 10, "window_cap_tokens": 15,
+    "weekly_cap_usd": 100, "promo_multiplier": 1.0, "promo_until": "2000-01-01",
+    "p90_daily_usd": 10, "window_cap_usd": 15,
     "night_start": "02:00", "night_end": "06:00", "morning_guard": "08:30",
     "prereset_burn_hours": 8,
     "activity_idle_night_min": 40, "night_slice_min": 50,
@@ -19,7 +19,7 @@ CFG = {
 
 
 def usage(week=0, block=None):
-    return {"week_tokens": week, "block": block}
+    return {"week_usd": week, "block": block}
 
 
 class TestReset(unittest.TestCase):
@@ -73,7 +73,7 @@ class TestDecide(unittest.TestCase):
         # block (23:30-04:30) leaves 30 min. Slice must shrink, not vanish.
         now = datetime(2026, 8, 11, 4, 0, tzinfo=TZ)
         block = {"start": now - timedelta(hours=4, minutes=30),
-                 "end": now + timedelta(minutes=30), "tokens": 2, "active": True}
+                 "end": now + timedelta(minutes=30), "usd": 2, "active": True}
         d = controller.decide(CFG, now, usage(week=0, block=block), idle_min=999)
         self.assertEqual(d.action, "run")
         self.assertLessEqual(d.slice_min, 30)
@@ -114,7 +114,7 @@ class TestDecide(unittest.TestCase):
         for week in (0, 60, 90, 150):
             d = controller.decide(CFG, now, usage(week=week), idle_min=999)
             self.assertEqual((d.action, d.regime), ("run", "prereset"))
-            self.assertEqual(d.budget_tokens, float("inf"))
+            self.assertEqual(d.budget_usd, float("inf"))
 
     def test_prereset_still_yields_to_the_owner(self):
         # The activity lock is the one guard the burn-down keeps.
@@ -166,13 +166,13 @@ class TestNightBudget(unittest.TestCase):
 
     def test_last_night_is_open_bar(self):
         # One night left: the whole surplus, no share math and no night cap.
-        cfg = dict(CFG, window_cap_tokens=15)
+        cfg = dict(CFG, window_cap_usd=15)
         self.assertEqual(controller.night_budget(cfg, self.nights(1), 100, 0), 100)
 
     def test_share_capped_by_what_one_night_can_absorb(self):
         # A huge surplus early in the week: tonight cannot exceed one window.
         got = controller.night_budget(CFG, self.nights(5), 10000, 0)
-        self.assertEqual(got, float(CFG["window_cap_tokens"]))
+        self.assertEqual(got, float(CFG["window_cap_usd"]))
 
     def test_unabsorbable_quota_burns_tonight(self):
         # 3 nights left: the middle one absorbs 15, the last one 30 (two
@@ -212,7 +212,7 @@ class TestNightBudget(unittest.TestCase):
         now = datetime(2026, 8, 10, 3, 0, tzinfo=TZ)
         d = controller.decide(CFG, now, usage(week=0), idle_min=999)
         self.assertEqual(d.action, "run")
-        self.assertLessEqual(d.budget_tokens, float(CFG["window_cap_tokens"]))
+        self.assertLessEqual(d.budget_usd, float(CFG["window_cap_usd"]))
 
     def test_night_skips_once_tonight_is_spent(self):
         now = datetime(2026, 8, 10, 3, 0, tzinfo=TZ)
@@ -227,6 +227,18 @@ class TestNightBudget(unittest.TestCase):
         now = datetime(2026, 8, 12, 3, 0, tzinfo=TZ)
         self.assertEqual(controller.nights_remaining(CFG, now, True), 2)
         self.assertEqual(controller.nights_remaining(CFG, now, False), 1)
+
+
+class TestUnit(unittest.TestCase):
+    def test_window_headroom_is_the_cap_minus_the_open_windows_usd(self):
+        block = {"active": True, "usd": 4.5}
+        self.assertAlmostEqual(controller._window_headroom(CFG, block), 10.5)
+        self.assertEqual(controller._window_headroom(CFG, None), 15.0)
+
+    def test_reasons_are_formatted_as_money(self):
+        now = datetime(2026, 8, 11, 2, 30, tzinfo=TZ)
+        d = controller.decide(CFG, now, usage(week=95), idle_min=999)
+        self.assertRegex(d.reason, r"available=-?\d+\.\d\d <= 0")
 
 
 class TestSurplus(unittest.TestCase):

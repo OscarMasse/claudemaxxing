@@ -19,6 +19,11 @@ Multi-value fields (like a project's `dirs`) are written in YAML flow style,
 Sections used: `accounts` and `projects` (see config.yaml for the full story).
 
 Accessors:
+  misconfigured_account(acct) -> a problem string, or None. The budget unit is
+                    USD since 2026-09-12; an account still carrying a retired
+                    `*_tokens` key, or missing its USD caps, is refused rather
+                    than converted (default when a key is absent, never when it
+                    is present and unreadable).
   accounts(cfg)  -> list of merged account dicts. Each account inherits every
                     top-level scalar as a default and overrides it with its own
                     keys, so shared knobs (regimes, slices, rates) are written
@@ -183,6 +188,30 @@ def load(path):
             if pair and pair[1]:
                 item[pair[0]] = _coerce(pair[1])
     return cfg
+
+
+# Budget keys of the token era, retired by specs/2026-09-12-usd-budget.md.
+# A config that still carries one has a number in a unit the engine no
+# longer has, and no conversion factor exists (the whole point of the change
+# is that tokens weigh differently per model), so the account is refused.
+RETIRED_KEYS = ("weekly_cap_tokens", "window_cap_tokens", "p90_daily_tokens",
+                "est_session_tokens", "fable_min_surplus_tokens",
+                "opus_min_surplus_tokens")
+# Without these the controller has no cap to pace against; a default here
+# would be an invented limit on someone's subscription.
+REQUIRED_USD_KEYS = ("weekly_cap_usd", "window_cap_usd", "p90_daily_usd")
+UNIT_NOTE = "the unit is USD since 2026-09-12 (see specs)"
+
+
+def misconfigured_account(acct):
+    """Why a merged account dict cannot be scheduled, or None when it can."""
+    for key in RETIRED_KEYS:
+        if key in acct:
+            return f"retired key {key}, {UNIT_NOTE}"
+    for key in REQUIRED_USD_KEYS:
+        if key not in acct:
+            return f"missing key {key}, {UNIT_NOTE}"
+    return None
 
 
 def scalars(cfg):

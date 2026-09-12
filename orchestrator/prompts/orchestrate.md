@@ -27,6 +27,14 @@ Procedure:
    - `delivery: pr` - commit on a dedicated branch, push it, and open a pull request.
      Record the PR URL in the task's `## Notes` and in your digest bullet. Work that
      stops at an unpushed branch is NOT done, whatever its state otherwise.
+     Push with the explicit HTTPS URL: `git push https://github.com/<owner>/<repo>.git
+     <branch>`. The forms `git push origin <branch>` and `git push -u origin <branch>`
+     are refused by the headless permission layer ("Claude requested permissions to
+     use Bash, but you haven't granted it yet"); that is not a task blocker, it is the
+     wrong command - do not diagnose it as "blocked by permissions", use the URL form.
+     A push touching `.github/workflows/*` is rejected by GitHub: the agent token has
+     no `workflow` scope. Leave workflow edits out of the branch, describe the hunk in
+     the PR body, and set the task `blocked` with that question for the owner (step 6).
    - `delivery: branch` - commit on a dedicated branch and never push. No PR.
    - `delivery: local` - the strictly-local rails below apply in full.
    A task with no `delivery:` key never reaches you (the gatekeeper reports it as
@@ -98,7 +106,8 @@ Procedure:
 10. Commit ALL repo changes you made (backlog repo and any project repo you touched),
     clear messages, no co-author lines. Then honor the task's `delivery:` contract from
     step 1: push and open the PR (recording its URL) for `pr`, stop at the local commit
-    for `branch`, never push for `local`.
+    for `branch`, never push for `local`. Push by explicit HTTPS URL, never `origin`,
+    and never push `.github/workflows/*` (see the `pr` bullet in step 1).
 
 Constraints: never launch other Claude sessions (internal subagents via the Agent
 tool are fine); stay inside {{PROJECT_DIRS}}; push exactly as the task's `delivery:`

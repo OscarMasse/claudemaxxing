@@ -134,22 +134,44 @@ def notify_duty(p, idle, open_cmd=None):
             f.write(h + "\n")
 
 
-def active_slots(p, state_dir):
-    """Count fresh RUNNING* locks in one account's state dir; break stale ones."""
-    n = 0
+def _fresh_locks(state_dir):
+    """(lock path, fields) of every RUNNING* lock in one account's state dir
+    that is younger than the lock TTL. The fields are what run.sh wrote:
+    `<pid> <epoch> [<model>]`; the model is absent in digest runs and in
+    locks written before it was recorded. A lock that cannot be read is
+    yielded with an empty field list, so the caller can break it."""
     if not state_dir.is_dir():
-        return 0
+        return [], []
+    fresh, stale = [], []
     for lock in sorted(state_dir.glob("RUNNING*")):
         try:
-            started = float(lock.read_text().split()[1])
+            fields = lock.read_text().split()
+            started = float(fields[1])
         except (IndexError, ValueError, OSError):
-            started = 0.0
-        if time.time() - started < LOCK_TTL_S:
-            n += 1
-        else:
-            lock.unlink(missing_ok=True)
-            log(p, f"broke stale lock {state_dir.name}/{lock.name}")
-    return n
+            fields, started = [], 0.0
+        (fresh if time.time() - started < LOCK_TTL_S else stale).append((lock, fields))
+    return fresh, stale
+
+
+def active_slots(p, state_dir):
+    """Count fresh RUNNING* locks in one account's state dir; break stale ones."""
+    fresh, stale = _fresh_locks(state_dir)
+    for lock, _ in stale:
+        lock.unlink(missing_ok=True)
+        log(p, f"broke stale lock {state_dir.name}/{lock.name}")
+    return len(fresh)
+
+
+def running_models(state_dir):
+    """Model family of each live session, from the third field of its lock.
+
+    `max_fable_slots` is about concurrent Fable SESSIONS, and a session lives
+    across many ticks: on 2026-09-12 a tick counting only its own launches put
+    a second Fable session next to one launched five minutes earlier, which is
+    exactly the race the setting exists to prevent. Locks without a model
+    field (digest runs, older launchers) hold a slot but no model slot."""
+    fresh, _ = _fresh_locks(state_dir)
+    return [fields[2] for _, fields in fresh if len(fields) > 2]
 
 
 def night_start_dt(acct, now):
@@ -295,8 +317,10 @@ def tick_account(p, acct, projs):
         # three or four sessions per slot anyway - and keeps the other slots
         # doing useful work. It applies in the pre-reset burn-down as well:
         # the wall it would run into there is the same one.
+        # Sessions launched by earlier ticks count too: the constraint is on
+        # what runs concurrently, not on what one tick launches.
         fable_slots = int(acct.get("max_fable_slots", 1))
-        fable_taken = 0
+        fable_taken = running_models(state).count("fable")
         for cand in candidates:
             if cand["model"] in out_of_quota:
                 continue

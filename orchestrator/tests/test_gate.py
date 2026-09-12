@@ -333,6 +333,38 @@ class TestGate(unittest.TestCase):
         self.assertGreaterEqual(len([l for l in lines if " sonnet " in l]), 1,
                                 r.stdout)
 
+    def test_a_running_fable_session_takes_the_fable_slot(self):
+        # The cap used to count only this tick's launches: at 11:19 on
+        # 2026-09-12 a Fable session was launched next to one from 11:14 that
+        # was still running. run.sh writes the model as the lock's third
+        # field so the tick can see what the live sessions run on.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "RUNNING.1").write_text(f"999 {int(time.time())} fable")
+        for i, name in enumerate(("t1.md", "t2.md")):
+            self.write_task(name, f"---\ntitle: {name}\nproject: side-projects\n"
+                            f"status: ready\npriority: high\ncreated: 2026-08-0{i+1}\n"
+                            "model: fable\n---\n")
+        self.write_task("t3.md", "---\ntitle: C\nproject: side-projects\n"
+                        "status: ready\npriority: low\ncreated: 2026-08-03\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual(len([l for l in lines if " fable " in l]), 0, r.stdout)
+        self.assertEqual(len([l for l in lines if " sonnet " in l]), 1, r.stdout)
+
+    def test_a_lock_without_a_model_field_still_counts_as_a_slot(self):
+        # Digest runs and pre-change locks carry no model: they hold a slot
+        # but no model slot.
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
+        (state / "RUNNING.2").write_text(f"999 {int(time.time())} fable")
+        p = gate.paths()
+        self.assertEqual(gate.active_slots(p, state), 2)
+        self.assertEqual(gate.running_models(state), ["fable"])
+
     def test_fable_cap_is_configurable(self):
         self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
                         "max_fable_slots: 2\n")

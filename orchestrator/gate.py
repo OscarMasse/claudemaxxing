@@ -287,9 +287,31 @@ def tick_account(p, acct, projs):
         # night is the normal case; `max_fable_slots` paces the one model with
         # its own separate limit.
         keys = period_keys(acct, now)
+        # How many of this tick's slots the strongest model may take. It is a
+        # pacing tool, unlike max_parallel_sessions: the binding constraint on
+        # a Fable night is the account's Fable limit, not wall-clock time, and
+        # four Fable sessions racing each other exhaust it in under two hours
+        # (measured 2026-09-09), leaving nothing for the rest of the night and
+        # no slot for the cheaper models that were nowhere near their own
+        # limit. Serialising them costs almost nothing - a night fits only
+        # three or four sessions per slot anyway - and keeps the other slots
+        # doing useful work. It applies in the pre-reset burn-down as well:
+        # the wall it would run into there is the same one.
+        # Sessions launched by earlier ticks count too: the constraint is on
+        # what runs concurrently, not on what one tick launches.
+        fable_slots = int(acct.get("max_fable_slots", 1))
+        fable_running = running_models(state).count("fable")
+        # The per-model rules go INTO the selection rather than filtering its
+        # output: cutting the queue to `free` first and dropping the models
+        # that cannot launch second leaves slots empty whenever the queue
+        # head is heavy in one model (2026-09-12: opus, fable, fable, sonnet
+        # with four free slots launched two, all night).
+        model_slots = {family: 0 for family in out_of_quota}
+        model_slots.setdefault("fable", max(fable_slots - fable_running, 0))
         candidates = tasks.launch_order(p["root"], projs, name, count=free,
                                         done=duties_served(state),
-                                        period_keys=keys)
+                                        period_keys=keys,
+                                        model_slots=model_slots)
         # What a session costs is a property of the work, not of the slice it
         # was allotted: sessions do not fill their slice (measured median
         # utilisation here: 3%), so both the measured figure and the cold-start
@@ -307,27 +329,7 @@ def tick_account(p, acct, projs):
         measured = ledger.session_costs(state)
         default_cost = float(acct.get("est_session_tokens", 2500000))
         budget = d.budget_tokens
-        # How many of this tick's slots the strongest model may take. It is a
-        # pacing tool, unlike max_parallel_sessions: the binding constraint on
-        # a Fable night is the account's Fable limit, not wall-clock time, and
-        # four Fable sessions racing each other exhaust it in under two hours
-        # (measured 2026-09-09), leaving nothing for the rest of the night and
-        # no slot for the cheaper models that were nowhere near their own
-        # limit. Serialising them costs almost nothing - a night fits only
-        # three or four sessions per slot anyway - and keeps the other slots
-        # doing useful work. It applies in the pre-reset burn-down as well:
-        # the wall it would run into there is the same one.
-        # Sessions launched by earlier ticks count too: the constraint is on
-        # what runs concurrently, not on what one tick launches.
-        fable_slots = int(acct.get("max_fable_slots", 1))
-        fable_taken = running_models(state).count("fable")
         for cand in candidates:
-            if cand["model"] in out_of_quota:
-                continue
-            if cand["model"] == "fable":
-                if fable_taken >= fable_slots:
-                    continue
-                fable_taken += 1
             est_burn = measured.get((cand["path"], cand["model"]), default_cost)
             # Budget rules per scheduling class. A duty is mandatory: charged
             # to the budget, never gated by it. A queue task is exempt when it

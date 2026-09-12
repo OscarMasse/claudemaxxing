@@ -110,6 +110,7 @@ Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a del
 **Budget controller.**
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
 Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
+The per-model rules (`max_fable_slots`, a model observed out of quota) are applied inside the selection, while the queue is being cut to the free slot count, not to its output afterwards: a queue head heavy in one model would otherwise leave slots empty that the rest of the queue could fill.
 Consumption is measured by reading Claude Code's own transcript files (`lib/transcripts.py`), de-duplicated per billed message, with the real 5h window start (the first token, not the top of that hour).
 
 **Quota exhaustion is observed, not predicted.**

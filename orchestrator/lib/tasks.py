@@ -493,15 +493,60 @@ def pick(root, projects, account):
     return picked[0] if picked else None
 
 
-def _pad_parallel(out, queue, count):
+class _ModelSlots:
+    """How many more sessions each model family may get this tick.
+
+    `{family: remaining}`; a family absent from the dict is unlimited, one at
+    0 is skipped. `take` answers whether a task can still be launched and, if
+    so, consumes one of its family's slots, so the selection below filters
+    WHILE it slices rather than after: the caller used to cut the queue to the
+    slot count first and drop the unlaunchable models second, which on
+    2026-09-12 turned [opus, fable, fable, sonnet] with four free slots into
+    two launches, on every tick of the night."""
+
+    def __init__(self, model_slots):
+        self.left = dict(model_slots or {})
+
+    def take(self, task):
+        n = self.left.get(task["model"])
+        if n is None:
+            return True
+        if n <= 0:
+            return False
+        self.left[task["model"]] = n - 1
+        return True
+
+
+def _take(candidates, count, slots):
+    """The first `count` of `candidates` that `slots` lets through, consuming
+    their model slots as they are picked."""
+    out = []
+    for t in candidates:
+        if len(out) >= count:
+            break
+        if slots.take(t):
+            out.append(t)
+    return out
+
+
+def _pad_parallel(out, queue, count, slots):
     """Fill leftover slots with extra sessions on tasks that declare
     `parallel: true` (they shard via claims). Padding is the last resort: it
-    only duplicates work already selected, so every other class goes first."""
+    only duplicates work already selected, so every other class goes first.
+    A shard is one more session of its model, so it obeys the model slots too."""
     par = [t for t in queue if t["parallel"]]
-    i = 0
     while 0 < len(out) < count and par:
-        out.append(dict(par[i % len(par)]))
-        i += 1
+        # One round over the shards; a round that admits nothing means the
+        # model slots are exhausted for every shard, so stop.
+        admitted = False
+        for t in par:
+            if len(out) >= count:
+                break
+            if slots.take(t):
+                out.append(dict(t))
+                admitted = True
+        if not admitted:
+            break
     return out
 
 
@@ -509,11 +554,12 @@ def pick_multi(root, projects, account, count):
     """Up to `count` session assignments from the ordinary priority queue:
     distinct tasks first, then parallel shards."""
     queue = _ordered(root, projects, account)
-    return _pad_parallel(queue[:count], queue, count)
+    slots = _ModelSlots(None)
+    return _pad_parallel(queue[:count], queue, count, slots)
 
 
 def launch_order(root, projects, account, count,
-                 done=None, period_keys=None):
+                 done=None, period_keys=None, model_slots=None):
     """Up to `count` session assignments for one tick, in launch order.
 
     The three scheduling classes are served in a fixed order that encodes their
@@ -526,14 +572,21 @@ def launch_order(root, projects, account, count,
        exhausted (the caller additionally launches them only if budget is left);
     4. parallel shards of queue tasks, as padding.
 
+    `model_slots` (`{family: remaining}`, see _ModelSlots) says which models
+    the caller can still launch and how many times; the returned list already
+    respects it, so it fills `count` whenever enough launchable work exists.
+    A duty whose model has no slot is not starved by this - it cannot run
+    anyway - and comes back the next tick, its period still unserved.
+
     Each assignment carries `sched` ("duty", "filler" or None) so the caller can
     apply the budget rule that matches the class."""
     if count <= 0:
         return []
-    out = duties_due(root, projects, account,
-                     done or {}, period_keys or {})[:count]
+    slots = _ModelSlots(model_slots)
+    out = _take(duties_due(root, projects, account, done or {}, period_keys or {}),
+                count, slots)
     queue = _ordered(root, projects, account)
-    out += queue[:count - len(out)]
+    out += _take(queue, count - len(out), slots)
     if len(out) < count:
-        out += fillers(root, projects, account)[:count - len(out)]
-    return _pad_parallel(out, queue, count)
+        out += _take(fillers(root, projects, account), count - len(out), slots)
+    return _pad_parallel(out, queue, count, slots)

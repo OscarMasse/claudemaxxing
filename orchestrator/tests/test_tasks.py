@@ -460,6 +460,55 @@ class TestSchedulingClasses(unittest.TestCase):
         self.assertEqual(got, {"sync.md": "duty", "queue.md": None,
                                "tidy.md": "filler"})
 
+    def test_model_slots_are_filtered_before_the_count_is_cut(self):
+        # gate.py used to take the first `count` tasks and drop the ones its
+        # model rules excluded afterwards, so a fable-heavy queue head left
+        # slots empty: on 2026-09-12 [opus, fable, fable, sonnet] with 4 free
+        # slots launched 2, every tick of the night. The skip has to happen
+        # while slicing, so the returned list already fills `count`.
+        (self.root / "tasks" / "queue.md").unlink()
+        for i, model in enumerate(("opus", "fable", "fable", "sonnet", "sonnet")):
+            write_task(self.root, f"t{i}.md", project="side-projects",
+                       status="ready", priority="high", created=f"2026-08-0{i+1}",
+                       model=model)
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", 4,
+                                    model_slots={"fable": 1})
+        self.assertEqual([t["model"] for t in picked],
+                         ["opus", "fable", "sonnet", "sonnet"])
+        self.assertEqual(self.names(picked), ["t0.md", "t1.md", "t3.md", "t4.md"])
+
+    def test_a_family_at_zero_slots_is_never_returned(self):
+        write_task(self.root, "f.md", project="side-projects", status="ready",
+                   priority="high", created="2026-07-01", model="fable")
+        write_task(self.root, "sync.md", project="life", status="ready",
+                   duty="nightly", model="fable")
+        write_task(self.root, "tidy.md", project="life", status="ready",
+                   filler="true", model="fable")
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", 4,
+                                    period_keys=self.KEYS, model_slots={"fable": 0})
+        self.assertEqual(self.names(picked), ["queue.md"])
+
+    def test_an_absent_family_is_unlimited(self):
+        for i in range(3):
+            write_task(self.root, f"o{i}.md", project="side-projects",
+                       status="ready", priority="high", created=f"2026-08-0{i+1}",
+                       model="opus")
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", 4,
+                                    model_slots={"fable": 0})
+        self.assertEqual(len(picked), 4)
+
+    def test_parallel_padding_respects_model_slots(self):
+        (self.root / "tasks" / "queue.md").unlink()
+        write_task(self.root, "shard.md", project="side-projects", status="ready",
+                   priority="high", created="2026-08-01", model="fable",
+                   parallel="true")
+        write_task(self.root, "other.md", project="side-projects", status="ready",
+                   priority="low", created="2026-08-02", parallel="true")
+        picked = tasks.launch_order(self.root, PROJECTS, "personal", 4,
+                                    model_slots={"fable": 1})
+        self.assertEqual([t["model"] for t in picked].count("fable"), 1)
+        self.assertEqual(len(picked), 4)
+
     def test_duty_still_obeys_prerequisites(self):
         write_task(self.root, "sync.md", project="life", status="ready",
                    duty="nightly", created="2026-09-01",

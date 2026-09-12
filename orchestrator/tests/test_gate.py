@@ -365,6 +365,38 @@ class TestGate(unittest.TestCase):
         self.assertEqual(gate.active_slots(p, state), 2)
         self.assertEqual(gate.running_models(state), ["fable"])
 
+    def test_a_fable_heavy_queue_head_does_not_leave_slots_empty(self):
+        # 2026-09-12, 11:00: candidates opus, fable, fable, sonnet with 4 free
+        # slots and one fable slot launched only 2. The model filter has to
+        # run before the queue is cut to the slot count.
+        self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
+                        "max_fable_slots: 1\n")
+        (self.root / "tasks" / "t1.md").unlink()
+        for i, model in enumerate(("opus", "fable", "fable", "sonnet", "sonnet")):
+            self.write_task(f"q{i}.md", f"---\ntitle: {i}\nproject: side-projects\n"
+                            f"status: ready\npriority: high\ncreated: 2026-08-0{i+1}\n"
+                            f"model: {model}\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual([l.split()[4] for l in lines],
+                         ["opus", "fable", "sonnet", "sonnet"], r.stdout)
+
+    def test_an_out_of_quota_family_does_not_eat_a_slot(self):
+        self.append_cfg("max_parallel_sessions: 2\nest_session_tokens: 0.25\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "exhausted.json").write_text(json.dumps({"opus": {
+            "until": "2026-08-11T04:20:00+02:00", "scope": "session"}}))
+        (self.root / "tasks" / "t1.md").unlink()
+        for i, model in enumerate(("opus", "opus", "sonnet", "sonnet")):
+            self.write_task(f"q{i}.md", f"---\ntitle: {i}\nproject: side-projects\n"
+                            f"status: ready\npriority: high\ncreated: 2026-08-0{i+1}\n"
+                            f"model: {model}\n---\n")
+        r = run_gate(self.root, self.env)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertEqual([l.split()[4] for l in lines], ["sonnet", "sonnet"],
+                         r.stdout)
+
     def test_fable_cap_is_configurable(self):
         self.append_cfg("max_parallel_sessions: 4\nest_session_tokens: 0.25\n"
                         "max_fable_slots: 2\n")

@@ -1,4 +1,11 @@
-"""Token usage read straight from Claude Code's own transcript files.
+"""Consumption in USD, read straight from Claude Code's own transcript files.
+
+The unit is dollars at Anthropic list price, not tokens. The account's limit
+weighs tokens by price: on the night of 2026-09-12, 14M local tokens of Fable
+and Opus moved the weekly `/usage` bar 4 points while 22M tokens of Sonnet
+moved it 1 - about a 5x difference per token, the ratio of the list prices.
+Raw token counts could not pace that; `sum(tokens x price)` lines up with the
+bars (specs/2026-09-12-usd-budget.md carries the four readings).
 
 This replaces `npx ccusage blocks --json`, which was the source until
 2026-09-09. Three reasons, in order of how much they cost:
@@ -36,6 +43,21 @@ FAMILY_PREFIXES = (
 )
 
 
+# Anthropic API list price per MILLION tokens on 2026-09-12, keyed by family:
+# (input, output, cache read, cache write). Cache write is 1.25x input and
+# cache read 0.1x input, except Fable 5.1 whose cache read is a flat 0.25.
+PRICES = {
+    "fable": (10.00, 50.00, 0.25, 12.50),
+    "opus": (5.00, 25.00, 0.50, 6.25),
+    "sonnet": (2.00, 10.00, 0.20, 2.50),
+    "haiku": (1.00, 5.00, 0.10, 1.25),
+}
+
+# An id of no known family is priced at the most expensive row: the honest
+# error is an overestimate. It is still reported through `unknown_models`.
+UNKNOWN_PRICE_FAMILY = "fable"
+
+
 # Claude Code writes assistant entries of its own making (API error notices,
 # interrupt markers) with this model id and a zero-token usage block. They are
 # not consumption and must not be reported as an unrecognized model.
@@ -57,11 +79,22 @@ def family(model_id):
     return None
 
 
+def _components(usage):
+    """(input, output, cache read, cache write) token counts of one entry."""
+    return (int(usage.get("input_tokens", 0) or 0),
+            int(usage.get("output_tokens", 0) or 0),
+            int(usage.get("cache_read_input_tokens", 0) or 0),
+            int(usage.get("cache_creation_input_tokens", 0) or 0))
+
+
 def _entry_tokens(usage):
-    return (int(usage.get("input_tokens", 0) or 0)
-            + int(usage.get("output_tokens", 0) or 0)
-            + int(usage.get("cache_read_input_tokens", 0) or 0)
-            + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    return sum(_components(usage))
+
+
+def entry_usd(model_id, usage):
+    """List-price cost in USD of one transcript entry's `usage` block."""
+    prices = PRICES.get(family(model_id) or UNKNOWN_PRICE_FAMILY)
+    return sum(n * price for n, price in zip(_components(usage), prices)) / 1e6
 
 
 def _files(config_dir):
@@ -72,7 +105,10 @@ def _files(config_dir):
 
 
 def entries(config_dir, since=None):
-    """Yield (timestamp, model_id, tokens), oldest first, de-duplicated.
+    """Yield (timestamp, model_id, usd, tokens), oldest first, de-duplicated.
+
+    `usd` is what the budget runs on; `tokens` (the four components summed) is
+    kept for reporting only, so the digest can still show volume next to cost.
 
     `since` drops older entries early; it is an optimisation only, the result
     is the same as filtering afterwards. Unreadable lines are skipped: a
@@ -107,7 +143,9 @@ def entries(config_dir, since=None):
                         continue
                     if since is not None and ts < since:
                         continue
-                    out.append((ts, msg.get("model"), _entry_tokens(usage)))
+                    out.append((ts, msg.get("model"),
+                                entry_usd(msg.get("model"), usage),
+                                _entry_tokens(usage)))
         except OSError:
             continue
     out.sort(key=lambda r: r[0])
@@ -123,37 +161,37 @@ def blocks(rows):
     token at 23:20), with no rounding to the hour.
     """
     out = []
-    for ts, model, tokens in rows:
+    for ts, model, usd, _tokens in rows:
         if not out or ts >= out[-1]["start"] + WINDOW:
             out.append({"start": ts, "end": ts + WINDOW, "by_model": {},
-                        "tokens": 0, "last": ts})
+                        "usd": 0.0, "last": ts})
         b = out[-1]
-        b["tokens"] += tokens
+        b["usd"] += usd
         b["last"] = ts
-        b["by_model"][model] = b["by_model"].get(model, 0) + tokens
+        b["by_model"][model] = b["by_model"].get(model, 0.0) + usd
     return out
 
 
 def by_family(by_model, unknown=None):
-    """{family: tokens} from a {model_id: tokens} map.
+    """{family: usd} from a {model_id: usd} map.
 
     Ids of no known family are counted under "unknown" and appended to
     `unknown` when a list is given, so a model id the engine has never seen
     shows up in `gate.py status` instead of quietly costing nothing.
 
-    These totals are a MEASURE, not a prediction of the account's limit: the
-    limit is not linear in local tokens (lib/quota.py explains why, with the
-    measurement). They pace the week and they say which model is doing the
-    spending; they do not say when a model is about to be cut off.
+    These totals are a MEASURE that paces the week and says which model is
+    doing the spending. The calibration against `/usage` is coarse (one
+    night's readings), so when a model is about to be cut off is still
+    observed, not predicted (lib/quota.py).
     """
     out = {}
-    for model_id, tokens in by_model.items():
+    for model_id, usd in by_model.items():
         fam = family(model_id)
         if fam is None:
             if unknown is not None and model_id not in unknown:
                 unknown.append(model_id)
             fam = "unknown"
-        out[fam] = out.get(fam, 0) + tokens
+        out[fam] = out.get(fam, 0.0) + usd
     return out
 
 
@@ -162,17 +200,17 @@ def summary(config_dir, since, now):
     unknown = []
     rows = entries(config_dir, since=since)
     week_by_model = {}
-    for _ts, model, tokens in rows:
-        week_by_model[model] = week_by_model.get(model, 0) + tokens
+    for _ts, model, usd, _tokens in rows:
+        week_by_model[model] = week_by_model.get(model, 0.0) + usd
     week = by_family(week_by_model, unknown)
     active = None
     for b in blocks(rows):
         if b["start"] <= now < b["end"]:
             active = {"start": b["start"], "end": b["end"], "active": True,
-                      "tokens": b["tokens"],
+                      "usd": b["usd"],
                       "by_family": by_family(b["by_model"], unknown)}
     return {
-        "week_tokens": sum(week.values()),
+        "week_usd": sum(week.values()),
         "week_by_family": week,
         "block": active,
         "unknown_models": unknown,

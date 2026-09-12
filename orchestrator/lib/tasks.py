@@ -358,22 +358,22 @@ STUCK_NOTE = (
     "resume from them, do not restart from scratch.\n")
 
 
-def _set_ready(path, hours, date):
-    """Rewrite one task's frontmatter status to `ready` and log why in Notes.
+def set_status(path, status, note):
+    """Rewrite one task's frontmatter status and log why in Notes.
 
     The status line is replaced only inside the frontmatter block, so a task
     whose prose happens to contain a `status:` line is not corrupted. A task
     with no `## Notes` section gets one: the note is the only trace of the
-    repair the human ever sees in the task itself.
+    change the human ever sees in the task itself. `note` is one complete
+    Markdown line, newline included.
     """
     text = path.read_text(errors="replace")
     m = re.match(r"---\n(.*?)\n---", text, re.S)
     if not m:
         return False
-    fm = re.sub(r"^status:.*$", "status: ready", m.group(1),
+    fm = re.sub(r"^status:.*$", f"status: {status}", m.group(1),
                 count=1, flags=re.M)
     text = text[:m.start(1)] + fm + text[m.end(1):]
-    note = STUCK_NOTE.format(date=date, hours=hours)
     if "\n## Notes" in text:
         head, sep, tail = text.rpartition("\n## Notes")
         body = tail.split("\n", 1)
@@ -383,6 +383,34 @@ def _set_ready(path, hours, date):
         text = f"{text.rstrip()}\n\n## Notes\n\n{note}"
     path.write_text(text)
     return True
+
+
+def _set_ready(path, hours, date):
+    """Repair one stuck task: back to `ready`, with STUCK_NOTE explaining."""
+    return set_status(path, "ready", STUCK_NOTE.format(date=date, hours=hours))
+
+
+CLAIM_NOTE = (
+    "- {date}: claimed by the gatekeeper at launch ({model}, slice {slice_min} "
+    "min); the session records its own progress below.\n")
+
+
+def claim(path, date, model, slice_min):
+    """Mark one queue task `in-progress` at LAUNCH, before its session exists.
+
+    The session used to set `in-progress` itself, several minutes after
+    launch. Between the two, the task was still `ready` to the scheduler: on
+    2026-09-12 the tick after a launch picked the same task again and a second
+    session worked it in the same worktree, for 4.7M tokens. Claiming here
+    closes that window; the tick that prints RUN is the one that owns the file.
+
+    A claim whose session never gets to the task (crash before step 4, or a
+    launch that failed) is not a leak: `repair_stuck` resets any `in-progress`
+    older than the lock TTL back to `ready`, with a note.
+    """
+    return set_status(Path(path), "in-progress",
+                      CLAIM_NOTE.format(date=date, model=model,
+                                        slice_min=slice_min))
 
 
 def repair_stuck(root, now, ttl_s, date):

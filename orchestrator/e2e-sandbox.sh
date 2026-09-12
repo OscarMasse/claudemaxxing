@@ -31,10 +31,10 @@ chmod +x "$SANDBOX/claude-stub.sh"
 # Quota fixture: a usage snapshot with no consumption and no open 5h window,
 # so the sandbox night starts from a full budget.
 cat > "$SANDBOX/usage.json" <<'FIXTURE'
-{"week_tokens":0,"week_by_family":{},"block":null,"unknown_models":[]}
+{"week_usd":0,"week_by_family":{},"block":null,"unknown_models":[]}
 FIXTURE
 
-# Small token units keep the arithmetic readable in the output.
+# Small dollar figures keep the arithmetic readable in the output.
 cat > "$SANDBOX/config.yaml" <<CFG
 dry_run: false
 night_start: 02:00
@@ -45,7 +45,7 @@ activity_idle_night_min: 40
 night_slice_min: 50
 max_parallel_sessions: 4
 night_budget_ratio: 2.0
-est_session_tokens: 2.5
+est_session_usd: 2.5
 claude_bin: $SANDBOX/claude-stub.sh
 claude_model: sonnet
 claude_effort: low
@@ -53,9 +53,9 @@ max_session_usd: 1
 accounts:
   - name: max
     claude_config_dir: $SANDBOX/cfgdir
-    weekly_cap_tokens: 1000
-    window_cap_tokens: 200
-    p90_daily_tokens: 50
+    weekly_cap_usd: 1000
+    window_cap_usd: 200
+    p90_daily_usd: 50
     reset_weekday: 4
     reset_time: 05:59
     reset_tz: Europe/Warsaw

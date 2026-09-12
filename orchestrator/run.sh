@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch one background orchestrator session (or the morning digest).
 # Usage: run.sh [--account NAME] <slice_min> [task_file] [model] [effort] [project]
-#                                [est_tokens] [delivery]
+#                                [est_usd] [delivery]
 #        run.sh --digest [--account NAME]
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
@@ -47,9 +47,10 @@ done
 SLICE_MIN="${ARGS[0]:-15}"
 TASK_FILE="${ARGS[1]:-}"; MODEL_OVR="${ARGS[2]:-}"; EFFORT_OVR="${ARGS[3]:-}"
 PROJECT="${ARGS[4]:-}"
-# What the gatekeeper predicted this slice would burn. Recorded in the ledger
-# next to the actual usage so the estimate can be scored (ledger.accuracy).
-EST_TOKENS="${ARGS[5]:-0}"
+# What the gatekeeper predicted this session would cost, in USD at list price
+# (the budget unit since 2026-09-12). Recorded in the ledger next to the
+# session's actual cost_usd so the estimate can be scored (ledger.accuracy).
+EST_USD="${ARGS[5]:-0}"
 # The task's declared delivery contract (branch|pr|local), passed down so the
 # session is told its obligation instead of re-deriving it - and so a slice can
 # never push work the task did not ask to be pushed. Empty only when no task
@@ -189,7 +190,7 @@ fi
 rm -f "$ERR_FILE"
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
-  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_TOKENS" \
+  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_USD" \
   >> "$STATE_ROOT/runs.out" 2>&1
 # Cost and duration for the digest journal's mechanical line, read from the
 # result JSON before it is deleted.

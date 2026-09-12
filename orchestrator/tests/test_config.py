@@ -13,11 +13,11 @@ NESTED = (
     "night_start: 02:00\n"
     "night_budget_ratio: 2.0\n"
     "claude_bin: /usr/local/bin/claude\n"
-    "weekly_cap_tokens: 100\n"
+    "weekly_cap_usd: 100\n"
     "accounts:\n"
     "  - name: personal\n"
     "    claude_config_dir: ~/.claude\n"
-    "    weekly_cap_tokens: 300\n"
+    "    weekly_cap_usd: 300\n"
     "    reset_tz: Europe/Warsaw\n"
     "    reset_time: 05:59\n"
     "  - name: work\n"
@@ -48,13 +48,13 @@ class TestFlatParsing(unittest.TestCase):
         cfg = config.load(write_cfg(
             "# comment\n"
             "dry_run: true\n"
-            "weekly_cap_tokens: 300000000\n"
+            "weekly_cap_usd: 300000000\n"
             "night_budget_ratio: 2.0\n"
             "reset_tz: Europe/Warsaw\n"
             "reset_time: 05:59\n"
             "promo_until: 2026-08-19\n"))
         self.assertIs(cfg["dry_run"], True)
-        self.assertEqual(cfg["weekly_cap_tokens"], 300000000)
+        self.assertEqual(cfg["weekly_cap_usd"], 300000000)
         self.assertAlmostEqual(cfg["night_budget_ratio"], 2.0)
         self.assertEqual(cfg["reset_tz"], "Europe/Warsaw")
         self.assertEqual(cfg["reset_time"], "05:59")
@@ -82,9 +82,9 @@ class TestSections(unittest.TestCase):
         accts = config.accounts(self.cfg)
         personal, work = accts
         # Account key wins over the flat default.
-        self.assertEqual(personal["weekly_cap_tokens"], 300)
+        self.assertEqual(personal["weekly_cap_usd"], 300)
         # Flat default inherited when the account does not override.
-        self.assertEqual(work["weekly_cap_tokens"], 100)
+        self.assertEqual(work["weekly_cap_usd"], 100)
         self.assertEqual(personal["claude_bin"], "/usr/local/bin/claude")
         self.assertEqual(work["claude_bin"], "/opt/claude")
         self.assertIs(personal["dry_run"], True)
@@ -163,10 +163,48 @@ class TestFlowStyleLists(unittest.TestCase):
         self.assertEqual(config.split_values("[a"), ["[a"])
 
 
+class TestMisconfiguredAccount(unittest.TestCase):
+    """The budget unit is USD; a token-era key is refused, never converted."""
+
+    GOOD = {"name": "a", "weekly_cap_usd": 780, "window_cap_usd": 67,
+            "p90_daily_usd": 105}
+
+    def test_a_complete_usd_account_is_fine(self):
+        self.assertIsNone(config.misconfigured_account(self.GOOD))
+
+    def test_every_retired_key_is_refused(self):
+        for key in config.RETIRED_KEYS:
+            problem = config.misconfigured_account(dict(self.GOOD, **{key: 1}))
+            self.assertEqual(
+                problem, f"retired key {key}, the unit is USD since 2026-09-12 "
+                         "(see specs)")
+
+    def test_a_missing_usd_cap_is_an_error_not_a_default(self):
+        acct = dict(self.GOOD)
+        del acct["weekly_cap_usd"]
+        self.assertEqual(config.misconfigured_account(acct),
+                         "missing key weekly_cap_usd, the unit is USD since "
+                         "2026-09-12 (see specs)")
+
+    def test_a_flat_retired_key_reaches_every_account(self):
+        # Flat keys are inherited defaults, so one leftover at the top level
+        # misconfigures every account that does not override it - which none
+        # can, since the key itself is the problem.
+        cfg = config.load(write_cfg(
+            "est_session_tokens: 2500000\n"
+            "accounts:\n"
+            "  - name: a\n    weekly_cap_usd: 1\n    window_cap_usd: 1\n"
+            "    p90_daily_usd: 1\n"
+            "  - name: b\n    weekly_cap_usd: 1\n    window_cap_usd: 1\n"
+            "    p90_daily_usd: 1\n"))
+        problems = [config.misconfigured_account(a) for a in config.accounts(cfg)]
+        self.assertTrue(all(p and "est_session_tokens" in p for p in problems))
+
+
 class TestLegacyFallback(unittest.TestCase):
     def setUp(self):
         self.cfg = config.load(write_cfg(
-            "weekly_cap_tokens: 100\np90_daily_tokens: 10\n"
+            "weekly_cap_usd: 100\np90_daily_usd: 10\n"
             "reset_tz: Europe/Warsaw\nclaude_bin: /usr/local/bin/claude\n"
             "extra_dirs: ~/projects ~/work\n"))
 
@@ -176,7 +214,7 @@ class TestLegacyFallback(unittest.TestCase):
         self.assertEqual(accts[0]["name"], "default")
         self.assertEqual(accts[0]["claude_config_dir"],
                          os.path.expanduser("~/.claude"))
-        self.assertEqual(accts[0]["weekly_cap_tokens"], 100)
+        self.assertEqual(accts[0]["weekly_cap_usd"], 100)
 
     def test_default_project_synthesized_from_extra_dirs(self):
         projs = config.projects(self.cfg)
@@ -302,10 +340,11 @@ class TestRealConfig(unittest.TestCase):
         accts = config.accounts(cfg)
         self.assertGreaterEqual(len(accts), 2)
         for a in accts:
-            for key in ("name", "claude_config_dir", "weekly_cap_tokens",
-                        "window_cap_tokens", "p90_daily_tokens", "reset_weekday",
+            for key in ("name", "claude_config_dir", "weekly_cap_usd",
+                        "window_cap_usd", "p90_daily_usd", "reset_weekday",
                         "reset_time", "reset_tz"):
                 self.assertIn(key, a, f"account {a.get('name')} missing {key}")
+            self.assertIsNone(config.misconfigured_account(a), a.get("name"))
         names = {a["name"] for a in accts}
         projs = config.projects(cfg)
         self.assertGreaterEqual(len(projs), 3)

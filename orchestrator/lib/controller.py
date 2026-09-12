@@ -6,6 +6,10 @@ See the README sections "Scheduling regimes" and "Budget controller
 
 Two regimes only: the night window and the pre-reset burn-down. Daytime is
 reserved for the owner, so the daytime tick always skips.
+
+Every quantity here is USD at Anthropic list price (lib/transcripts.py has the
+table and the 2026-09-12 measurement behind the unit). The math is the same as
+when it ran on raw token counts; only the unit changed.
 """
 import math
 
@@ -16,7 +20,7 @@ from zoneinfo import ZoneInfo
 # No `model` field: the model a session runs is the one its task declares
 # (lib/tasks.py), never a property of the tick. The regime decides whether
 # and how much to run, not what to run it on.
-Decision = namedtuple("Decision", "action reason slice_min regime budget_tokens",
+Decision = namedtuple("Decision", "action reason slice_min regime budget_usd",
                       defaults=("", 0))
 
 WINDOW = timedelta(hours=5)  # a Max quota session window
@@ -51,14 +55,14 @@ def _promo(cfg, now):
     return 1.0
 
 
-def surplus(cfg, now, week_tokens):
-    """Tokens the background system may spend this week: the weekly cap minus
+def surplus(cfg, now, week_usd):
+    """USD the background system may spend this week: the weekly cap minus
     what is consumed minus the decaying daily reserve that protects the owner's
     own usage. Same quantity `decide()` calls `available`, exposed so the digest
     and the planner report exactly what the decision was made on."""
-    cap = float(cfg["weekly_cap_tokens"]) * _promo(cfg, now)
+    cap = float(cfg["weekly_cap_usd"]) * _promo(cfg, now)
     days_remaining = (next_reset(cfg, now) - now).total_seconds() / 86400.0
-    return cap - float(week_tokens) - float(cfg["p90_daily_tokens"]) * days_remaining
+    return cap - float(week_usd) - float(cfg["p90_daily_usd"]) * days_remaining
 
 
 def _nights_remaining(cfg, now):
@@ -83,7 +87,7 @@ def nights_remaining(cfg, now, in_night):
 
 
 def night_capacity(cfg, last=False):
-    """Tokens one night can physically absorb.
+    """USD one night can physically absorb.
 
     A night (night_start..night_end) is shorter than a 5h quota window, so one
     window's cap is the binding ceiling: hoarding more than this for a later
@@ -101,11 +105,11 @@ def night_capacity(cfg, last=False):
     if last:
         hours = float(cfg.get("prereset_burn_hours", 0))
         windows = max(1, math.ceil(hours / (WINDOW.total_seconds() / 3600.0)))
-    return float(cfg["window_cap_tokens"]) * windows
+    return float(cfg["window_cap_usd"]) * windows
 
 
 def night_budget(cfg, now, available, spent_tonight, in_night=True):
-    """Tonight's token allocation out of the weekly surplus.
+    """Tonight's USD allocation out of the weekly surplus.
 
     Deliberately non-linear and back-loaded: with `night_budget_ratio` r, night
     j of the n remaining gets a weight r^(j-1), so tonight takes the smallest
@@ -157,17 +161,17 @@ def _today_at(now, hhmm):
 
 
 def _window_headroom(cfg, block):
-    """Tokens left in the current 5h window (full cap if no window is open)."""
-    cap = float(cfg["window_cap_tokens"])
+    """USD left in the current 5h window (full cap if no window is open)."""
+    cap = float(cfg["window_cap_usd"])
     if block and block.get("active"):
-        return max(0.0, cap - float(block["tokens"]))
+        return max(0.0, cap - float(block["usd"]))
     return cap
 
 
 def decide(cfg, now, usage, idle_min):
     reset = next_reset(cfg, now)
-    cap = float(cfg["weekly_cap_tokens"]) * _promo(cfg, now)
-    week = float(usage["week_tokens"])
+    cap = float(cfg["weekly_cap_usd"]) * _promo(cfg, now)
+    week = float(usage["week_usd"])
     days_remaining = (reset - now).total_seconds() / 86400.0
     block = usage.get("block")
     idle = float("inf") if idle_min is None else idle_min
@@ -213,12 +217,12 @@ def decide(cfg, now, usage, idle_min):
         # owner mid-workday. Daytime runs are manual (`run.sh`) now.
         return Decision("skip", "day: daytime runs are manual only", 0, "day")
 
-    reserve = float(cfg["p90_daily_tokens"]) * days_remaining
+    reserve = float(cfg["p90_daily_usd"]) * days_remaining
     available = cap - week - reserve
 
     if available <= 0:
         return Decision("skip",
-                        f"available={available:.0f} <= 0 (reserve={reserve:.0f})",
+                        f"available={available:.2f} <= 0 (reserve={reserve:.2f})",
                         0, "night")
 
     if idle < float(cfg["activity_idle_night_min"]):
@@ -231,7 +235,7 @@ def decide(cfg, now, usage, idle_min):
     if tonight <= 0:
         return Decision("skip",
                         f"night: tonight's allocation spent "
-                        f"(available={available:.0f})", 0, "night")
+                        f"(available={available:.2f})", 0, "night")
     guard = _today_at(now, cfg["morning_guard"])
     window_end = block["end"] if (block and block["active"]) else now + WINDOW
     if window_end > guard:

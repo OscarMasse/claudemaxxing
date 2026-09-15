@@ -28,10 +28,10 @@ Procedure:
      Record the PR URL in the task's `## Notes` and in your digest bullet. Work that
      stops at an unpushed branch is NOT done, whatever its state otherwise.
      Push with the explicit HTTPS URL: `git push https://github.com/<owner>/<repo>.git
-     <branch>`. The forms `git push origin <branch>` and `git push -u origin <branch>`
-     are refused by the headless permission layer ("Claude requested permissions to
-     use Bash, but you haven't granted it yet"); that is not a task blocker, it is the
-     wrong command - do not diagnose it as "blocked by permissions", use the URL form.
+     <branch>` (SSH remotes have no key in a headless session). Only a `pr` session
+     may push: the launcher denies `git push` outright for `branch` and `local`
+     tasks, so a refused push there means the delivery contract, not a permission
+     problem to diagnose.
      A push touching `.github/workflows/*` is rejected by GitHub: the agent token has
      no `workflow` scope. Leave workflow edits out of the branch, describe the hunk in
      the PR body, and set the task `blocked` with that question for the owner (step 6).

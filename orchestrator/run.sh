@@ -140,6 +140,16 @@ case "$DELIVERY" in
   local)  DELIVERY_DIRECTIVE="Delivery for this task is \`local\`: the strictly-local rails apply in full, nothing leaves the machine." ;;
   *)      DELIVERY_DIRECTIVE="No delivery was passed down: read the \`delivery:\` key of the task you pick and apply the contract in step 1." ;;
 esac
+# Permission routing by delivery. Sessions run in bypassPermissions, so the
+# prompt's "do NOT push" is the only thing standing between a `branch`/`local`
+# task and origin. A per-session deny is absolute (deny > ask > allow, and it
+# cannot be talked around by another command form), so only `pr` keeps the
+# push. The `rtk` variant covers the token-saving hook that rewrites commands.
+# Digest and auto modes carry no delivery and never push either.
+PERM_ARGS=()
+if [ "$DELIVERY" != "pr" ]; then
+  PERM_ARGS=(--disallowedTools "Bash(git push*)" "Bash(rtk git push*)")
+fi
 PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
               -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
               -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \
@@ -174,6 +184,7 @@ printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
+  "${PERM_ARGS[@]}" \
   "${ADD_DIRS[@]}" \
   > "$OUT_JSON" 2> "$ERR_FILE"
 CODE=$?

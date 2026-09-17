@@ -184,7 +184,7 @@ printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
-  "${PERM_ARGS[@]}" \
+  ${PERM_ARGS[@]+"${PERM_ARGS[@]}"} \
   "${ADD_DIRS[@]}" \
   > "$OUT_JSON" 2> "$ERR_FILE"
 CODE=$?

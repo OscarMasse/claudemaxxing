@@ -85,6 +85,14 @@ Procedure:
 8. Verification is mandatory before `done`, in two stages:
    a. Run exactly what the task's `verification` field says and record the result
       in `## Notes`.
+      An environment problem (a port already bound, a stack another worktree left
+      up, a missing gitignored file in a fresh worktree) is part of your work, not
+      a reason to stop: isolate your run (its own compose project, no or other host
+      ports, a copied template file) and verify anyway. Never tear down a stack in
+      another worktree - a concurrent session may be using it; the gatekeeper reaps
+      abandoned ones between sessions. "Not verified, environment was busy" is not
+      an acceptable stop reason; if isolation truly fails, record the exact
+      command and error in `## Notes`, like any other failed verification.
       If the task body has an `## Acceptance` checklist (`- [ ]` items), verify and
       tick each item individually; every box must be checked before `done`.
    b. Adversarial review: spawn a fresh-context subagent (the internal Agent tool,
@@ -108,6 +116,8 @@ Procedure:
     step 1: push and open the PR (recording its URL) for `pr`, stop at the local commit
     for `branch`, never push for `local`. Push by explicit HTTPS URL, never `origin`,
     and never push `.github/workflows/*` (see the `pr` bullet in step 1).
+    Before exiting, `docker compose down` every stack you brought up in your
+    worktree (volumes may stay); a later slice brings it back up in seconds.
 
 Constraints: never launch other Claude sessions (internal subagents via the Agent
 tool are fine); stay inside {{PROJECT_DIRS}}; push exactly as the task's `delivery:`

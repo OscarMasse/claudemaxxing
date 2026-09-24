@@ -327,6 +327,13 @@ def _main(argv):
             return 2
         print(" ".join(p["dirs"]))
         return 0
+    if cmd == "project-local-only":
+        p = projects(cfg).get(argv[3])
+        if p is None:
+            print(f"config: unknown project {argv[3]!r}", file=sys.stderr)
+            return 2
+        print(_fmt(p["local_only_default"]))
+        return 0
     if cmd == "project-account":
         p = projects(cfg).get(argv[3])
         if p is None:

@@ -24,16 +24,6 @@ STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
 # Same export as gatekeeper.sh.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
-# GitHub credentials for background sessions: a fine-grained PAT scoped to the
-# repos the agents may touch (Contents + Pull requests only). GH_TOKEN drives
-# `gh` (pr create etc.); GIT_ASKPASS answers git's HTTPS prompts. Push targets
-# are HTTPS URLs; protect main with pre-push hooks or branch protection.
-AGENT_GH_TOKEN_FILE="$HOME/.config/backlog-agents/github-token"
-if [ -f "$AGENT_GH_TOKEN_FILE" ]; then
-  export GH_TOKEN="$(cat "$AGENT_GH_TOKEN_FILE")"
-  export GIT_ASKPASS="$HOME/.config/backlog-agents/git-askpass.sh"
-fi
-
 ACCOUNT="${ORCH_ACCOUNT:-}"
 MODE="orchestrate"
 ARGS=()
@@ -103,6 +93,22 @@ CLAUDE_BIN="$(cfg account "$ACCOUNT" claude_bin)"
 MODEL="${MODEL_OVR:-$(cfg account "$ACCOUNT" claude_model)}"
 EFFORT="${EFFORT_OVR:-$(cfg account "$ACCOUNT" claude_effort)}"
 MAX_USD="$(cfg account "$ACCOUNT" max_session_usd 15)"
+
+# GitHub credentials for background sessions: a fine-grained PAT scoped to the
+# repos the agents may touch (Contents + Pull requests only). GH_TOKEN drives
+# `gh` (pr create etc.); GIT_ASKPASS answers git's HTTPS prompts. Push targets
+# are HTTPS URLs; protect main with pre-push hooks or branch protection.
+# Only for a known project that may publish: a `local_only_default` project
+# (the employer's repos) never pushes, and the PAT cannot see its org either -
+# exporting it there made every read-only `gh` call return an empty list
+# instead of falling back to the owner's keyring login (2026-09-17). Digest
+# and auto-pick sessions carry no project and never push, so they get none.
+AGENT_GH_TOKEN_FILE="$HOME/.config/backlog-agents/github-token"
+if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" != "true" ] \
+   && [ -f "$AGENT_GH_TOKEN_FILE" ]; then
+  export GH_TOKEN="$(cat "$AGENT_GH_TOKEN_FILE")"
+  export GIT_ASKPASS="$HOME/.config/backlog-agents/git-askpass.sh"
+fi
 
 # Directories the session may write to (--add-dir): the picked task's project
 # dirs, or every project dir of this account when no task was pre-selected.

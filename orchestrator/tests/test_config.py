@@ -114,6 +114,18 @@ class TestSections(unittest.TestCase):
         self.assertEqual(projs["job"]["priority"], 100)  # default
         self.assertIs(projs["job"]["local_only_default"], True)
 
+    def test_project_local_only_cli(self):
+        # run.sh keys the agent GitHub token on this: a local-only project
+        # must not get it (its reads fall back to the owner's keyring).
+        path = write_cfg(NESTED)
+        out = {}
+        for name in ("side-projects", "job"):
+            out[name] = subprocess.run(
+                [sys.executable, str(Path(config.__file__)), path,
+                 "project-local-only", name],
+                capture_output=True, text=True).stdout.strip()
+        self.assertEqual(out, {"side-projects": "false", "job": "true"})
+
     def test_project_unknown_account_raises(self):
         cfg = config.load(write_cfg(
             "accounts:\n  - name: a\n    claude_config_dir: ~/.claude\n"

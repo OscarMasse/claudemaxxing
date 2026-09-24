@@ -53,7 +53,8 @@ def run_gate(root, extra_env=None, arg="tick"):
                ORCH_ROOT=str(root),
                ORCH_NOW="2026-08-11T02:30:00+02:00",  # Tuesday night
                ORCH_IDLE_MIN="999",
-               ORCH_NO_NOTIFY="1")
+               ORCH_NO_NOTIFY="1",
+               ORCH_DOCKER_BIN="")  # never touch the real docker daemon
     # A developer shell may carry these; they must not leak into the tests.
     env.pop("ORCH_CONFIG", None)
     env.pop("BACKLOG_ROOT", None)
@@ -458,7 +459,8 @@ class TestGate(unittest.TestCase):
                    BACKLOG_ROOT=str(self.root),
                    ORCH_NOW="2026-08-11T02:30:00+02:00",
                    ORCH_IDLE_MIN="999",
-                   ORCH_NO_NOTIFY="1")
+                   ORCH_NO_NOTIFY="1",
+                   ORCH_DOCKER_BIN="")
         env.pop("ORCH_ROOT", None)
         env.pop("ORCH_CONFIG", None)
         env.update(self.env)
@@ -600,6 +602,55 @@ class TestGate(unittest.TestCase):
         run_gate(self.root, env)  # second tick: no duplicate mark
         notified2 = (self.root / "orchestrator" / "state" / "notified.txt").read_text()
         self.assertEqual(notified, notified2)
+
+
+class TestGateJanitor(unittest.TestCase):
+    """When a tick tears down agent-worktree stacks (lib/janitor.py): only at
+    night, with no session running and the owner away. A stub docker CLI
+    lists one agent stack under the project dir and records `compose` calls.
+    Borrows TestGate's fixture without inheriting its tests."""
+    tearDown = TestGate.tearDown
+    write_cfg = TestGate.write_cfg
+    write_task = TestGate.write_task
+
+    def setUp(self):
+        TestGate.setUp(self)
+        proj = self.root / "proj"
+        self.write_cfg(BASE_CFG + PERSONAL
+                       + PROJECTS.replace("~/projects", str(proj)))
+        self.calls = self.root / "docker-calls"
+        stub = self.root / "docker"
+        stub.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = ps ]; then "
+            f"printf 'proj-a\\t{proj}/.agent-worktrees/proj-a\\n'; exit 0; fi\n"
+            f"echo \"$@\" >> {self.calls}\n")
+        stub.chmod(0o755)
+        self.env = dict(self.env, ORCH_DOCKER_BIN=str(stub))
+
+    def downs(self):
+        return self.calls.read_text() if self.calls.exists() else ""
+
+    def test_night_idle_nothing_running_reaps(self):
+        run_gate(self.root, self.env)
+        self.assertEqual(self.downs(), "compose -p proj-a down --remove-orphans\n")
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("janitor compose down project=proj-a ok=True", log)
+
+    def test_running_session_protects_stacks(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True)
+        (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
+        run_gate(self.root, self.env)
+        self.assertEqual(self.downs(), "")
+
+    def test_daytime_never_reaps(self):
+        run_gate(self.root, dict(self.env, ORCH_NOW="2026-08-11T14:00:00+02:00"))
+        self.assertEqual(self.downs(), "")
+
+    def test_owner_present_never_reaps(self):
+        run_gate(self.root, dict(self.env, ORCH_IDLE_MIN="2"))
+        self.assertEqual(self.downs(), "")
 
 
 class TestPlatformSeam(unittest.TestCase):

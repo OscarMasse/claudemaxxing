@@ -58,6 +58,7 @@ Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffre
 - **Kill switch.** `touch orchestrator/PAUSED` stops all launches; deleting it resumes.
 - **No silent defaults.** A frontmatter value the engine interprets gets a default when the key is ABSENT, never when it is present and unreadable: an unknown `model:` or `project:`, or a missing `delivery:`, makes the task unschedulable and reported (`gate.py status`, every tick's log), because work done at the wrong model or in the wrong place costs more than work not done.
 - **Self-repair.** A session killed mid-task leaves it `in-progress`, which no scheduler ever picks again; the gatekeeper resets such a task to `ready` once no live session can account for it, keeping its last notes so the next session resumes rather than restarts.
+- **Stack janitor.** Sessions leave docker compose stacks running in their worktrees, and a stale stack holding a host port makes the next session's verification fail; at night, with no session running and the owner away, the gatekeeper runs `docker compose down` (volumes kept) on every stack whose working directory is under a project's `.agent-worktrees/`, and never touches anything else.
 - **Live morning digest.** Every run journals its progress into the day's digest file as it finishes; the 07:37 session curates it into "done autonomously" vs "needs the human". Readable at any hour.
 
 ## Accounts and projects

@@ -22,7 +22,8 @@ Env overrides (tests / manual runs):
   the repo default; see lib/config.resolve_path),
   ORCH_NOW (ISO), ORCH_IDLE_MIN, ORCH_IDLE_MIN_<ACCOUNT>,
   ORCH_USAGE_JSON, ORCH_USAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
-  ORCH_PLATFORM (<ACCOUNT> = name upper-cased, non-alphanumerics -> _)
+  ORCH_PLATFORM, ORCH_DOCKER_BIN (empty disables the janitor)
+  (<ACCOUNT> = name upper-cased, non-alphanumerics -> _)
 """
 import hashlib
 import json
@@ -35,7 +36,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import activity, config, controller, ledger, quota, tasks, usage  # noqa: E402
+from lib import activity, config, controller, janitor, ledger, quota, tasks, usage  # noqa: E402
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -389,6 +390,27 @@ def tick_account(p, acct, projs):
     return idle
 
 
+def janitor_due(p, cfg):
+    """Whether this tick may tear down agent-worktree stacks (lib/janitor.py).
+
+    Only when nothing can be using them: no session running on any account
+    (the locks do not say which worktree a session works in, so any live
+    session protects every stack), inside some account's night window, and
+    with the owner away from every account. Daytime is excluded because that
+    is when the owner checks an agent's branch by hand in its worktree, stack
+    up. Every night starts with nothing running, so a leftover never survives
+    into the next night."""
+    accts = [a for a in config.accounts(cfg) if not config.misconfigured_account(a)]
+    if not accts:
+        return False
+    if any(active_slots(p, p["state"] / a["name"]) for a in accts):
+        return False
+    if not any(night_start_dt(a, now_from_env(a)) for a in accts):
+        return False
+    idles = [idle_for_account(p["root"], a) for a in accts]
+    return all(i is None or i > PRESENT_MIN for i in idles)
+
+
 def tick(p):
     if p["paused"].exists():
         print("SKIP paused")
@@ -405,6 +427,12 @@ def tick(p):
     for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,
                                                datetime.now().strftime("%F")):
         log(p, f"repaired stuck task={task_name} in-progress for {hours:.1f}h")
+    # Also before scheduling: sessions launched by this tick must start from a
+    # machine with no abandoned stacks on it.
+    if janitor_due(p, cfg):
+        dirs = sorted({d for proj in projs.values() for d in proj["dirs"]})
+        for name, ok in janitor.sweep(dirs):
+            log(p, f"janitor compose down project={name} ok={ok}")
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))

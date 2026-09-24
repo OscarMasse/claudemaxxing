@@ -407,6 +407,26 @@ class TestGate(unittest.TestCase):
         lines = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
         self.assertEqual(len(lines), 2, r.stdout)
 
+    def _prereset_ceiling_runs(self, model, now):
+        # The burn-down runs wider than the night, and only the burn-down.
+        self.append_cfg("max_parallel_sessions: 2\nest_session_usd: 0.25\n"
+                        "prereset_max_parallel_sessions: 4\n"
+                        "prereset_max_fable_slots: 3\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        f"model: {model}\nparallel: true\n---\n")
+        r = run_gate(self.root, dict(self.env, ORCH_NOW=now))
+        return len([l for l in r.stdout.splitlines() if l.startswith("RUN")])
+
+    def test_prereset_overrides_the_parallel_ceiling(self):
+        self.assertEqual(self._prereset_ceiling_runs("sonnet", "2026-08-12T23:00:00+02:00"), 4)
+
+    def test_prereset_overrides_the_fable_ceiling(self):
+        self.assertEqual(self._prereset_ceiling_runs("fable", "2026-08-12T23:00:00+02:00"), 3)
+
+    def test_night_ignores_the_prereset_ceilings(self):
+        self.assertEqual(self._prereset_ceiling_runs("sonnet", "2026-08-11T02:30:00+02:00"), 2)
+
     def test_launch_claims_the_task(self):
         # The session used to be the one setting `in-progress`, minutes after
         # launch; on 2026-09-12 the next tick still saw the task `ready` and

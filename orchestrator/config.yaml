@@ -58,7 +58,8 @@ digest_time: 07:37
 # per-night plan hoards for it.
 prereset_burn_hours: 8
 # Activity lock threshold (minutes since the last interactive session write on
-# the account being scheduled; each account has its own idle clock).
+# the account being scheduled; each account has its own idle clock). Night
+# regime only: the pre-reset burn-down ignores it.
 activity_idle_night_min: 40
 # Slice size (wall-clock minutes handed to the claude session).
 night_slice_min: 50
@@ -76,6 +77,11 @@ max_parallel_sessions: 4
 # and starving the cheaper models of slots. Applies to the pre-reset burn-down
 # too, which upgrades sessions to Fable and would hit that same wall.
 max_fable_slots: 1
+# Burn-down overrides of the two ceilings above (unset: same values). The
+# last night has no next-morning window to protect, and a model that hits its
+# wall is recorded and skipped (lib/quota.py), so both can run wider.
+# prereset_max_parallel_sessions: 4
+# prereset_max_fable_slots: 2
 
 # Shape of the per-night allocation of the weekly surplus. Night j of the n left
 # before the reset gets weight r^(j-1), so the plan is back-loaded: unspent

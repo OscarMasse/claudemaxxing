@@ -52,7 +52,7 @@ Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffre
 
 - **Verification before landing.** Every task declares a `verification` method (tests, script, checkable criteria, optionally a per-item `## Acceptance` checklist), and each session must pass an adversarial review: a fresh-context subagent instructed to refute the work, looped until a pass finds zero new major issues.
 - **Quota-aware scheduling.** A decaying reserve protects a P90 heavy day for every remaining day of the quota week; background sessions consume only the surplus, mostly at night (02:00-06:00).
-- **Activity lock.** Idle time comes from interactive event timestamps in session transcripts; any recent human activity on an account blocks its background launches.
+- **Activity lock.** Idle time comes from interactive event timestamps in session transcripts; any recent human activity on an account blocks its night launches. The pre-reset burn-down ignores it: the surplus expires at the reset, and a clash with the owner's own use costs less than a skipped tick.
 - **Prerequisite gating.** `prerequisites: <task> <task>` in a task's frontmatter keeps it unscheduled until every named task is `done`.
 - **Declared delivery.** Every task states `delivery: branch|pr|local` and the session must honor it: `pr` means the task is not done until the branch is pushed and the PR is open with its URL recorded, `branch` means a local commit and no push, `local` means nothing leaves the machine. Leaving it to the session's judgement produced a night where four of five finished tasks sat in unpushed worktrees and one opened a PR, with nothing in the tasks distinguishing them.
 - **Kill switch.** `touch orchestrator/PAUSED` stops all launches; deleting it resumes.
@@ -122,7 +122,7 @@ The budget paces the week; it does not tell you when a model is about to be refu
 The bars are server-side truth and include usage the transcripts cannot see (other devices, claude.ai).
 So the wall is learned by hitting it: a session that dies on `You've hit your <scope> limit - resets <time>` has that fact recorded per model family in `state/<account>/exhausted.json`, and later ticks stop offering that model until the stated reset.
 It is per model on purpose - the night this was built, Fable was refused at 02:25 while Sonnet kept working in the same window - and any other failure records nothing, so an ordinary crash never costs a model its eligibility.
-`max_fable_slots` caps how many Fable sessions may run concurrently (1 by default): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
+`max_fable_slots` caps how many Fable sessions may run concurrently (1 by default; `prereset_max_fable_slots` and `prereset_max_parallel_sessions` override the two ceilings in the burn-down): its binding constraint is a token limit rather than wall-clock time, so parallel Fable sessions only race each other to that wall while starving the cheaper models of slots.
 It counts the sessions still RUNNING, not just the tick's own launches: `run.sh` writes the model into the `RUNNING.N` lock, and the tick reads it back, because a session outlives the tick that launched it by many ticks.
 
 **Per-night allocation.**

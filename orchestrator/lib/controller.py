@@ -183,7 +183,11 @@ def decide(cfg, now, usage, idle_min):
 
     if prereset:
         # Burn-down: no reserve, no budget, no model arbitration, no morning
-        # guard. Only the activity lock protects the owner.
+        # guard, and no activity lock. The lock used to be the one guard kept
+        # here; on 2026-09-24 it held the burn-down to one batch in an hour
+        # with 69% of the week still unspent. With that much surplus left a
+        # session clashing with the owner's own use is unlikely and cheap,
+        # while every skipped tick is quota that expires at the reset.
         #
         # Measured weekly consumption is an estimate, and its error is only
         # tolerable because during the week it merely paces spending: an
@@ -200,8 +204,6 @@ def decide(cfg, now, usage, idle_min):
         # account's wall records it (lib/quota.py) and later ticks stop
         # launching that model. A task cut mid-slice is not a loss either -
         # it resumes at the start of the next week.
-        if idle < float(cfg["activity_idle_night_min"]):
-            return Decision("skip", f"prereset: activity {idle:.0f}min ago", 0, "prereset")
         minutes_to_reset = (reset - now).total_seconds() / 60
         return Decision("run", "prereset burn-down",
                         max(5, min(int(cfg["night_slice_min"]), int(minutes_to_reset))),

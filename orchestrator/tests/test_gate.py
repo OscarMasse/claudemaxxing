@@ -505,6 +505,8 @@ class TestGate(unittest.TestCase):
         lock.write_text(f"999 {int(time.time())}")  # fresh
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal running"), r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("account=personal skip reason='all slots busy'", log)
 
     def test_status_prints_summary(self):
         r = run_gate(self.root, self.env, arg="status")

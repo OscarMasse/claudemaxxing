@@ -81,7 +81,7 @@ def now_from_env(acct):
     return datetime.now(ZoneInfo(acct["reset_tz"]))
 
 
-def idle_for_account(root, acct):
+def idle_for_account(acct):
     """Idle minutes on THIS account's profile: interactive use of one
     subscription never blocks background work on another."""
     raw = (os.environ.get(f"ORCH_IDLE_MIN_{usage.env_name(acct['name'])}")
@@ -89,9 +89,11 @@ def idle_for_account(root, acct):
     if raw is not None:
         return float(raw)
     # Claude Code stores transcripts under <config dir>/projects/<path-encoded-cwd>.
-    # The orchestrator's own project dir (derived from the backlog root) is
-    # excluded: its headless sessions must not count as the owner's activity.
-    exclude = str(root).replace("/", "-")
+    # The headless sessions' project dir is excluded: they must not count as
+    # the owner's activity. run.sh cds into this directory before launching
+    # them, so that is their cwd - not the backlog root, where the owner's own
+    # interactive sessions run and must keep counting.
+    exclude = str(Path(__file__).resolve().parent).replace("/", "-")
     return activity.idle_minutes(Path(acct["claude_config_dir"]) / "projects",
                                  exclude, time.time())
 
@@ -250,7 +252,7 @@ def tick_account(p, acct, projs):
         print(f"SKIP {name} misconfigured: {problem}")
         return None
     now = now_from_env(acct)
-    idle = idle_for_account(p["root"], acct)
+    idle = idle_for_account(acct)
     snap = usage.snapshot(acct, now)
     state = p["state"] / name
     # The night allocator needs to know what tonight already cost, so its
@@ -407,7 +409,7 @@ def janitor_due(p, cfg):
         return False
     if not any(night_start_dt(a, now_from_env(a)) for a in accts):
         return False
-    idles = [idle_for_account(p["root"], a) for a in accts]
+    idles = [idle_for_account(a) for a in accts]
     return all(i is None or i > PRESENT_MIN for i in idles)
 
 
@@ -481,7 +483,7 @@ def status(p):
             print(f"account={name} misconfigured: {problem}")
             continue
         now = now_from_env(acct)
-        idle = idle_for_account(p["root"], acct)
+        idle = idle_for_account(acct)
         snap = usage.snapshot(acct, now)
         reset = controller.next_reset(acct, now)
         days = (reset - now).total_seconds() / 86400

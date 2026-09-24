@@ -281,6 +281,12 @@ def tick_account(p, acct, projs):
                     MAX_SLOTS)
     free = cap_slots - active_slots(p, state)
     if d.action == "run" and free <= 0:
+        # Logged like any other decision: a silent tick is indistinguishable
+        # from a gatekeeper that did not run (2026-09-24, a 15-minute hole in
+        # the log that was only four busy slots).
+        log(p, f"account={name} skip reason='all slots busy' slice=0 "
+               f"regime={d.regime} week=${snap['week_usd']:.2f} "
+               f"idle={idle} free_slots=0 duties=- fillers=- tasks=-")
         print(f"SKIP {name} running")
         return idle
     # Task selection happens here (not in the session): the tasks' declared

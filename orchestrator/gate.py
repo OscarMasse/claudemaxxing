@@ -81,6 +81,13 @@ def now_from_env(acct):
     return datetime.now(ZoneInfo(acct["reset_tz"]))
 
 
+def regime_key(acct, regime, key, default):
+    """`prereset_<key>` in the burn-down when set, `<key>` otherwise."""
+    if regime == "prereset" and f"prereset_{key}" in acct:
+        return acct[f"prereset_{key}"]
+    return acct.get(key, default)
+
+
 def idle_for_account(acct):
     """Idle minutes on THIS account's profile: interactive use of one
     subscription never blocks background work on another."""
@@ -267,7 +274,11 @@ def tick_account(p, acct, projs):
     # Playwright) and bounds how many sessions can contend on the same repos.
     # run.sh only allocates RUNNING.1..8 lock slots, so 8 is the hard structural
     # limit however high this is set.
-    cap_slots = min(int(acct.get("max_parallel_sessions", 4)), MAX_SLOTS)
+    # The burn-down may run wider (`prereset_max_parallel_sessions`): the
+    # ordinary ceiling also paces the 5h window the owner inherits the next
+    # morning, which is worth nothing on the last night.
+    cap_slots = min(int(regime_key(acct, d.regime, "max_parallel_sessions", 4)),
+                    MAX_SLOTS)
     free = cap_slots - active_slots(p, state)
     if d.action == "run" and free <= 0:
         print(f"SKIP {name} running")
@@ -313,7 +324,7 @@ def tick_account(p, acct, projs):
         # the wall it would run into there is the same one.
         # Sessions launched by earlier ticks count too: the constraint is on
         # what runs concurrently, not on what one tick launches.
-        fable_slots = int(acct.get("max_fable_slots", 1))
+        fable_slots = int(regime_key(acct, d.regime, "max_fable_slots", 1))
         fable_running = running_models(state).count("fable")
         # The per-model rules go INTO the selection rather than filtering its
         # output: cutting the queue to `free` first and dropping the models

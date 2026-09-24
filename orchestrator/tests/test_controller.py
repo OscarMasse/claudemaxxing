@@ -98,11 +98,12 @@ class TestDecide(unittest.TestCase):
         d = controller.decide(CFG, now, usage(week=95), idle_min=999)
         self.assertEqual(d.action, "run")
 
-    def test_prereset_still_respects_activity(self):
+    def test_prereset_ignores_activity(self):
+        # The owner working right now does not hold the burn-down back.
         now = datetime(2026, 8, 12, 23, 0, tzinfo=TZ)
-        d = controller.decide(CFG, now, usage(week=0), idle_min=10)
-        self.assertEqual(d.action, "skip")
-        self.assertIn("activity", d.reason)
+        for idle in (0, 1, 10):
+            d = controller.decide(CFG, now, usage(week=0), idle_min=idle)
+            self.assertEqual((d.action, d.regime), ("run", "prereset"))
 
     def test_prereset_ignores_the_estimate_entirely(self):
         # Wednesday 23:00, reset in <8h. Whatever the measurement says - a
@@ -115,13 +116,6 @@ class TestDecide(unittest.TestCase):
             d = controller.decide(CFG, now, usage(week=week), idle_min=999)
             self.assertEqual((d.action, d.regime), ("run", "prereset"))
             self.assertEqual(d.budget_usd, float("inf"))
-
-    def test_prereset_still_yields_to_the_owner(self):
-        # The activity lock is the one guard the burn-down keeps.
-        now = datetime(2026, 8, 12, 23, 0, tzinfo=TZ)
-        d = controller.decide(CFG, now, usage(week=0), idle_min=1)
-        self.assertEqual(d.action, "skip")
-        self.assertIn("activity", d.reason)
 
     def test_a_decision_never_names_a_model(self):
         # The surplus used to pick a model for the tick, which then acted as a

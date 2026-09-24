@@ -2,7 +2,7 @@
 
 Scans session transcripts under the Claude profile's projects dir, excluding
 the orchestrator's own project directory (its headless sessions run from the
-backlog root and must not count as the owner's activity).
+engine's orchestrator/ directory and must not count as the owner's activity).
 
 Idle is derived from the timestamp of the last INTERACTIVE event (user or
 assistant turn) inside each transcript, never from file mtime and never from

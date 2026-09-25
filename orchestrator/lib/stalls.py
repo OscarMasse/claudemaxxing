@@ -162,7 +162,8 @@ def detect(root, state_root, now):
 
     Pure read. The per-night storm looks at the night `now` belongs to only:
     a storm from a past night is history, not something to block on today.
-    Duties and fillers stay `ready` by contract and are paced by their own
+    Duties, fillers and `parallel: true` tasks (shards launched side by
+    side) stay `ready` by contract and are paced by their own
     rules, so they are never judged here. Only runs after the detector last blocked a task count, so a
     task the owner sets back to `ready` gets a fresh start."""
     since = {k: _naive(datetime.fromisoformat(v))
@@ -181,7 +182,7 @@ def detect(root, state_root, now):
         name = path.name
         fm = path.read_text(errors="replace")
         if (_status(path) != "ready"
-                or re.search(r"^(duty:\s*\S|filler:\s*true)", fm, re.M)):
+                or re.search(r"^(duty:\s*\S|filler:\s*true|parallel:\s*true)", fm, re.M)):
             continue
         ls = launches.get(name, [])
         if (len(ls) >= STALL_RUNS and ls[-1]["hash"] == ls[-2]["hash"]

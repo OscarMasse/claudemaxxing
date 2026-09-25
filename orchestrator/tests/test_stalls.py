@@ -92,8 +92,9 @@ class StallTest(Base):
         self.now += timedelta(days=2)
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
 
-    def test_duty_and_filler_are_never_judged(self):
-        for name, extra in (("d.md", "duty: nightly\n"), ("f.md", "filler: true\n")):
+    def test_duty_filler_parallel_never_judged(self):
+        for name, extra in (("d.md", "duty: nightly\n"), ("f.md", "filler: true\n"),
+                            ("s.md", "parallel: true\n")):
             path = self.task(name, TASK.replace("status: ready\n",
                                                 "status: ready\n" + extra))
             for i in range(5):

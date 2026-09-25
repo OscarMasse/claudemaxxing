@@ -402,7 +402,10 @@ def tick_account(p, acct, projs):
                 # `ready` by contract (duties.json is what paces a duty), and
                 # a `parallel: true` task is shared by design: its shards
                 # coordinate through claims of their own.
-                stalls.record_launch(p["state"], t["path"], now)
+                try:
+                    stalls.record_launch(p["state"], t["path"], now)
+                except OSError as e:
+                    log(p, f"stall detector failed (launch): {e!r}")
                 tasks.claim(t["path"], now.strftime("%F"), t["model"],
                             d.slice_min)
     else:

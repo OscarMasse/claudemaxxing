@@ -215,9 +215,16 @@ def period_keys(acct, now):
     A period is ABSENT when the current tick is outside its window, which is
     what makes a nightly duty night-only: no key, not due. `weekly` is keyed on
     the quota week (the last reset), so it is always present.
+
+    `filler` is the night a tick belongs to (the local date 12 hours earlier,
+    so an evening burn-down and the 04:00 tick share one): a filler runs at
+    most once per night. Without it a filler was relaunched on every tick the
+    queue ran dry - 42 sessions of the same no-op chore on the 2026-09-24
+    burn-down, where the budget is unlimited and never stopped it.
     """
     tz = ZoneInfo(acct["reset_tz"])
-    keys = {"weekly": controller.prev_reset(acct, now).date().isoformat()}
+    keys = {"weekly": controller.prev_reset(acct, now).date().isoformat(),
+            "filler": (now.astimezone(tz) - timedelta(hours=12)).date().isoformat()}
     start = night_start_dt(acct, now)
     if start:
         keys["nightly"] = start.astimezone(tz).date().isoformat()
@@ -394,7 +401,7 @@ def tick_account(p, acct, projs):
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
                   f"{t['effort']} {t['project']} {t.get('est_usd', 0.0):.2f} "
                   f"{t['delivery']}")
-            if t["sched"] == "duty":
+            if t["sched"] in ("duty", "filler"):
                 record_duty(state, t["path"], t["period_key"])
             elif t["sched"] is None and not t["parallel"]:
                 # Queue tasks are claimed here, at launch, or the next tick

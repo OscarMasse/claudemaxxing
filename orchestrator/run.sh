@@ -157,10 +157,13 @@ esac
 # with its reason: pushes and mutating gh calls for every delivery but `pr`
 # (digest and auto modes carry no delivery and never publish either), force
 # pushes, filter-branch and credential reads for every session.
-PERM_ARGS=()
-while IFS= read -r rule; do PERM_ARGS+=("$rule"); done \
-  < <(python3 lib/permissions.py "$DELIVERY")
-PERM_ARGS=(--disallowedTools "${PERM_ARGS[@]}")
+# Fail closed: a broken builder must not launch a session without its rails.
+if ! RULES="$(python3 lib/permissions.py "$DELIVERY")" || [ -z "$RULES" ]; then
+  echo "$(date '+%F %T') permissions builder failed, not launching" >&2
+  exit 1
+fi
+PERM_ARGS=(--disallowedTools)
+while IFS= read -r rule; do PERM_ARGS+=("$rule"); done <<< "$RULES"
 PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
               -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
               -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \

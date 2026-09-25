@@ -30,6 +30,9 @@ GH_MUTATING = (
     "pr create", "pr ready", "pr reopen",
     "issue comment", "issue create", "issue edit", "issue close",
     "issue reopen", "issue delete",
+    "release create", "release edit", "release delete",
+    "repo create", "repo edit", "repo delete", "gist create",
+    "workflow run", "label create",
 )
 
 WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
@@ -74,7 +77,10 @@ def irreversible_rules():
     Force flags are matched anywhere after `push`. A `+refspec`
     (`git push origin +branch`) is a force push too and is caught by the
     `push * +*` form. Accepted gaps: bundled short flags (`-uf`) and a
-    `remote.<name>.push` refspec with a `+` set in git config.
+    `remote.<name>.push` refspec with a `+` set in git config, and env-var
+    prefixes (`FOO=1 git push`) if the harness does not strip them. The
+    `git -C * ` prefix over-matches (`git -C wt log --grep push` is denied):
+    accepted, a false refusal costs less than a missed push.
     `git reset --hard` is deliberately NOT here: inside a disposable worktree
     it is the routine way to abandon a bad attempt, and nothing is lost.
     """

@@ -978,6 +978,19 @@ class TestGateDuties(unittest.TestCase):
         self.assertIn("queue.md", lines[0])
         self.assertIn("tidy.md", lines[1])
 
+    def test_filler_runs_once_per_night(self):
+        # 2026-09-24: a filler relaunched on every tick the queue ran dry, 42
+        # times in one burn-down. Served at launch, it waits for the next night.
+        self.cost(0.25)
+        self.task("tidy.md", "filler: true\n")
+        first = self.runs(run_gate(self.root, self.env))
+        self.assertEqual(len(first), 1, first)
+        for lock in self.root.glob("orchestrator/state/*/RUNNING.*"):
+            lock.unlink()
+        self.assertEqual(self.runs(run_gate(self.root, self.env)), [])
+        next_night = dict(self.env, ORCH_NOW="2026-08-12T02:30:00+02:00")
+        self.assertEqual(len(self.runs(run_gate(self.root, next_night))), 1)
+
     def test_filler_never_runs_on_borrowed_budget(self):
         # The queue task alone overshoots the allocation: unlike a queue task,
         # a filler never gets the "first session always runs" exemption.

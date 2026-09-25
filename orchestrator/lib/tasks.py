@@ -61,7 +61,9 @@ Scheduling classes (frontmatter, mutually exclusive):
 
   `filler: true` - an opportunistic routine. Selected only AFTER the priority
   queue has been served and only if budget remains, so it never displaces real
-  work. Good for open-ended chores that are nice to advance but never urgent.
+  work, and at most once per night (the `filler` period key, recorded at
+  launch like a duty's). Good for open-ended chores that are nice to advance
+  but never urgent.
 
 Both are excluded from the normal priority queue; a task declaring neither is
 ordinary queued work.
@@ -588,5 +590,12 @@ def launch_order(root, projects, account, count,
     queue = _ordered(root, projects, account)
     out += _take(queue, count - len(out), slots)
     if len(out) < count:
-        out += _take(fillers(root, projects, account), count - len(out), slots)
+        key = (period_keys or {}).get("filler")
+        due = []
+        for t in fillers(root, projects, account):
+            if key is not None and (done or {}).get(t["path"]) == key:
+                continue  # already served tonight
+            t["period_key"] = key
+            due.append(t)
+        out += _take(due, count - len(out), slots)
     return _pad_parallel(out, queue, count, slots)

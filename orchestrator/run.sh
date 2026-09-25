@@ -182,6 +182,15 @@ if ! PROMPT="$(python3 lib/prompt.py render "prompts/$MODE.md" \
   echo "$(date '+%F %T') prompt rendering failed, not launching" >&2
   exit 1
 fi
+# Token budget warning (hooks/token_budget.py, registered in
+# session-settings.json): the hook reads the task's raw `token_budget:` value
+# from the environment and is a no-op without one (digest, auto-pick).
+export ORCH_DIR
+ORCH_TOKEN_BUDGET=""
+if [ -n "$TASK_FILE" ] && [ -f "$TASK_FILE" ]; then
+  ORCH_TOKEN_BUDGET="$(sed -n '2,/^---$/s/^token_budget:[[:space:]]*//p' "$TASK_FILE" | head -1)"
+fi
+export ORCH_TOKEN_BUDGET
 TIMEOUT_S=$(( (SLICE_MIN + 10) * 60 ))
 START="$(date '+%F %T')"
 
@@ -207,6 +216,7 @@ printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
+  --settings "$ORCH_DIR/session-settings.json" \
   ${PERM_ARGS[@]+"${PERM_ARGS[@]}"} \
   "${ADD_DIRS[@]}" \
   > "$OUT_JSON" 2> "$ERR_FILE"

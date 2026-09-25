@@ -78,14 +78,32 @@ class TestTokenBudgetHook(unittest.TestCase):
         self.assert_warning(self.run_hook(session="a"), 85)
         self.assert_warning(self.run_hook(session="b"), 85)
 
-    def test_uses_latest_context_and_output_counted_once(self):
-        # Records split from one API message share its id and usage.
-        self.write(assistant("m1", 1000, 3000), assistant("m1", 1000, 3000),
+    def test_counts_only_the_latest_turn(self):
+        # Earlier outputs are already inside the latest context.
+        self.write(assistant("m1", 1000, 7000),
                    {"type": "user", "message": {"content": "x"}},
-                   assistant("m2", 2000, 0))
-        self.assertEqual(self.run_hook(), "")  # 2000 + 3000 = 50%
-        self.write(assistant("m1", 1000, 3000), assistant("m2", 6000, 0))
+                   assistant("m2", 2000, 500))
+        self.assertEqual(self.run_hook(), "")  # 2500 = 25%
+        self.write(assistant("m1", 1000, 7000), assistant("m2", 8500, 500))
         self.assert_warning(self.run_hook(), 90)
+
+    def test_falling_back_after_compaction_does_not_rewarn(self):
+        self.write(assistant("m1", 14000, 0))
+        self.assert_warning(self.run_hook(), 140)
+        self.write(assistant("m2", 9000, 0))
+        self.assertEqual(self.run_hook(), "")
+
+    def test_concurrent_hooks_warn_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.write(assistant("m1", 9000, 0))
+        with ThreadPoolExecutor(8) as pool:
+            outs = list(pool.map(lambda _: self.run_hook(), range(8)))
+        self.assertEqual(sum(1 for o in outs if o), 1)
+
+    def test_quoted_and_commented_budgets(self):
+        self.write(assistant("m1", 9000, 0))
+        for i, budget in enumerate(('"10k"', "'10k'", "10k  # soft", "10k\r")):
+            self.assert_warning(self.run_hook(budget=budget, session=str(i)), 90)
 
     def test_budget_units(self):
         self.write(assistant("m1", 1_700_000, 0))

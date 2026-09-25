@@ -28,6 +28,9 @@ from pathlib import Path
 STALL_RUNS = 4          # launches with unchanged content before a task is stalled
 STORM_NIGHT_RUNS = 5    # launches within one night before a task is storming
 STORM_SAME_EXIT = 3     # consecutive sessions on one task with one non-zero exit
+# with_timeout.py's code when a slice runs out: a long task being cut off is
+# working, not failing, and the stall check judges whether it advanced.
+TIMEOUT_EXIT = 124
 GLOBAL_FAIL_RUNS = 5    # consecutive zero-work failures, any task, before PAUSED
 
 # A night is bucketed by the local date 12 hours earlier, so 22:00 and 04:00
@@ -99,8 +102,9 @@ def ledger_rows(state_root):
                 continue
             if isinstance(row, dict) and row.get("ts"):
                 rows.append(row)
-    rows.sort(key=lambda r: r["ts"])
-    return rows
+    # The same session can be recorded at both levels: count it once.
+    unique = {(r["ts"], r.get("mode"), r.get("task")): r for r in rows}
+    return sorted(unique.values(), key=lambda r: r["ts"])
 
 
 def record_launch(state_root, path, ts):
@@ -193,7 +197,7 @@ def detect(root, state_root, now):
                           f"{tonight} launches in the night of {night}"))
             continue
         tail = [r["exit"] for r in rs[-STORM_SAME_EXIT:]]
-        if (len(tail) == STORM_SAME_EXIT and tail[0] != 0
+        if (len(tail) == STORM_SAME_EXIT and tail[0] not in (0, TIMEOUT_EXIT)
                 and len(set(tail)) == 1):
             found.append((name, "storming", len(rs),
                           f"last {STORM_SAME_EXIT} sessions all exited {tail[0]}"))
@@ -236,7 +240,7 @@ def history(state_root):
 
 
 def _zero_work_failure(row):
-    return (row.get("exit", 0) != 0 and not float(row.get("cost_usd") or 0)
+    return (row.get("exit", 0) not in (0, TIMEOUT_EXIT) and not float(row.get("cost_usd") or 0)
             and not int(row.get("duration_ms") or 0))
 
 

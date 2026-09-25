@@ -48,10 +48,10 @@ Procedure:
    leave finished work sitting in a worktree.
    Local-only rails (non-negotiable): a task with `delivery: local` (every task of a
    project that sets `local_only_default: true`) must produce NO external side
-   effects. Concretely:
-   - GitHub strictly read-only: `gh` may list/view PRs, comments, checks, diffs.
-     NEVER `gh pr comment/review/merge/edit/close`, never any mutating API call.
-     Draft replies to reviewers are written to files for the owner to post themselves.
+   effects. Pushes, mutating `gh` calls, force pushes and credential reads are
+   denied by the launcher (`lib/permissions.py`); a refusal is the rail, not a
+   problem to work around. What the deny list cannot see:
+   - Draft replies to reviewers are written to files for the owner to post themselves.
    - Never touch the owner's checkouts (current branch, working tree, stash, index).
      All code work happens in a dedicated `git worktree` under
      <project dir>/.agent-worktrees/<repo>-<topic>, commits stay local, never pushed.

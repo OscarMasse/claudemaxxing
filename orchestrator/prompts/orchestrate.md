@@ -103,7 +103,7 @@ Procedure:
       major issues persist after 3, leave `status: ready` with the open issues
       listed in `## Notes`.
 9. Append one line to {{BACKLOG_ROOT}}/orchestrator/state/runs.log:
-   `<ISO date> task=<file> did=<one-line summary> stopped=<reason>`
+   `<ISO date> task=<basename, e.g. my-task.md> did=<one-line summary> stopped=<reason>`
    (this is the machine log, keep it as is). ALSO append ONE markdown bullet
    under the `## Runs` section of {{DIGEST_FILE}} (create the file with a
    `# Digest <date>` header and a `## Runs` section if it does not exist yet):

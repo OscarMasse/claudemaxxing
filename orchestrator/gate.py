@@ -36,7 +36,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import activity, config, controller, janitor, ledger, quota, tasks, usage  # noqa: E402
+from lib import activity, config, controller, janitor, ledger, quota, stalls, tasks, usage  # noqa: E402
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -402,6 +402,10 @@ def tick_account(p, acct, projs):
                 # `ready` by contract (duties.json is what paces a duty), and
                 # a `parallel: true` task is shared by design: its shards
                 # coordinate through claims of their own.
+                try:
+                    stalls.record_launch(p["state"], t["path"], now)
+                except OSError as e:
+                    log(p, f"stall detector failed (launch): {e!r}")
                 tasks.claim(t["path"], now.strftime("%F"), t["model"],
                             d.slice_min)
     else:
@@ -431,6 +435,16 @@ def janitor_due(p, cfg):
 
 
 def tick(p):
+    # Before the kill-switch check: this is what sets it.
+    # A detector failure must never cost the tick: it is logged and skipped.
+    try:
+        tripped = stalls.trip_global(p["state"], p["paused"], p["needs"])
+    except Exception as e:  # noqa: BLE001
+        tripped = None
+        log(p, f"stall detector failed (global): {e!r}")
+    if tripped:
+        log(p, f"paused: {len(tripped)} consecutive zero-work session failures "
+               f"{tripped[0]['ts']}..{tripped[-1]['ts']}")
     if p["paused"].exists():
         print("SKIP paused")
         return
@@ -446,6 +460,16 @@ def tick(p):
     for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,
                                                datetime.now().strftime("%F")):
         log(p, f"repaired stuck task={task_name} in-progress for {hours:.1f}h")
+    # Also before scheduling, so a task that is not advancing is not handed
+    # the front of the queue once more.
+    try:
+        found = stalls.block_detected(p["root"], p["state"], datetime.now(),
+                                      tasks.set_status)
+    except Exception as e:  # noqa: BLE001
+        found = []
+        log(p, f"stall detector failed (tasks): {e!r}")
+    for task_name, reason, runs, detail in found:
+        log(p, f"blocked {reason} task={task_name} runs={runs}: {detail}")
     # Also before scheduling: sessions launched by this tick must start from a
     # machine with no abandoned stacks on it.
     if janitor_due(p, cfg):
@@ -559,6 +583,12 @@ def status(p):
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "
                   f"out_tokens={s['out_tokens']} total_tokens={s['total_tokens']}")
+    # Printed once, after the accounts: the detector reads every account's runs.
+    for task_name, reason, runs, detail in stalls.detect(p["root"], p["state"], datetime.now()):
+        print(f"stalled task={task_name} reason={reason} runs={runs} ({detail})")
+    for h in stalls.history(p["state"]):
+        print(f"detector_blocked task={h['task']} at={h['ts']} "
+              f"reason={h['reason']} runs={h['runs']} ({h['detail']})")
     # Printed once, after the accounts: these tasks belong to none of them.
     for task_name, project in tasks.orphaned(p["root"], projs):
         print(f"orphaned task={task_name} project={project}")

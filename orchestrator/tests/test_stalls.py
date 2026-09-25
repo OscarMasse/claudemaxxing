@@ -106,6 +106,12 @@ class StallTest(Base):
             self.session(path, self.t0 + timedelta(days=i), note=f"{i}", code=1)
         self.assertEqual(stalls.detect(self.root, self.state, self.now)[0][1], "storming")
 
+    def test_repeated_timeouts_are_not_storming(self):
+        path = self.task()
+        for i in range(stalls.STORM_SAME_EXIT):
+            self.session(path, self.t0 + timedelta(days=i), note=f"{i}", code=124)
+        self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
+
     def test_block_writes_status_and_resets_count(self):
         path = self.task()
         for i in range(5):
@@ -168,6 +174,12 @@ class GlobalStormTest(Base):
             f.write(json.dumps({"ts": "2026-09-01T00:00:00", "mode": "orchestrate",
                                 "exit": 0}) + "\n")
         self.assertEqual(len(stalls.ledger_rows(self.state)), 2)
+
+    def test_duplicate_rows_count_once(self):
+        self.ledger([1] * 3)
+        self.ledger([1] * 3, sub=".")
+        self.assertEqual(len(stalls.ledger_rows(self.state)), 3)
+        self.assertIsNone(self.trip())
 
 
 if __name__ == "__main__":

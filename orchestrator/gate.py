@@ -433,7 +433,12 @@ def janitor_due(p, cfg):
 
 def tick(p):
     # Before the kill-switch check: this is what sets it.
-    tripped = stalls.trip_global(p["state"], p["paused"], p["needs"])
+    # A detector failure must never cost the tick: it is logged and skipped.
+    try:
+        tripped = stalls.trip_global(p["state"], p["paused"], p["needs"])
+    except Exception as e:  # noqa: BLE001
+        tripped = None
+        log(p, f"stall detector failed (global): {e!r}")
     if tripped:
         log(p, f"paused: {len(tripped)} consecutive zero-work session failures "
                f"{tripped[0]['ts']}..{tripped[-1]['ts']}")
@@ -454,8 +459,13 @@ def tick(p):
         log(p, f"repaired stuck task={task_name} in-progress for {hours:.1f}h")
     # Also before scheduling, so a task that is not advancing is not handed
     # the front of the queue once more.
-    for task_name, reason, runs, detail in stalls.block_detected(
-            p["root"], p["state"], datetime.now(), tasks.set_status):
+    try:
+        found = stalls.block_detected(p["root"], p["state"], datetime.now(),
+                                      tasks.set_status)
+    except Exception as e:  # noqa: BLE001
+        found = []
+        log(p, f"stall detector failed (tasks): {e!r}")
+    for task_name, reason, runs, detail in found:
         log(p, f"blocked {reason} task={task_name} runs={runs}: {detail}")
     # Also before scheduling: sessions launched by this tick must start from a
     # machine with no abandoned stacks on it.

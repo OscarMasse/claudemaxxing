@@ -89,6 +89,10 @@ trap 'rm -f "$LOCK"' EXIT INT TERM
 # The account's Claude profile drives the invocation AND where usage /
 # activity detection read, so each subscription is fully self-contained.
 export CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
+# Background sessions run on the subscription only: a base URL or API key
+# inherited from the launching shell would silently bill a per-token account
+# instead. Nothing sets them today; this keeps it that way.
+unset ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 CLAUDE_BIN="$(cfg account "$ACCOUNT" claude_bin)"
 MODEL="${MODEL_OVR:-$(cfg account "$ACCOUNT" claude_model)}"
 EFFORT="${EFFORT_OVR:-$(cfg account "$ACCOUNT" claude_effort)}"

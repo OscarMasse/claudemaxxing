@@ -151,15 +151,16 @@ case "$DELIVERY" in
   *)      DELIVERY_DIRECTIVE="No delivery was passed down: read the \`delivery:\` key of the task you pick and apply the contract in step 1." ;;
 esac
 # Permission routing by delivery. Sessions run in bypassPermissions, so the
-# prompt's "do NOT push" is the only thing standing between a `branch`/`local`
-# task and origin. A per-session deny is absolute (deny > ask > allow, and it
-# cannot be talked around by another command form), so only `pr` keeps the
-# push. The `rtk` variant covers the token-saving hook that rewrites commands.
-# Digest and auto modes carry no delivery and never push either.
+# prompt's rails would otherwise rest on the session's good behaviour. A
+# per-session deny is evaluated by the harness first (deny > ask > allow), so
+# lib/permissions.py builds the rails as deny rules, one family per function
+# with its reason: pushes and mutating gh calls for every delivery but `pr`
+# (digest and auto modes carry no delivery and never publish either), force
+# pushes, filter-branch and credential reads for every session.
 PERM_ARGS=()
-if [ "$DELIVERY" != "pr" ]; then
-  PERM_ARGS=(--disallowedTools "Bash(git push*)" "Bash(rtk git push*)")
-fi
+while IFS= read -r rule; do PERM_ARGS+=("$rule"); done \
+  < <(python3 lib/permissions.py "$DELIVERY")
+PERM_ARGS=(--disallowedTools "${PERM_ARGS[@]}")
 PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
               -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
               -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \

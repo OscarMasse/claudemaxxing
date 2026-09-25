@@ -120,6 +120,10 @@ Procedure:
     worktree (volumes may stay); a later slice brings it back up in seconds.
 
 Constraints: never launch other Claude sessions (internal subagents via the Agent
-tool are fine); stay inside {{PROJECT_DIRS}}; push exactly as the task's `delivery:`
+tool are fine, but always in the foreground: never `run_in_background`, and no
+background Bash either - this session is headless, it ends the moment your turn
+does, and a completion notification never arrives to resume you. Several agents
+at once is fine: dispatch them in one message and they run concurrently while
+you wait); stay inside {{PROJECT_DIRS}}; push exactly as the task's `delivery:`
 requires - always for `pr`, never for `branch` or `local`; never push to `main` and
 never merge a PR yourself; English only in files; plain dashes.

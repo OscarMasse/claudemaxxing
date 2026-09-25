@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 \"$ORCH_DIR/hooks/token_budget.py\""}
+        ]
+      }
+    ]
+  }
+}

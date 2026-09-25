@@ -18,6 +18,10 @@ Procedure:
    - `## To validate` - work finished by background runs awaiting the owner's approval,
      drawn from the `## Runs` journal bullets.
    - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each.
+   - `## Stalled tasks` - every `stalled` and `detector_blocked` line of the
+     gate.py status output, one bullet each with its reason and run count.
+     These are tasks the gatekeeper found not advancing between sessions; say
+     so when there are none.
    - `## Done` - tasks completed autonomously, drawn from the journal bullets.
    - `## Quota` - the gate.py status output, one block per account. Budgets are
      in USD at list price. Keep the `usage_week_pct` and `usage_window_pct` lines

@@ -213,14 +213,16 @@ python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
 # result JSON before it is deleted.
 read -r COST_USD DURATION_MIN < <(python3 lib/ledger.py fields "$OUT_JSON")
 rm -f "$OUT_JSON"
-echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=${TASK_FILE:-auto} project=${PROJECT:-auto} model=$MODEL/$EFFORT exit=$CODE" >> "$STATE_ROOT/runs.log"
+# One normalized task= form (the basename), shared with orchestrate.md step 9
+# and read by lib/stalls.py.
+TASK_BASENAME="auto"
+[ -n "$TASK_FILE" ] && TASK_BASENAME="$(basename "$TASK_FILE")"
+echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=$TASK_BASENAME project=${PROJECT:-auto} model=$MODEL/$EFFORT exit=$CODE" >> "$STATE_ROOT/runs.log"
 
 # Mechanical journal entry: one line per run, appended to this run's digest
 # file (creating the header/section on first write). A single `>>` write per
 # invocation - never split across two writes - because parallel slots append
 # to the same file concurrently.
-TASK_BASENAME="auto"
-[ -n "$TASK_FILE" ] && TASK_BASENAME="$(basename "$TASK_FILE")"
 ENTRY_LINE="$(printf -- '- %s [%s/%s] %s (%s/%s, $%s, %smin, exit %s)' \
   "$(date '+%H:%M')" "$ACCOUNT" "${PROJECT:-auto}" "$TASK_BASENAME" \
   "$MODEL" "$EFFORT" "$COST_USD" "$DURATION_MIN" "$CODE")"

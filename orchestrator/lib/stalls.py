@@ -240,6 +240,17 @@ def history(state_root):
     return _load_state(state_root).get("history", [])
 
 
+def active_blocks(root, state_root):
+    """History entries whose task is still `blocked`, latest block per task.
+
+    A task the owner set back to `ready` (or finished) is no longer a stall to
+    report, even though its block stays in the history."""
+    latest = {h["task"]: h for h in history(state_root)}
+    return [h for name, h in sorted(latest.items())
+            if (Path(root, "tasks", name).exists()
+                and _status(Path(root, "tasks", name)) == "blocked")]
+
+
 def _zero_work_failure(row):
     return (row.get("exit", 0) not in (0, TIMEOUT_EXIT) and not float(row.get("cost_usd") or 0)
             and not int(row.get("duration_ms") or 0))

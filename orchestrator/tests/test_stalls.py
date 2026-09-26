@@ -128,6 +128,17 @@ class StallTest(Base):
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
         self.assertEqual(stalls.history(self.state)[0]["task"], "a.md")
 
+    def test_active_blocks_only_lists_still_blocked_tasks(self):
+        path = self.task()
+        for i in range(5):
+            self.session(path, self.t0 + timedelta(days=i))
+        stalls.block_detected(self.root, self.state, self.t0 + timedelta(days=6), tasks.set_status)
+        self.assertEqual([h["task"] for h in stalls.active_blocks(self.root, self.state)], ["a.md"])
+        # Unblocked by the owner: stays in the history, leaves the active list.
+        tasks.set_status(path, "ready", "- owner: retry\n")
+        self.assertEqual(stalls.active_blocks(self.root, self.state), [])
+        self.assertEqual(len(stalls.history(self.state)), 1)
+
 
 class GlobalStormTest(Base):
     def ledger(self, exits, sub="max"):

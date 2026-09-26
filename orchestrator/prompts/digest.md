@@ -30,7 +30,8 @@ Procedure:
      line verbatim: the caps are derived from the status line's rate-limit
      readings, and their `source` (reading / history / seed) and `age_h` say how
      old the reading behind them is. Say "caps from readings of <as_of>" when the
-     source is not `reading`, and call out every `cap_change` as a limit change.
+     source is not `reading`, and call out every `cap_change` marked "limit change"
+     as a limit change ("seed superseded" is the first real calibration).
      An `uncalibrated` account or a `rate_limits_error` line goes to Questions.
    - `## Runs` - the raw journal, UNCHANGED, moved to the bottom of the file as the
      source record the sections above were built from.

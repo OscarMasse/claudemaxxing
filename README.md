@@ -126,7 +126,10 @@ rec = subprocess.Popen([sys.executable, "<engine>/orchestrator/lib/ratelimits.py
                        env=dict(os.environ, BACKLOG_ROOT="<backlog root>"),
                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        start_new_session=True)
-rec.stdin.write(raw_stdin_bytes); rec.stdin.close()
+try:
+    rec.stdin.write(raw_stdin_bytes); rec.stdin.close()
+except OSError:
+    pass  # a recording failure never breaks the status line
 ```
 
 Seed the history once with a hand reading (weekly, window, p90 daily, when), then let the first usable reading supersede it: `python3 orchestrator/lib/ratelimits.py seed <account> 850 58 114 2026-09-24T23:10:00+02:00`.

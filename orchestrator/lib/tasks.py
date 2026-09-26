@@ -279,6 +279,47 @@ def _ordered(root, projects, account, sched_class=None):
     return [t for _, t in sorted(found, key=lambda x: x[0])]
 
 
+def task_name(ref):
+    """Task basename from what an owner types: `a`, `a.md` or a path to it."""
+    name = Path(ref).name
+    return name[:-3] if name.endswith(".md") else name
+
+
+def resolve(root, projects, account, ref):
+    """One task named by the owner, for a manual launch: (task, unmet, reason).
+
+    `task` is the same assignment `_ordered` builds, whatever the task's
+    scheduling class, when the task is launchable right now. Otherwise it is
+    None and either `unmet` lists prerequisites that are not done yet (the
+    caller may wait for them) or `reason` says why it can never launch as it
+    stands. Naming a task bypasses the ORDER, never the eligibility rules: a
+    task the gatekeeper would refuse is refused here too, and said so."""
+    name = task_name(ref)
+    path = Path(root) / "tasks" / f"{name}.md"
+    if not path.is_file():
+        return None, [], "no such task"
+    fm = _frontmatter(path)
+    if fm.get("status") != "ready":
+        return None, [], f"status={fm.get('status', '<missing>')}"
+    proj = projects.get(fm.get("project", "default"))
+    if proj is None:
+        return None, [], f"project={fm.get('project', 'default')} not configured"
+    if proj["account"] != account:
+        return None, [], f"routes to account {proj['account']}"
+    problems = [problem for n, problem in misconfigured(root, projects)
+                if n == path.name]
+    if problems:
+        return None, [], "misconfigured: " + ", ".join(problems)
+    unmet = _unmet_prerequisites(root, fm)
+    if unmet:
+        return None, unmet, None
+    for cls in (None, "duty", "filler"):
+        for t in _ordered(root, projects, account, sched_class=cls):
+            if Path(t["path"]).stem == name:
+                return t, [], None
+    return None, [], "not eligible"
+
+
 def duties_due(root, projects, account, done, period_keys):
     """Mandatory recurring tasks whose period has not been served yet.
 
@@ -529,6 +570,12 @@ def _take(candidates, count, slots):
         if slots.take(t):
             out.append(t)
     return out
+
+
+def launchable(candidates, count, model_slots):
+    """The first `count` of `candidates` the model slots let through, in order.
+    `_take` for callers that build their own candidate list (manual.py)."""
+    return _take(candidates, count, _ModelSlots(model_slots))
 
 
 def _pad_parallel(out, queue, count, slots):

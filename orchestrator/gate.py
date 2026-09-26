@@ -606,7 +606,7 @@ def status(p):
     # Printed once, after the accounts: the detector reads every account's runs.
     for task_name, reason, runs, detail in stalls.detect(p["root"], p["state"], datetime.now()):
         print(f"stalled task={task_name} reason={reason} runs={runs} ({detail})")
-    for h in stalls.history(p["state"]):
+    for h in stalls.active_blocks(p["root"], p["state"]):
         print(f"detector_blocked task={h['task']} at={h['ts']} "
               f"reason={h['reason']} runs={h['runs']} ({h['detail']})")
     # Printed once, after the accounts: these tasks belong to none of them.

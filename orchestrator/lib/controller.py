@@ -14,7 +14,7 @@ when it ran on raw token counts; only the unit changed.
 import math
 
 from collections import namedtuple
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 # No `model` field: the model a session runs is the one its task declares
@@ -47,20 +47,12 @@ def prev_reset(cfg, now):
     return next_reset(cfg, now) - timedelta(days=7)
 
 
-def _promo(cfg, now):
-    tz = ZoneInfo(cfg["reset_tz"])
-    until = date.fromisoformat(str(cfg["promo_until"]))
-    if now.astimezone(tz).date() <= until:
-        return float(cfg["promo_multiplier"])
-    return 1.0
-
-
 def surplus(cfg, now, week_usd):
     """USD the background system may spend this week: the weekly cap minus
     what is consumed minus the decaying daily reserve that protects the owner's
     own usage. Same quantity `decide()` calls `available`, exposed so the digest
     and the planner report exactly what the decision was made on."""
-    cap = float(cfg["weekly_cap_usd"]) * _promo(cfg, now)
+    cap = float(cfg["weekly_cap_usd"])
     days_remaining = (next_reset(cfg, now) - now).total_seconds() / 86400.0
     return cap - float(week_usd) - float(cfg["p90_daily_usd"]) * days_remaining
 
@@ -170,7 +162,7 @@ def _window_headroom(cfg, block):
 
 def decide(cfg, now, usage, idle_min):
     reset = next_reset(cfg, now)
-    cap = float(cfg["weekly_cap_usd"]) * _promo(cfg, now)
+    cap = float(cfg["weekly_cap_usd"])
     week = float(usage["week_usd"])
     days_remaining = (reset - now).total_seconds() / 86400.0
     block = usage.get("block")

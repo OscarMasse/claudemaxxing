@@ -79,9 +79,8 @@ Nothing to install on the Python side: standard library only, no virtualenv, no 
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).
 2. Declare your `accounts` and `projects` in `orchestrator/config.yaml` (fully documented example in the file).
-3. Calibrate each account's USD caps (`weekly_cap_usd`, `window_cap_usd`, `p90_daily_usd`) against `/usage`: the digest relays the engine's weekly and window percentages every morning, and the owner corrects the caps when they drift.
-   They are coarse pacing knobs: the calibration is a handful of `/usage` readings, so when a model is about to be refused is still observed, not predicted (`orchestrator/lib/quota.py`).
-   Set `promo_until` whenever the caps were read during a promotional period, so `status` keeps asking for a fresh reading once it lapses.
+3. Let each account calibrate its own caps: pipe the status line's stdin to the recorder from the status line script of that account's profile (`statusLine` in `<claude_config_dir>/settings.json`), and seed the history once.
+   See "Caps from rate-limit readings" below for the snippet and the seed command.
 4. Create a task in `tasks/` (see `examples/tasks/`) with `status: ready` and a matching `project:`.
 5. Run `orchestrator/install.sh`; it registers the gatekeeper loop and the daily digest job, and prints the one manual `pmset` step for nightly wake.
 6. Optional: a fine-grained PAT in `~/.config/backlog-agents/github-token` enables background git pushes.
@@ -113,6 +112,27 @@ Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a del
 The unit is USD at Anthropic list price, computed locally from the transcripts with a per-family price table (`lib/transcripts.py`), because the account's limit weighs tokens by price: on 2026-09-12, 14M local tokens of Fable and Opus moved the weekly `/usage` bar 4 points while 22M tokens of Sonnet moved it 1, the ratio of their list prices.
 It is not what the subscription bills; it is the weighting the limit applies, and the same unit Claude Code reports per session (`total_cost_usd`).
 The token-era keys (`weekly_cap_tokens`, `window_cap_tokens`, `p90_daily_tokens`, `est_session_tokens`, `*_min_surplus_tokens`) are retired: an account still carrying one is reported as misconfigured and not scheduled, never converted, since no factor turns a model-blind token count into dollars.
+**Caps from rate-limit readings.**
+The caps are not configured, they are derived (`orchestrator/lib/ratelimits.py`).
+Claude Code hands the status line command `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage`, `resets_at`) on Pro and Max accounts, the same data as `/usage`.
+The recorder appends each reading to `state/<account>/rate_limits.jsonl` with the engine's own USD over the reading's period, at most one row a minute and only when a value changed, and `cap = engine_usd / (used_percentage / 100)`.
+Only readings at 10% of the week or 20% of the window and above count (they bound the whole-percent rounding error to 5%), a day's usable readings reduce to their median, and a day median more than 15% away from the cap in use is a limit change that replaces it outright; `p90_daily_usd` scales with the weekly cap.
+At night no reading arrives, so the engine carries the latest derived caps forward; `gate.py status` prints each cap with its source (`reading`, `history`, `seed`) and age, and the digest relays it.
+Hook it from the account's status line script, detached so the transcript scan (about a second) never delays the status line:
+
+```python
+import subprocess, sys
+rec = subprocess.Popen([sys.executable, "<engine>/orchestrator/lib/ratelimits.py", "record", "<account>"],
+                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       start_new_session=True)
+rec.stdin.write(raw_stdin_bytes); rec.stdin.close()
+```
+
+Seed the history once with a hand reading (weekly, window, p90 daily, when), then let the first usable reading supersede it: `python3 orchestrator/lib/ratelimits.py seed <account> 850 58 114 2026-09-24T23:10:00+02:00`.
+Until a seed exists the account is reported `uncalibrated` and not scheduled.
+Usage from other devices or claude.ai is invisible to the engine and skews the ratio, and the per-model (Fable) weekly bar is not in the data: the wall is still observed, not predicted (below).
+The keys `weekly_cap_usd`, `window_cap_usd`, `p90_daily_usd`, `promo_multiplier` and `promo_until` are retired: an account still carrying one is reported as misconfigured.
+
 `available = weekly_cap - consumed - p90_daily_reserve * days_remaining`; the reserve decays linearly to zero at reset, so the week starts protective and ends fully released.
 Slot counts are budget-driven: a session's estimated burn must fit the slice budget, so a night is one heavy session or many small ones depending on the work, never a fixed task count.
 The per-model rules (`max_fable_slots`, a model observed out of quota) are applied inside the selection, while the queue is being cut to the free slot count, not to its output afterwards: a queue head heavy in one model would otherwise leave slots empty that the rest of the queue could fill.

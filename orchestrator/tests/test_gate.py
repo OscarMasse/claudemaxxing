@@ -11,6 +11,7 @@ from unittest import mock
 ORCH = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ORCH))
 import gate  # noqa: E402
+from lib import config, ratelimits  # noqa: E402
 
 # $40 consumed this week, no open 5h window. Budgets are USD at list price.
 FIXTURE = {"week_usd": 40, "week_by_family": {}, "block": None,
@@ -31,9 +32,6 @@ PERSONAL = (
     "accounts:\n"
     "  - name: personal\n"
     "    claude_config_dir: ~/.claude\n"
-    "    weekly_cap_usd: 100\n"
-    "    window_cap_usd: 15\n"
-    "    p90_daily_usd: 10\n"
     "    reset_weekday: 3\n"
     "    reset_time: 05:59\n"
     "    reset_tz: Europe/Warsaw\n"
@@ -48,7 +46,21 @@ PROJECTS = (
 )
 
 
-def run_gate(root, extra_env=None, arg="tick"):
+SEED_AT = "2026-08-01T00:00:00+00:00"
+
+
+def seed_accounts(root):
+    """Seed the rate-limit history of every configured account, as the owner
+    does once with `lib/ratelimits.py seed`. Only fills an empty history."""
+    cfg = config.load(Path(root) / "config.yml")
+    for acct in config.accounts(cfg):
+        ratelimits.seed(Path(root) / "orchestrator" / "state" / acct["name"],
+                        100, 15, 10, SEED_AT)
+
+
+def run_gate(root, extra_env=None, arg="tick", seed=True):
+    if seed:
+        seed_accounts(root)
     env = dict(os.environ,
                ORCH_ROOT=str(root),
                ORCH_NOW="2026-08-11T02:30:00+02:00",  # Tuesday night
@@ -226,7 +238,7 @@ class TestGate(unittest.TestCase):
         self.append_cfg("max_parallel_sessions: 2\n"
                         "est_session_usd: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
@@ -241,7 +253,7 @@ class TestGate(unittest.TestCase):
         # the engine must remember that instead of spending its remaining
         # slots relaunching into the same wall (2026-09-09).
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"fable": {
             "scope": "session", "until": "2026-08-11T04:20:00+02:00",
             "seen": "2026-08-11T02:25:00+02:00"}}))
@@ -286,7 +298,7 @@ class TestGate(unittest.TestCase):
         # Fable dead, sonnet fine: the night must keep working. This is what
         # the per-model signal buys over a global backoff.
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"fable": {
             "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
         r = run_gate(self.root, self.env)
@@ -295,7 +307,7 @@ class TestGate(unittest.TestCase):
 
     def test_expired_exhaustion_record_no_longer_blocks(self):
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"fable": {
             "scope": "session", "until": "2026-08-11T01:00:00+02:00"}}))
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
@@ -341,7 +353,7 @@ class TestGate(unittest.TestCase):
         self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
                         "max_fable_slots: 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())} fable")
         for i, name in enumerate(("t1.md", "t2.md")):
             self.write_task(name, f"---\ntitle: {name}\nproject: side-projects\n"
@@ -358,7 +370,7 @@ class TestGate(unittest.TestCase):
         # Digest runs and pre-change locks carry no model: they hold a slot
         # but no model slot.
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
         (state / "RUNNING.2").write_text(f"999 {int(time.time())} fable")
         p = gate.paths()
@@ -384,7 +396,7 @@ class TestGate(unittest.TestCase):
     def test_an_out_of_quota_family_does_not_eat_a_slot(self):
         self.append_cfg("max_parallel_sessions: 2\nest_session_usd: 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"opus": {
             "until": "2026-08-11T04:20:00+02:00", "scope": "session"}}))
         (self.root / "tasks" / "t1.md").unlink()
@@ -484,6 +496,7 @@ class TestGate(unittest.TestCase):
         env.pop("ORCH_ROOT", None)
         env.pop("ORCH_CONFIG", None)
         env.update(self.env)
+        seed_accounts(self.root)
         r = subprocess.run(["python3", str(ORCH / "gate.py"), "tick"],
                            capture_output=True, text=True, env=env, cwd=ORCH)
         self.assertTrue(r.stdout.startswith("RUN personal 50"),
@@ -496,7 +509,7 @@ class TestGate(unittest.TestCase):
     def test_stale_lock_broken_fresh_lock_respected(self):
         self.append_cfg("max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         lock = state / "RUNNING.1"
         lock.write_text("999 0")  # epoch 0 -> stale
         r = run_gate(self.root, self.env)
@@ -546,37 +559,20 @@ class TestGate(unittest.TestCase):
         self.assertIn(expected, r.stdout)
         self.assertNotIn("week_usd", r.stdout)
 
-    def test_a_missing_usd_cap_is_an_error_not_a_default(self):
-        self.write_cfg(BASE_CFG + PERSONAL.replace("    weekly_cap_usd: 100\n", "")
-                       + PROJECTS)
-        r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith(
-            "SKIP personal misconfigured: missing key weekly_cap_usd"), r.stdout)
+    def test_an_unseeded_account_is_skipped_as_uncalibrated(self):
+        r = run_gate(self.root, self.env, seed=False)
+        self.assertTrue(r.stdout.startswith("SKIP personal uncalibrated"),
+                        r.stdout)
+        self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
+        r = run_gate(self.root, self.env, arg="status", seed=False)
+        self.assertIn("account=personal uncalibrated", r.stdout)
+        self.assertNotIn("week_usd", r.stdout)
 
-    def test_status_relays_the_promo_state_and_the_per_model_split(self):
-        self.write_cfg(BASE_CFG + PERSONAL
-                       + "    promo_multiplier: 1.5\n"
-                         "    promo_until: 2026-08-30\n" + PROJECTS)
+    def test_status_reports_the_seeded_caps(self):
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("promo active until 2026-08-30", r.stdout)
-
-    def test_status_warns_before_the_promo_ends(self):
-        self.write_cfg(BASE_CFG + PERSONAL
-                       + "    promo_multiplier: 1.5\n"
-                         "    promo_until: 2026-08-12\n" + PROJECTS)
-        r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("promo ENDS 2026-08-12 (in 1d)", r.stdout)
-        self.assertIn("NEEDS-HUMAN", r.stdout)
-
-    def test_status_keeps_asking_after_the_promo_expired(self):
-        # The cap can only be re-read off /usage by a human, so this line does
-        # not go away on its own: it repeats until promo_until is updated.
-        self.write_cfg(BASE_CFG + PERSONAL
-                       + "    promo_multiplier: 1.5\n"
-                         "    promo_until: 2026-08-01\n" + PROJECTS)
-        r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("promo EXPIRED 2026-08-01 (10d ago)", r.stdout)
-        self.assertIn("NEEDS-HUMAN", r.stdout)
+        self.assertIn("cap weekly_cap_usd=100.00 source=seed", r.stdout)
+        self.assertIn("cap window_cap_usd=15.00 source=seed", r.stdout)
+        self.assertIn("cap p90_daily_usd=10.00", r.stdout)
 
     def test_status_reports_per_model_usage_and_unknown_ids(self):
         # An id the engine cannot classify still spends the owner's quota, so
@@ -594,7 +590,7 @@ class TestGate(unittest.TestCase):
 
     def test_status_reports_an_exhausted_model(self):
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"fable": {
             "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
         r = run_gate(self.root, self.env, arg="status")
@@ -661,7 +657,7 @@ class TestGateJanitor(unittest.TestCase):
 
     def test_running_session_protects_stacks(self):
         state = self.root / "orchestrator" / "state" / "personal"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
         run_gate(self.root, self.env)
         self.assertEqual(self.downs(), "")
@@ -743,9 +739,6 @@ class TestGateMultiAccount(unittest.TestCase):
     WORK = (
         "  - name: work\n"
         "    claude_config_dir: ~/.claude-work\n"
-        "    weekly_cap_usd: 100\n"
-        "    window_cap_usd: 15\n"
-        "    p90_daily_usd: 10\n"
         "    reset_weekday: 3\n"
         "    reset_time: 05:59\n"
         "    reset_tz: Europe/Warsaw\n"
@@ -814,7 +807,7 @@ class TestGateMultiAccount(unittest.TestCase):
         cfg = self.root / "config.yml"
         cfg.write_text(cfg.read_text() + "max_parallel_sessions: 1\n")
         state = self.root / "orchestrator" / "state" / "work"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
         r = run_gate(self.root, self.env)
         lines = self.lines(r)
@@ -833,6 +826,20 @@ class TestGateMultiAccount(unittest.TestCase):
         r = run_gate(self.root, self.env, arg="status")
         self.assertIn("account=personal", r.stdout)
         self.assertIn("account=work", r.stdout)
+
+    def test_a_retired_cap_key_skips_only_that_account(self):
+        # Caps are derived from the rate_limits history, a hand-entered one
+        # is refused rather than silently used; the other account still runs.
+        cfg = self.root / "config.yml"
+        cfg.write_text(cfg.read_text().replace(
+            "    claude_config_dir: ~/.claude-work\n",
+            "    claude_config_dir: ~/.claude-work\n"
+            "    weekly_cap_usd: 100\n"))
+        r = run_gate(self.root, self.env)
+        lines = self.lines(r)
+        self.assertTrue(lines[0].startswith("RUN personal"), r.stdout + r.stderr)
+        self.assertTrue(lines[1].startswith(
+            "SKIP work misconfigured: retired key weekly_cap_usd"), r.stdout)
 
     def test_a_misconfigured_account_does_not_stop_the_other(self):
         # One subscription left in the token unit; the other keeps its night.
@@ -864,7 +871,6 @@ class TestGateLegacyConfig(unittest.TestCase):
         (self.root / "tasks").mkdir()
         (self.root / "config.yml").write_text(
             BASE_CFG +
-            "weekly_cap_usd: 100\nwindow_cap_usd: 15\np90_daily_usd: 10\n"
             "reset_weekday: 3\nreset_time: 05:59\nreset_tz: Europe/Warsaw\n"
             "extra_dirs: ~/projects\n")
         # A legacy task: no `project:` key at all.

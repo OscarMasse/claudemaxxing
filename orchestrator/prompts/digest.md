@@ -26,11 +26,12 @@ Procedure:
    - `## Quota` - the gate.py status output, one block per account. Budgets are
      in USD at list price. Keep the `usage_week_pct` and `usage_window_pct` lines
      verbatim and the per-task `cost` lines from each account's ledger (runs, USD,
-     tokens - they inform planning), plus one line per account whose promo_until
-     is within 3 days: "Promo expires <date> - config falls back to 1.0
-     automatically." Then one line asking the owner to compare the two
-     percentages with `/usage` and correct `weekly_cap_usd` / `window_cap_usd`
-     in config.yaml if they drift.
+     tokens - they inform planning), and every `cap ...` and `cap_change ...`
+     line verbatim: the caps are derived from the status line's rate-limit
+     readings, and their `source` (reading / history / seed) and `age_h` say how
+     old the reading behind them is. Say "caps from readings of <as_of>" when the
+     source is not `reading`, and call out every `cap_change` as a limit change.
+     An `uncalibrated` account or a `rate_limits_error` line goes to Questions.
    - `## Runs` - the raw journal, UNCHANGED, moved to the bottom of the file as the
      source record the sections above were built from.
    Keep the whole file readable in under ten minutes. If a section is empty

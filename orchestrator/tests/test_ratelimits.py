@@ -142,7 +142,7 @@ class TestSeed(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_seed_writes_only_into_an_empty_history(self):
+    def test_seed_is_written_once(self):
         self.assertTrue(ratelimits.seed(self.state, 850, 58, 114, SEED["ts"]))
         self.assertFalse(ratelimits.seed(self.state, 1, 2, 3, SEED["ts"]))
         rows = ratelimits.load(self.state)
@@ -283,6 +283,50 @@ class TestCli(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["weekly_cap_usd"], rows[0]["window_cap_usd"],
                           rows[0]["p90_daily_usd"]), (850.0, 58.0, 114.0))
+
+class TestReviewFixes(unittest.TestCase):
+    def test_a_small_limit_change_takes_over_within_a_week(self):
+        # 14 days at 1000 then 14 days at 1120 (+12%, under the 15% rule):
+        # the cap follows the last week, not the whole regime.
+        rows = []
+        for i in range(28):
+            usd = 400.0 if i < 14 else 448.0
+            ts = T0 + timedelta(days=i)
+            rows.append(weekly(ts, 40, usd, resets=ts + timedelta(days=3)))
+        c = ratelimits.caps([EARLY_SEED] + rows, T0 + timedelta(days=28), TZ)
+        self.assertAlmostEqual(c["weekly_cap_usd"], 1120.0)
+
+    def test_days_are_grouped_in_the_account_timezone(self):
+        # 21:30 and 23:30 UTC on the same UTC date fall on two Warsaw dates,
+        # so they are two day medians, not one.
+        a = datetime(2026, 9, 24, 21, 30, tzinfo=UTC)   # 23:30 Warsaw, 24th
+        b = datetime(2026, 9, 24, 23, 30, tzinfo=UTC)   # 01:30 Warsaw, 25th
+        c = ratelimits.caps([EARLY_SEED, weekly(a, 40, 400.0), weekly(b, 40, 800.0)],
+                            b + timedelta(hours=1), TZ)
+        d = c["detail"]["weekly_cap_usd"]
+        self.assertEqual([ch["day"] for ch in d["changes"]], ["2026-09-24", "2026-09-25"])
+        self.assertEqual(d["as_of"].date().isoformat(), "2026-09-25")
+
+    def test_a_naive_now_does_not_crash(self):
+        c = ratelimits.caps([EARLY_SEED, weekly(T0, 40, 400.0)],
+                            datetime(2026, 9, 25, 12, 0), TZ)
+        self.assertAlmostEqual(c["weekly_cap_usd"], 1000.0)
+        ratelimits.recent_changes(c, datetime(2026, 9, 25, 12, 0))
+
+    def test_recent_changes_drop_after_a_week(self):
+        c = ratelimits.caps([EARLY_SEED, weekly(T0, 40, 400.0)], T0, TZ)
+        self.assertEqual(len(ratelimits.recent_changes(c, T0 + timedelta(days=7))), 1)
+        self.assertEqual(ratelimits.recent_changes(c, T0 + timedelta(days=8)), [])
+
+    def test_malformed_rows_are_skipped_not_fatal(self):
+        with tempfile.TemporaryDirectory() as d:
+            good = weekly(T0, 40, 400.0)
+            lines = [json.dumps(EARLY_SEED), json.dumps({"ts": T0.isoformat(),
+                     "seven_day": {"used_percentage": 40}}), "[1, 2]",
+                     json.dumps({"seed": True}), json.dumps(good)]
+            (Path(d) / ratelimits.HISTORY).write_text("\n".join(lines) + "\n")
+            rows = ratelimits.load(d)
+            self.assertEqual(rows, [EARLY_SEED, good])
 
 
 if __name__ == "__main__":

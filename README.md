@@ -118,11 +118,12 @@ Claude Code hands the status line command `rate_limits.five_hour` and `rate_limi
 The recorder appends each reading to `state/<account>/rate_limits.jsonl` with the engine's own USD over the reading's period, at most one row a minute and only when a value changed, and `cap = engine_usd / (used_percentage / 100)`.
 Only readings at 10% of the week or 20% of the window and above count (they bound the whole-percent rounding error to 5%), a day's usable readings reduce to their median, and a day median more than 15% away from the cap in use is a limit change that replaces it outright; `p90_daily_usd` scales with the weekly cap.
 At night no reading arrives, so the engine carries the latest derived caps forward; `gate.py status` prints each cap with its source (`reading`, `history`, `seed`) and age, and the digest relays it.
-Hook it from the account's status line script, detached so the transcript scan (about a second) never delays the status line:
+Hook it from the account's status line script with `BACKLOG_ROOT` set (a status line does not inherit the launchd environment), detached so the transcript scan (about a second) never delays the status line:
 
 ```python
-import subprocess, sys
+import os, subprocess, sys
 rec = subprocess.Popen([sys.executable, "<engine>/orchestrator/lib/ratelimits.py", "record", "<account>"],
+                       env=dict(os.environ, BACKLOG_ROOT="<backlog root>"),
                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        start_new_session=True)
 rec.stdin.write(raw_stdin_bytes); rec.stdin.close()
@@ -165,7 +166,7 @@ The tick that prints `RUN` for a queue task also claims it - `status: in-progres
 Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_usd`) is in the same unit as the learned figure.
 The learned figure is the MAX of the last runs per (task, model), not their mean: on 2026-09-12 the actual/estimate ratio ranged from 0.1 to 15, because the mean of a cheap survey slice and an expensive implementation slice keeps quoting the survey, and an under-estimate launches sessions the night cannot pay for while an over-estimate only costs one session until the next tick re-measures.
 The actual cost is Claude Code's own `total_cost_usd`, which includes the subagents a session spawned (pricing the top-level `usage` block alone came out 1.1x to 2.9x under it).
-The one number that cannot be learned is the weekly cap itself: it only exists on the `/usage` screen, so `gate.py status` prints a `promo` line that warns three days before `promo_until` and then every day after it, until a human re-reads the limit and updates the config.
+The caps are learned too, from the status line's rate-limit readings (see "Caps from rate-limit readings" above), so no limit change or promotion needs a human to re-read `/usage`.
 
 ## FAQ
 

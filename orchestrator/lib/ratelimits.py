@@ -24,8 +24,9 @@ Noise rules (the owner's decisions of 2026-09-25):
 - A reading pairs its percentage with the engine's USD over the reading's own
   period (bounded by its `resets_at`), never with another period's.
 - Day medians within 15% of the cap in use are the same limit seen again, and
-  the cap is the median of those days. A day median further than 15% away is
-  a limit change: it replaces the cap outright, no averaging, and is reported.
+  the cap is the median of those days over the last week. A day median
+  further than 15% away is a limit change: it replaces the cap outright, no
+  averaging, and is reported.
 - `p90_daily_usd` scales with the weekly cap, at the ratio the seed fixed.
 
 At night no reading arrives (the status line only renders in interactive
@@ -42,7 +43,7 @@ import json
 import os
 import statistics
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -60,6 +61,10 @@ WINDOWS = (
 )
 MIN_INTERVAL = timedelta(minutes=1)
 CHANGE_RATIO = 0.15
+# A cap is the median of the day medians of its regime over this many days
+# at most, so a limit change smaller than CHANGE_RATIO still takes over
+# within a week instead of being outvoted by every older day.
+REGIME_SPAN = timedelta(days=7)
 # How far back a limit change stays in `status` (and therefore the digest).
 CHANGE_REPORT_AGE = timedelta(days=7)
 
@@ -68,17 +73,37 @@ def _ts(s):
     return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
 
 
+def _valid(row):
+    """Whether a history row has the shape the fold reads (a bad row must not
+    take the tick down, nor block every later recording)."""
+    try:
+        _ts(row["ts"])
+        if row.get("seed"):
+            return all(float(row[k]) > 0 for _key, _l, _p, k in WINDOWS) \
+                and float(row["p90_daily_usd"]) >= 0
+        for key, *_ in WINDOWS:
+            if key in row:
+                w = row[key]
+                float(w["used_percentage"]), float(w["engine_usd"])
+                _ts(w["resets_at"])
+        return True
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
 def load(state_dir):
-    """History rows, oldest first. Unreadable lines are skipped."""
+    """History rows, oldest first. Unreadable or malformed lines are skipped."""
     path = Path(state_dir) / HISTORY
     if not path.is_file():
         return []
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
-            rows.append(json.loads(line))
+            row = json.loads(line)
         except ValueError:
             continue
+        if isinstance(row, dict) and _valid(row):
+            rows.append(row)
     return rows
 
 
@@ -176,12 +201,12 @@ def _fold(rows, key, min_pct, seed_cap, seed_ts, now, tz):
             changes.append({"cap": key, "day": day.isoformat(), "from": cap, "to": median,
                             "why": "seed superseded" if source == "seed" else "limit change"})
             regime = []
-        regime.append(median)
-        cap = statistics.median(regime)
+        regime = [(d, m) for d, m in regime if day - d < REGIME_SPAN] + [(day, median)]
+        cap = statistics.median(m for _d, m in regime)
         source, as_of, resets = "history", days[day]["ts"], days[day]["resets"]
     if resets is not None and now < resets:
         source = "reading"
-    return {"cap": cap, "source": source, "as_of": as_of, "changes": changes}
+    return {"cap": cap, "source": source, "as_of": as_of.astimezone(tz), "changes": changes}
 
 
 def caps(rows, now, tz):
@@ -196,7 +221,8 @@ def caps(rows, now, tz):
     if s is None:
         return None
     tz = ZoneInfo(str(tz))
-    out = {"detail": {}}
+    now = now.astimezone(tz)  # a naive now is local time, as in the controller
+    out = {"detail": {}, "tz": str(tz)}
     for key, _length, min_pct, cap_key in WINDOWS:
         d = _fold(rows, key, min_pct, float(s[cap_key]), _ts(s["ts"]), now, tz)
         for c in d["changes"]:
@@ -210,12 +236,9 @@ def caps(rows, now, tz):
 
 def recent_changes(derived, now):
     """Cap replacements of the last week, for `status` and the digest."""
-    out = []
-    for d in derived["detail"].values():
-        for c in d["changes"]:
-            if now - datetime.fromisoformat(c["day"]).replace(tzinfo=now.tzinfo) <= CHANGE_REPORT_AGE:
-                out.append(c)
-    return out
+    today = now.astimezone(ZoneInfo(derived["tz"])).date()
+    return [c for d in derived["detail"].values() for c in d["changes"]
+            if (today - date.fromisoformat(c["day"])).days <= CHANGE_REPORT_AGE.days]
 
 
 def _root():

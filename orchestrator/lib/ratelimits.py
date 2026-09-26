@@ -77,7 +77,8 @@ def _valid(row):
     """Whether a history row has the shape the fold reads (a bad row must not
     take the tick down, nor block every later recording)."""
     try:
-        _ts(row["ts"])
+        if _ts(row["ts"]).tzinfo is None:
+            return False
         if row.get("seed"):
             return all(float(row[k]) > 0 for _key, _l, _p, k in WINDOWS) \
                 and float(row["p90_daily_usd"]) >= 0
@@ -85,7 +86,8 @@ def _valid(row):
             if key in row:
                 w = row[key]
                 float(w["used_percentage"]), float(w["engine_usd"])
-                _ts(w["resets_at"])
+                if _ts(w["resets_at"]).tzinfo is None:
+                    return False
         return True
     except (KeyError, TypeError, ValueError, AttributeError):
         return False

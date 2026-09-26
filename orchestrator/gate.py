@@ -424,23 +424,32 @@ def tick_account(p, acct, projs):
             print(f"RUN {name} {d.slice_min} {t['path']} {t['model']} "
                   f"{t['effort']} {t['project']} {t.get('est_usd', 0.0):.2f} "
                   f"{t['delivery']}")
-            if t["sched"] in ("duty", "filler"):
-                record_duty(state, t["path"], t["period_key"])
-            elif t["sched"] is None and not t["parallel"]:
-                # Queue tasks are claimed here, at launch, or the next tick
-                # relaunches them (see tasks.claim). Duties and fillers stay
-                # `ready` by contract (duties.json is what paces a duty), and
-                # a `parallel: true` task is shared by design: its shards
-                # coordinate through claims of their own.
-                try:
-                    stalls.record_launch(p["state"], t["path"], now)
-                except OSError as e:
-                    log(p, f"stall detector failed (launch): {e!r}")
-                tasks.claim(t["path"], now.strftime("%F"), t["model"],
-                            d.slice_min)
+            record_launch(p, state, t, now, d.slice_min)
     else:
         print(f"SKIP {name} {d.reason}")
     return idle
+
+
+def record_launch(p, state, t, now, slice_min, pace_duty=True):
+    """The bookkeeping every launch owes, shared by the night tick and the
+    manual runner (manual.py) so the two cannot drift apart.
+
+    `pace_duty=False` launches a duty or filler without consuming its period:
+    a routine the owner asked for by name must not cost tonight's run of it."""
+    if t["sched"] in ("duty", "filler"):
+        if pace_duty:
+            record_duty(state, t["path"], t["period_key"])
+    elif t["sched"] is None and not t["parallel"]:
+        # Queue tasks are claimed here, at launch, or the next tick
+        # relaunches them (see tasks.claim). Duties and fillers stay
+        # `ready` by contract (duties.json is what paces a duty), and
+        # a `parallel: true` task is shared by design: its shards
+        # coordinate through claims of their own.
+        try:
+            stalls.record_launch(p["state"], t["path"], now)
+        except OSError as e:
+            log(p, f"stall detector failed (launch): {e!r}")
+        tasks.claim(t["path"], now.strftime("%F"), t["model"], slice_min)
 
 
 def janitor_due(p, cfg):

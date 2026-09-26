@@ -88,7 +88,10 @@ Nothing to install on the Python side: standard library only, no virtualenv, no 
    macOS attributes `osascript` notifications to Script Editor and gives them no click action, so without it the alert still shows but leads nowhere.
    terminal-notifier needs its own switch in System Settings > Notifications; when it is refused the adapter silently falls back to `osascript`.
 
-Manual trigger: `orchestrator/run.sh <minutes> [--account <name>]`.
+Manual runs, at any hour, whenever the owner decides: `orchestrator/manual.sh --for 5h`, `--count <N>` or `--tasks <a> <b> ...` (add `--dry-run` to see the plan first, `--stop` to stop launching).
+They skip every pacing rule (night window, morning guard, budget share, activity lock) and keep the safety ones (parallel and Fable slots, per-session cost cap, locks, refused models, prerequisites, kill switch); see `orchestrator/manual.py`.
+The runner detaches and keeps the machine awake on battery too; only a closed lid still sleeps.
+A single session: `orchestrator/run.sh <minutes> [--account <name>]`.
 Dry run: `dry_run: true` in the config, then watch `state/gatekeeper.log` for a night.
 Rehearse a whole night in seconds, in a throwaway backlog with a stubbed `claude` and zero tokens: `orchestrator/e2e-sandbox.sh`.
 
@@ -106,7 +109,7 @@ The budget is the single gate on what a night may spend, so a `fable` task compe
 Pre-reset burn-down: the last hours before the weekly reset run without a budget at all, because quota left unspent at the reset is simply lost. A dying surplus buys more sessions, not dearer ones.
 The measured consumption is an estimate; obeying it is worth it during the week, where it only paces spending, and not on the last night, where its error is the only thing that can strand the surplus.
 The account's real limit is observed there rather than predicted: a session that hits the wall records it and later ticks stop launching that model, and a task cut mid-slice resumes at the start of the next week.
-Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a deliberate `run.sh` invocation.
+Daytime: nothing, ever. The workday belongs to the owner; a daytime run is a deliberate `manual.sh` or `run.sh` invocation.
 
 **Budget controller.**
 The unit is USD at Anthropic list price, computed locally from the transcripts with a per-family price table (`lib/transcripts.py`), because the account's limit weighs tokens by price: on 2026-09-12, 14M local tokens of Fable and Opus moved the weekly `/usage` bar 4 points while 22M tokens of Sonnet moved it 1, the ratio of their list prices.

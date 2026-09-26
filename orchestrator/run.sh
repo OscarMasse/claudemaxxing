@@ -6,8 +6,9 @@
 # The account may also come from the ORCH_ACCOUNT env var; without either, the
 # first account in config.yaml is used. The account selects the Claude profile
 # (CLAUDE_CONFIG_DIR), the binary, and the state/<account>/ namespace.
-# Running this directly is the MANUAL trigger: it bypasses the gatekeeper's
-# quota locks (but not the RUNNING lock) - you decide, it runs.
+# Running this directly is the single-session MANUAL trigger (manual.sh runs
+# batches): it bypasses the gatekeeper's quota locks (but not the RUNNING
+# lock) - you decide, it runs.
 # Without a task_file the session picks the task itself (sonnet only), among
 # the projects of this account.
 set -uo pipefail
@@ -225,15 +226,18 @@ rm -f "$OUT_JSON"
 # and read by lib/stalls.py.
 TASK_BASENAME="auto"
 [ -n "$TASK_FILE" ] && TASK_BASENAME="$(basename "$TASK_FILE")"
-echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=$TASK_BASENAME project=${PROJECT:-auto} model=$MODEL/$EFFORT exit=$CODE" >> "$STATE_ROOT/runs.log"
+# ORCH_LAUNCH=manual is set by manual.py: the owner launched this session by
+# hand, which the digest must be able to tell from what the night decided.
+LAUNCH_TAG=""; [ "${ORCH_LAUNCH:-}" = "manual" ] && LAUNCH_TAG=" launch=manual"
+echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=$TASK_BASENAME project=${PROJECT:-auto} model=$MODEL/$EFFORT${LAUNCH_TAG} exit=$CODE" >> "$STATE_ROOT/runs.log"
 
 # Mechanical journal entry: one line per run, appended to this run's digest
 # file (creating the header/section on first write). A single `>>` write per
 # invocation - never split across two writes - because parallel slots append
 # to the same file concurrently.
-ENTRY_LINE="$(printf -- '- %s [%s/%s] %s (%s/%s, $%s, %smin, exit %s)' \
+ENTRY_LINE="$(printf -- '- %s [%s/%s] %s (%s/%s, $%s, %smin, exit %s%s)' \
   "$(date '+%H:%M')" "$ACCOUNT" "${PROJECT:-auto}" "$TASK_BASENAME" \
-  "$MODEL" "$EFFORT" "$COST_USD" "$DURATION_MIN" "$CODE")"
+  "$MODEL" "$EFFORT" "$COST_USD" "$DURATION_MIN" "$CODE" "${LAUNCH_TAG:+, manual}")"
 mkdir -p "$(dirname "$DIGEST_FILE")"
 if [ -s "$DIGEST_FILE" ]; then
   printf '%s\n' "$ENTRY_LINE" >> "$DIGEST_FILE"

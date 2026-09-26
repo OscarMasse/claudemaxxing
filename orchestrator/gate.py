@@ -31,12 +31,13 @@ import os
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import activity, config, controller, janitor, ledger, quota, stalls, tasks, usage  # noqa: E402
+from lib import (activity, config, controller, janitor, ledger, quota,  # noqa: E402
+                 ratelimits, stalls, tasks, usage)
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -253,6 +254,23 @@ def record_duty(state, path, key):
     tmp.replace(state / "duties.json")
 
 
+UNCALIBRATED = ("no rate-limit history to derive caps from: seed it once with "
+                "`lib/ratelimits.py seed`")
+
+
+def calibrated(p, acct, now):
+    """(account with its derived caps merged in, the derivation), or (None,
+    None) when the history has no seed. The controller stays pure: it reads
+    the caps off the account dict like any other key."""
+    derived = ratelimits.caps(ratelimits.load(p["state"] / acct["name"]), now,
+                              acct["reset_tz"])
+    if derived is None:
+        return None, None
+    merged = dict(acct, **{k: derived[k] for k in
+                           ("weekly_cap_usd", "window_cap_usd", "p90_daily_usd")})
+    return merged, derived
+
+
 def tick_account(p, acct, projs):
     """One scheduling decision for one account. Returns the account's idle
     minutes (for the presence-gated notifications)."""
@@ -266,6 +284,11 @@ def tick_account(p, acct, projs):
         print(f"SKIP {name} misconfigured: {problem}")
         return None
     now = now_from_env(acct)
+    acct, _derived = calibrated(p, acct, now)
+    if acct is None:
+        log(p, f"account={name} uncalibrated: {UNCALIBRATED}")
+        print(f"SKIP {name} uncalibrated")
+        return None
     idle = idle_for_account(acct)
     snap = usage.snapshot(acct, now)
     state = p["state"] / name
@@ -490,34 +513,23 @@ def tick(p):
     notify_duty(p, min(known) if known else None, cfg.get("notify_open_cmd"))
 
 
-PROMO_WARN_DAYS = 3
+def caps_lines(derived, now):
+    """The caps in use with their source and age, and the recent limit changes.
 
-
-def promo_note(acct, now):
-    """One line about the weekly-cap promo, for the digest to relay.
-
-    The cap is a hand-calibrated number: it cannot be derived from local data
-    (see lib/quota.py), so it is only ever as right as the last time someone
-    read it off `/usage`. A promo silently expiring therefore leaves the engine
-    pacing against a cap that no longer exists, and a promo silently STARTING
-    leaves a large surplus unspent - both invisible, both only fixable by a
-    human looking at the screen. Hence a line the digest must carry, from three
-    days before the date and forever after it, until `promo_until` is updated.
+    The digest relays these verbatim: a cap from `history` or `seed` is an old
+    reading carried forward, and its age says how much to trust it.
     """
-    tz = ZoneInfo(acct["reset_tz"])
-    today = now.astimezone(tz).date()
-    until = date.fromisoformat(str(acct["promo_until"]))
-    left = (until - today).days
-    if left < 0:
-        return (f"promo EXPIRED {until.isoformat()} ({-left}d ago) "
-                f"NEEDS-HUMAN: read the weekly limit off /usage and update "
-                f"weekly_cap_usd + promo_until in config.yaml")
-    if left <= PROMO_WARN_DAYS:
-        return (f"promo ENDS {until.isoformat()} (in {left}d) x{acct['promo_multiplier']} "
-                f"NEEDS-HUMAN: after it lapses, re-read the weekly limit off "
-                f"/usage and update weekly_cap_usd + promo_until")
-    return (f"promo active until {until.isoformat()} (in {left}d) "
-            f"x{acct['promo_multiplier']}")
+    out = []
+    for key, d in derived["detail"].items():
+        age_h = (now - d["as_of"]).total_seconds() / 3600
+        out.append(f"cap {key}={d['cap']:.2f} source={d['source']} "
+                   f"as_of={d['as_of'].date().isoformat()} age_h={age_h:.1f}")
+    out.append(f"cap p90_daily_usd={derived['p90_daily_usd']:.2f} "
+               f"(scaled with weekly_cap_usd)")
+    for c in ratelimits.recent_changes(derived, now):
+        out.append(f"cap_change {c['cap']} on={c['day']} from={c['from']:.2f} "
+                   f"to={c['to']:.2f} ({c['why']})")
+    return out
 
 
 def status(p):
@@ -531,31 +543,32 @@ def status(p):
             print(f"account={name} misconfigured: {problem}")
             continue
         now = now_from_env(acct)
+        acct, derived = calibrated(p, acct, now)
+        if acct is None:
+            print(f"account={name} uncalibrated: {UNCALIBRATED}")
+            continue
         idle = idle_for_account(acct)
         snap = usage.snapshot(acct, now)
         reset = controller.next_reset(acct, now)
         days = (reset - now).total_seconds() / 86400
-        promo = (acct["promo_multiplier"]
-                 if now.astimezone(ZoneInfo(acct["reset_tz"])).date().isoformat()
-                 <= str(acct["promo_until"])
-                 else 1.0)
-        cap = acct["weekly_cap_usd"] * promo
+        cap = acct["weekly_cap_usd"]
         reserve = acct["p90_daily_usd"] * days
         available = controller.surplus(acct, now, snap["week_usd"])
         print(f"week_usd={snap['week_usd']:.2f}")
         print(f"cap={cap:.2f} reserve={reserve:.2f} available={available:.2f}")
-        # The engine's view of the two `/usage` bars, so the digest can put
-        # them next to the real ones. The calibration is one night's readings
-        # (see specs); when these drift from /usage the owner corrects
-        # weekly_cap_usd / window_cap_usd, and this is the line that says so.
+        for line in caps_lines(derived, now):
+            print(line)
+        # The engine's view of the two `/usage` bars against the derived caps.
         block = snap.get("block")
         window_pct = (f"{block['usd'] / acct['window_cap_usd'] * 100:.1f}"
                       if block and block.get("active") else "none")
         print(f"usage_week_pct={snap['week_usd'] / cap * 100:.1f}")
         print(f"usage_window_pct={window_pct}")
+        err = p["state"] / name / ratelimits.ERROR
+        if err.is_file():
+            print(f"rate_limits_error {err.read_text().strip()}")
         print(f"next_reset={reset.isoformat()} days_remaining={days:.2f}")
-        print(f"idle_min={idle} promo_until={acct['promo_until']}")
-        print(promo_note(acct, now))
+        print(f"idle_min={idle}")
         for family, usd in sorted(snap.get("week_by_family", {}).items()):
             print(f"week_model={family} usd={usd:.2f}")
         for family, until in sorted(quota.blocked(p["state"] / name, now).items()):
@@ -621,6 +634,10 @@ def plan(p):
             print(f"account={name} misconfigured: {problem}")
             continue
         now = now_from_env(acct)
+        acct, _derived = calibrated(p, acct, now)
+        if acct is None:
+            print(f"account={name} uncalibrated: {UNCALIBRATED}")
+            continue
         snap = usage.snapshot(acct, now)
         reset = controller.next_reset(acct, now)
         left = controller.nights_remaining(acct, now, night_start_dt(acct, now) is not None)

@@ -9,7 +9,7 @@ TZ = ZoneInfo("Europe/Warsaw")
 # Aug 10 = Monday, Aug 13 = Thursday. The real config uses weekday 4; the
 # controller only sees the config value, so the math under test is identical.
 CFG = {
-    "weekly_cap_usd": 100, "promo_multiplier": 1.0, "promo_until": "2000-01-01",
+    "weekly_cap_usd": 100,
     "p90_daily_usd": 10, "window_cap_usd": 15,
     "night_start": "02:00", "night_end": "06:00", "morning_guard": "08:30",
     "prereset_burn_hours": 8,
@@ -127,20 +127,6 @@ class TestDecide(unittest.TestCase):
         self.assertEqual((d.action, d.regime), ("run", "night"))
         self.assertNotIn("model", d._fields)
 
-    def test_promo_multiplier_active(self):
-        cfg = dict(CFG, promo_multiplier=1.5, promo_until="2026-08-19")
-        # Wednesday 02:30, week=120: cap 150 with promo -> reserve 11.4 ->
-        # available 18.6 -> run. Without promo it skips (100-120-11.4 < 0).
-        now = datetime(2026, 8, 12, 2, 30, tzinfo=TZ)
-        d = controller.decide(cfg, now, usage(week=120), idle_min=999)
-        self.assertEqual(d.action, "run")
-
-    def test_promo_expired_falls_back(self):
-        cfg = dict(CFG, promo_multiplier=1.5, promo_until="2026-08-11")
-        now = datetime(2026, 8, 12, 2, 30, tzinfo=TZ)
-        d = controller.decide(cfg, now, usage(week=120), idle_min=999)
-        self.assertEqual(d.action, "skip")
-
 
 class TestNightBudget(unittest.TestCase):
     """Per-night allocation of the weekly surplus (non-linear, back-loaded)."""
@@ -248,12 +234,6 @@ class TestSurplus(unittest.TestCase):
         self.assertLess(controller.surplus(CFG, now, 95), 0)
         self.assertEqual(controller.decide(CFG, now, usage(week=95),
                                            idle_min=999).action, "skip")
-
-    def test_surplus_honors_the_promo_multiplier(self):
-        cfg = dict(CFG, promo_multiplier=1.5, promo_until="2026-08-19")
-        now = datetime(2026, 8, 10, 14, 0, tzinfo=TZ)
-        self.assertAlmostEqual(controller.surplus(cfg, now, 0) -
-                               controller.surplus(CFG, now, 0), 50)
 
 
 if __name__ == "__main__":

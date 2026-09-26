@@ -190,27 +190,32 @@ def load(path):
     return cfg
 
 
-# Budget keys of the token era, retired by specs/2026-09-12-usd-budget.md.
-# A config that still carries one has a number in a unit the engine no
-# longer has, and no conversion factor exists (the whole point of the change
-# is that tokens weigh differently per model), so the account is refused.
-RETIRED_KEYS = ("weekly_cap_tokens", "window_cap_tokens", "p90_daily_tokens",
-                "est_session_tokens", "fable_min_surplus_tokens",
-                "opus_min_surplus_tokens")
-# Without these the controller has no cap to pace against; a default here
-# would be an invented limit on someone's subscription.
-REQUIRED_USD_KEYS = ("weekly_cap_usd", "window_cap_usd", "p90_daily_usd")
-UNIT_NOTE = "the unit is USD since 2026-09-12 (see specs)"
+# Retired keys, each with where its job went. A config that still carries
+# one is refused rather than silently ignored: the number in it was the
+# owner's calibration, and pretending to honour it would be worse than
+# saying it no longer means anything.
+# - The token-era budget keys (specs/2026-09-12-usd-budget.md): no factor
+#   converts a model-blind token count into dollars.
+# - The hand-entered USD caps and the promo multiplier on them: the caps are
+#   derived from the account's own rate-limit readings since 2026-09-26
+#   (lib/ratelimits.py), and a reading already includes any promotion.
+_TOKEN_NOTE = "the unit is USD since 2026-09-12 (see specs)"
+_CAPS_NOTE = "caps are derived from rate-limit readings (lib/ratelimits.py)"
+RETIRED_KEYS = {
+    "weekly_cap_tokens": _TOKEN_NOTE, "window_cap_tokens": _TOKEN_NOTE,
+    "p90_daily_tokens": _TOKEN_NOTE, "est_session_tokens": _TOKEN_NOTE,
+    "fable_min_surplus_tokens": _TOKEN_NOTE, "opus_min_surplus_tokens": _TOKEN_NOTE,
+    "weekly_cap_usd": _CAPS_NOTE, "window_cap_usd": _CAPS_NOTE,
+    "p90_daily_usd": _CAPS_NOTE, "promo_multiplier": _CAPS_NOTE,
+    "promo_until": _CAPS_NOTE,
+}
 
 
 def misconfigured_account(acct):
     """Why a merged account dict cannot be scheduled, or None when it can."""
-    for key in RETIRED_KEYS:
+    for key, note in RETIRED_KEYS.items():
         if key in acct:
-            return f"retired key {key}, {UNIT_NOTE}"
-    for key in REQUIRED_USD_KEYS:
-        if key not in acct:
-            return f"missing key {key}, {UNIT_NOTE}"
+            return f"retired key {key}, {note}"
     return None
 
 
@@ -237,8 +242,6 @@ def accounts(cfg):
         merged.setdefault("claude_bin", "claude")
         merged.setdefault("claude_model", "sonnet")
         merged.setdefault("claude_effort", "low")
-        merged.setdefault("promo_multiplier", 1.0)
-        merged.setdefault("promo_until", "2000-01-01")
         out.append(merged)
     return out
 

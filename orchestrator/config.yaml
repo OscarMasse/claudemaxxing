@@ -30,12 +30,11 @@
 # est_session_tokens, *_min_surplus_tokens) are retired: an account still
 # carrying one is reported as misconfigured and not scheduled, never silently
 # converted.
-# IMPORTANT: the numbers below are EXAMPLE calibration values from one real Max
-# account, one night of readings, so coarse. The digest relays the engine's
-# weekly and window percentages every morning: compare them with `/usage` and
-# correct weekly_cap_usd / window_cap_usd when they drift. Running out of a
-# model's quota is still observed from the account's own limit message
-# (lib/quota.py), not predicted from these numbers.
+# The weekly and 5h window caps are not configured: they are derived from the
+# status line's rate_limits readings, stored per account in
+# state/<account>/rate_limits.jsonl (see lib/ratelimits.py and the README).
+# Running out of a model's quota is still observed from the account's own
+# limit message (lib/quota.py), not predicted from the caps.
 dry_run: false
 # Notifications. A new unchecked question in NEEDS-HUMAN.md raises one user
 # notification, and clicking it opens that file with this command. `open` hands
@@ -124,42 +123,18 @@ max_session_usd: 15
 #                     subscription (drives CLAUDE_CONFIG_DIR at launch AND
 #                     where activity/usage are read)
 #   claude_bin        optional, defaults to the shared top-level claude_bin
-#   weekly_cap_usd, window_cap_usd, p90_daily_usd
-#                     quota calibration for this subscription, in USD at list
-#                     price (see UNIT above). Required, no defaults. The caps
-#                     are read off `/usage`: spend a known amount, see how many
-#                     points the weekly and the 5h session bars moved, divide.
-#                     p90_daily_usd is the owner's own heavy-day consumption,
-#                     the daytime reserve background work must not eat.
 #   reset_weekday (0=Monday), reset_time, reset_tz
 #                     this subscription's weekly reset (check /usage:
 #                     "Resets <date> at <time>")
-#   promo_multiplier, promo_until
-#                     optional temporary quota multiplier; the multiplier
-#                     applies only until promo_until (inclusive), then falls
-#                     back to 1.0 automatically. Set promo_until even when the
-#                     multiplier is 1.0 because the caps already include the
-#                     promotion: `gate.py status` prints a `promo` line that
-#                     warns three days ahead and then every day after expiry,
-#                     since the post-promo limit can only be read off `/usage`
-#                     by a human.
 accounts:
   - name: personal
     claude_config_dir: ~/.claude
-    weekly_cap_usd: 780
-    window_cap_usd: 67
-    p90_daily_usd: 105
     reset_weekday: 4
     reset_time: 05:59
     reset_tz: Europe/Warsaw
-    promo_multiplier: 1.0
-    promo_until: 2000-01-01
   - name: work
     claude_config_dir: ~/.claude-work
     claude_bin: /usr/local/bin/claude
-    weekly_cap_usd: 370
-    window_cap_usd: 32
-    p90_daily_usd: 50
     reset_weekday: 0
     reset_time: 09:00
     reset_tz: Europe/Warsaw

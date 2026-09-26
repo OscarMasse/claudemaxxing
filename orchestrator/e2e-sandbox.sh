@@ -53,9 +53,6 @@ max_session_usd: 1
 accounts:
   - name: max
     claude_config_dir: $SANDBOX/cfgdir
-    weekly_cap_usd: 1000
-    window_cap_usd: 200
-    p90_daily_usd: 50
     reset_weekday: 4
     reset_time: 05:59
     reset_tz: Europe/Warsaw
@@ -77,6 +74,9 @@ task tidy.md low "filler: true"
 
 export BACKLOG_ROOT="$SANDBOX" ORCH_ROOT="$SANDBOX" ORCH_CONFIG="$SANDBOX/config.yaml"
 export ORCH_IDLE_MIN=999 ORCH_NO_NOTIFY=1 ORCH_USAGE_JSON="$SANDBOX/usage.json"
+# Caps are derived from the rate_limits history; the sandbox has no status
+# line feeding it, so it starts from a seed row (the caps used as-is).
+python3 lib/ratelimits.py seed max 1000 200 50 2026-08-01T00:00:00+00:00 > /dev/null
 
 echo "sandbox: $SANDBOX"
 echo

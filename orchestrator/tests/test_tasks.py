@@ -2,19 +2,20 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import date
 from pathlib import Path
 from lib import tasks
 
 
-def proj(name, account, priority=100, local_only_default=False):
-    return {"name": name, "account": account, "dirs": [],
-            "priority": priority, "local_only_default": local_only_default}
+def proj(name, account, rank=100, local_only_default=False, expedite=False):
+    return {"name": name, "account": account, "dirs": [], "rank": rank,
+            "expedite": expedite, "local_only_default": local_only_default}
 
 
 PROJECTS = {
-    "side-projects": proj("side-projects", "personal", priority=10),
-    "life": proj("life", "personal", priority=50),
-    "work": proj("work", "employer", priority=10, local_only_default=True),
+    "side-projects": proj("side-projects", "personal", rank=10),
+    "life": proj("life", "personal", rank=50),
+    "work": proj("work", "employer", rank=10, local_only_default=True),
 }
 
 
@@ -84,15 +85,15 @@ class TestPick(unittest.TestCase):
         picked = self.pick(account="default", projects=legacy)
         self.assertTrue(picked["path"].endswith("x.md"))
 
-    def test_project_priority_orders_before_task_priority(self):
-        # life has project priority 50, side-projects 10: a low-priority
-        # side-projects task still beats a high-priority life task.
+    def test_task_priority_orders_before_project_rank(self):
+        # life ranks 50, side-projects 10: the rank only breaks ties, so a
+        # high-priority life task still beats a low-priority side-projects one.
         write_task(self.root, "l.md", project="life", status="ready",
                    priority="high", delivery="local", created="2026-08-01")
         write_task(self.root, "s.md", project="side-projects", status="ready",
                    priority="low", created="2026-08-05")
         picked = self.pick()
-        self.assertTrue(picked["path"].endswith("s.md"))
+        self.assertTrue(picked["path"].endswith("l.md"))
 
     def test_each_delivery_value_is_carried_to_the_session(self):
         for value in ("branch", "pr"):
@@ -585,3 +586,195 @@ class TestRepairStuck(unittest.TestCase):
         self.stale("t.md", "---\ntitle: X\nstatus: in-progress\n---\n", 10 * 3600)
         self.assertEqual(len(self.repair()), 1)
         self.assertEqual(self.repair(), [])
+
+
+# The owner's real layout (2026-09-27): work is expedite, then
+# claudemaxxing > rankr > side-projects > personal as tie-breakers.
+RANKED = {
+    "work": proj("work", "max", rank=0, local_only_default=True, expedite=True),
+    "claudemaxxing": proj("claudemaxxing", "max", rank=1),
+    "rankr": proj("rankr", "max", rank=2),
+    "side-projects": proj("side-projects", "max", rank=3),
+    "personal": proj("personal", "max", rank=4),
+}
+TODAY = date(2026, 9, 27)
+
+
+class TestPriorityModel(unittest.TestCase):
+    """Classes of service (expedite, due soon, standard), then effective
+    priority, then project rank, then age."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def task(self, name, project, priority="medium", created="2026-09-01",
+             **fm):
+        fm.setdefault("status", "ready")
+        if project == "work":
+            fm.setdefault("delivery", "local")
+        write_task(self.root, f"{name}.md", project=project, priority=priority,
+                   created=created, **fm)
+
+    def order(self, today=TODAY, est_runs=None, **kw):
+        return [Path(t["path"]).stem for t in
+                tasks.launch_order(self.root, RANKED, "max", count=20,
+                                   today=today, est_runs=est_runs, **kw)]
+
+    def test_work_task_launches_before_every_other_task(self):
+        self.task("rankr-high", "rankr", "high", created="2026-08-01")
+        self.task("cm-high", "claudemaxxing", "high", created="2026-08-01")
+        self.task("work-low", "work", "low", created="2026-09-20")
+        self.task("work-high", "work", "high", created="2026-09-21")
+        self.assertEqual(self.order()[:2], ["work-high", "work-low"])
+
+    def test_work_class_ignores_deadlines_of_others(self):
+        self.task("dated", "rankr", "high", due="2026-09-28")
+        self.task("work-low", "work", "low")
+        self.assertEqual(self.order(), ["work-low", "dated"])
+
+    def test_personal_high_before_rankr_medium_and_low(self):
+        self.task("rankr-low", "rankr", "low", created="2026-08-01")
+        self.task("rankr-medium", "rankr", "medium", created="2026-08-01")
+        self.task("personal-high", "personal", "high", created="2026-09-20",
+                  delivery="local")
+        self.assertEqual(self.order(),
+                         ["personal-high", "rankr-medium", "rankr-low"])
+
+    def test_equal_priority_project_rank_decides(self):
+        self.task("personal", "personal", "medium", created="2026-08-01")
+        self.task("side", "side-projects", "medium", created="2026-08-01")
+        self.task("rankr", "rankr", "medium", created="2026-09-20")
+        self.task("cm", "claudemaxxing", "medium", created="2026-09-25")
+        self.assertEqual(self.order(), ["cm", "rankr", "side", "personal"])
+
+    def test_equal_priority_and_rank_age_then_name_decide(self):
+        self.task("b-old", "rankr", "medium", created="2026-08-01")
+        self.task("a-new", "rankr", "medium", created="2026-09-01")
+        self.task("c-new", "rankr", "medium", created="2026-09-01")
+        self.assertEqual(self.order(), ["b-old", "a-new", "c-new"])
+
+    def test_priority_inheritance_crosses_projects(self):
+        # A low personal prerequisite of a high rankr task is scheduled as
+        # high, so it passes a medium claudemaxxing task.
+        self.task("blocker", "personal", "low", delivery="local")
+        self.task("waiting", "rankr", "high", prerequisites="blocker")
+        self.task("cm", "claudemaxxing", "medium")
+        self.assertEqual(self.order(), ["blocker", "cm"])
+
+    def test_duties_and_fillers_keep_their_classes(self):
+        self.task("duty", "personal", "low", duty="nightly", delivery="local")
+        self.task("filler", "personal", "low", filler="true", delivery="local")
+        self.task("work", "work", "high")
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(done={}, period_keys={"nightly": "n1",
+                                                          "filler": "n1"}),
+                         ["duty", "work", "std", "filler"])
+
+    def test_far_deadline_keeps_its_standard_place(self):
+        self.task("dated", "personal", "low", due="2026-10-15",
+                  delivery="local")
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(), ["std", "dated"])
+
+    def test_due_soon_jumps_ahead_of_standard_high(self):
+        # One night needed plus one of margin: due in 1 night is due soon,
+        # due in 2 nights is not yet.
+        self.task("dated", "personal", "low", due="2026-09-28",
+                  delivery="local")
+        self.task("later", "personal", "low", due="2026-09-29",
+                  delivery="local", created="2026-08-01")
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(), ["dated", "std", "later"])
+
+    def test_due_soon_is_earliest_deadline_first(self):
+        self.task("late-high", "rankr", "high", due="2026-09-28")
+        self.task("early-low", "personal", "low", due="2026-09-27",
+                  delivery="local")
+        self.assertEqual(self.order(), ["early-low", "late-high"])
+
+    def test_due_soon_same_deadline_priority_decides(self):
+        self.task("low", "claudemaxxing", "low", due="2026-09-28")
+        self.task("high", "personal", "high", due="2026-09-28",
+                  delivery="local")
+        self.assertEqual(self.order(), ["high", "low"])
+
+    def test_estimated_runs_widen_the_lead_time(self):
+        # Three runs plus one of margin: a deadline three nights away is due.
+        self.task("big", "personal", "low", due="2026-09-30", delivery="local")
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(), ["std", "big"])
+        self.assertEqual(self.order(est_runs={"big": 2.2}), ["big", "std"])
+
+    def test_undated_prerequisite_of_dated_task_is_promoted(self):
+        # The chain needs two nights (prereq, then dated) plus one of margin.
+        self.task("prereq", "personal", "low", delivery="local")
+        self.task("dated", "personal", "low", due="2026-09-30",
+                  delivery="local", prerequisites="prereq")
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(), ["std", "prereq"])
+        self.assertEqual(self.order(today=date(2026, 9, 28)), ["prereq", "std"])
+
+    def test_shared_prerequisite_inherits_the_earliest_deadline(self):
+        self.task("shared", "personal", "low", delivery="local")
+        self.task("late", "personal", "low", due="2026-10-20",
+                  delivery="local", prerequisites="shared")
+        self.task("early", "personal", "low", due="2026-09-29",
+                  delivery="local", prerequisites="shared")
+        self.task("other", "rankr", "low", due="2026-09-29")
+        self.task("std", "rankr", "high")
+        # shared inherits 09-29 and must start first (two-night chain).
+        self.assertEqual(self.order(), ["shared", "std", "other"])
+        dl = tasks._deadlines(tasks._all_frontmatter(self.root))
+        self.assertEqual(dl["shared"]["due"], date(2026, 9, 29))
+        self.assertEqual(dl["shared"]["latest_start"], date(2026, 9, 27))
+
+    def test_deadlines_survive_a_prerequisite_cycle(self):
+        self.task("a", "personal", "low", delivery="local", prerequisites="b",
+                  due="2026-10-10")
+        self.task("b", "personal", "low", delivery="local", prerequisites="a")
+        self.assertEqual(self.order(), [])  # both wait on each other
+
+    def test_overdue_task_is_reported(self):
+        self.task("late", "personal", "low", due="2026-09-20", delivery="local")
+        self.assertEqual(tasks.deadline_alerts(self.root, TODAY),
+                         [("late.md", "overdue", date(2026, 9, 20), None)])
+        # Still scheduled, at the front of the queue, never dropped.
+        self.task("std", "rankr", "high")
+        self.assertEqual(self.order(), ["late", "std"])
+
+    def test_chain_that_cannot_fit_is_at_risk(self):
+        self.task("first", "personal", "low", delivery="local")
+        self.task("second", "personal", "low", delivery="local",
+                  prerequisites="first")
+        self.task("dated", "personal", "low", delivery="local",
+                  prerequisites="second", due="2026-09-28")
+        alerts = tasks.deadline_alerts(self.root, TODAY)
+        self.assertIn(("first.md", "at_risk", date(2026, 9, 28),
+                       date(2026, 9, 25)), alerts)
+        self.assertIn(("second.md", "at_risk", date(2026, 9, 28),
+                       date(2026, 9, 26)), alerts)
+
+    def test_blocked_dated_chain_is_at_risk_with_act_by_date(self):
+        self.task("needs-oscar", "personal", "low", delivery="local",
+                  status="blocked")
+        self.task("dated", "personal", "low", delivery="local",
+                  prerequisites="needs-oscar", due="2026-10-10")
+        self.assertEqual(tasks.deadline_alerts(self.root, TODAY),
+                         [("needs-oscar.md", "at_risk", date(2026, 10, 10),
+                           date(2026, 10, 8))])
+
+    def test_on_track_deadline_is_not_reported(self):
+        self.task("dated", "personal", "low", due="2026-10-10", delivery="local")
+        self.assertEqual(tasks.deadline_alerts(self.root, TODAY), [])
+
+    def test_unreadable_due_is_misconfigured_and_unschedulable(self):
+        self.task("bad", "personal", "high", due="next week", delivery="local")
+        self.assertEqual(self.order(), [])
+        self.assertIn(("bad.md", "due=next week (expected YYYY-MM-DD)"),
+                      tasks.misconfigured(self.root, RANKED))
+

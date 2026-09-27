@@ -27,7 +27,7 @@ NESTED = (
     "  - name: side-projects\n"
     "    account: personal\n"
     "    dirs: ~/projects ~/oss\n"
-    "    priority: 10\n"
+    "    rank: 10\n"
     "  - name: job\n"
     "    account: work\n"
     "    dirs: ~/work\n"
@@ -69,7 +69,7 @@ class TestSections(unittest.TestCase):
         self.assertEqual(len(self.cfg["projects"]), 2)
         self.assertEqual(self.cfg["accounts"][0]["name"], "personal")
         self.assertEqual(self.cfg["accounts"][1]["claude_bin"], "/opt/claude")
-        self.assertEqual(self.cfg["projects"][0]["priority"], 10)
+        self.assertEqual(self.cfg["projects"][0]["rank"], 10)
         self.assertIs(self.cfg["projects"][1]["local_only_default"], True)
 
     def test_scalar_after_section_returns_to_top_level(self):
@@ -102,10 +102,37 @@ class TestSections(unittest.TestCase):
         self.assertEqual(sp["account"], "personal")
         self.assertEqual(sp["dirs"], [os.path.expanduser("~/projects"),
                                       os.path.expanduser("~/oss")])
-        self.assertEqual(sp["priority"], 10)
+        self.assertEqual(sp["rank"], 10)
+        self.assertIs(sp["expedite"], False)
         self.assertIs(sp["local_only_default"], False)
-        self.assertEqual(projs["job"]["priority"], 100)  # default
+        self.assertEqual(projs["job"]["rank"], 100)  # default
         self.assertIs(projs["job"]["local_only_default"], True)
+
+    def _project_cfg(self, extra):
+        return config.load(write_cfg(
+            "accounts:\n  - name: a\n"
+            "projects:\n  - name: p\n    account: a\n" + extra))
+
+    def test_project_expedite_class(self):
+        projs = config.projects(self._project_cfg("    class: expedite\n"))
+        self.assertIs(projs["p"]["expedite"], True)
+
+    def test_project_retired_priority_refused(self):
+        # The old hard first sort key must not be silently reinterpreted.
+        with self.assertRaisesRegex(ValueError, "retired key 'priority'"):
+            config.projects(self._project_cfg("    priority: 5\n"))
+
+    def test_project_unknown_key_refused(self):
+        with self.assertRaisesRegex(ValueError, "unknown key 'rnak'"):
+            config.projects(self._project_cfg("    rnak: 1\n"))
+
+    def test_project_unknown_class_refused(self):
+        with self.assertRaisesRegex(ValueError, "unknown class 'expedit'"):
+            config.projects(self._project_cfg("    class: expedit\n"))
+
+    def test_project_non_integer_rank_refused(self):
+        with self.assertRaisesRegex(ValueError, "not an integer"):
+            config.projects(self._project_cfg("    rank: high\n"))
 
     def test_project_local_only_cli(self):
         # run.sh keys the agent GitHub token on this: a local-only project

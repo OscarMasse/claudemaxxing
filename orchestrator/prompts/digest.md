@@ -23,6 +23,9 @@ Procedure:
      (`detector_blocked` lists only tasks still `blocked`).
      These are tasks the gatekeeper found not advancing between sessions; say
      so when there are none.
+   - `## Deadlines` - every `overdue` and `at_risk` line of the gate.py status
+     output, one bullet each with its due date and, for `at_risk`, the `act_by`
+     date by which the owner must act. Omit the section when there are none.
    - `## Done` - tasks completed autonomously, drawn from the journal bullets.
    - `## Quota` - the gate.py status output, one block per account. Budgets are
      in USD at list price. Keep the `usage_week_pct` and `usage_window_pct` lines

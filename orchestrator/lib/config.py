@@ -28,9 +28,14 @@ Accessors:
                     top-level scalar as a default and overrides it with its own
                     keys, so shared knobs (regimes, slices, rates) are written
                     once while calibration lives per account.
-  projects(cfg)  -> {name: {name, account, dirs (expanded list), priority,
-                    local_only_default}}. `local_only_default` is a floor on
-                    the tasks' `delivery:` key, see lib/tasks.py.
+  projects(cfg)  -> {name: {name, account, dirs (expanded list), rank,
+                    expedite, local_only_default}}. `rank` breaks ties
+                    between equally urgent tasks and `class: expedite` puts a
+                    project's tasks ahead of the whole queue, see
+                    lib/tasks.py. `local_only_default` is a floor on the
+                    tasks' `delivery:` key, see lib/tasks.py. A project entry
+                    carrying any other key (the retired `priority` included)
+                    is refused.
 
 Backward compatibility: when the sections are absent, accounts() synthesizes a
 single account named "default" (profile ~/.claude, calibration from the flat
@@ -246,8 +251,25 @@ def accounts(cfg):
     return out
 
 
+# Every key a project entry may carry. Anything else is refused rather than
+# ignored: a misspelled `class: expedit` or a leftover `priority: 5` would
+# otherwise change the launch order silently.
+PROJECT_KEYS = ("name", "account", "dirs", "rank", "class",
+                "local_only_default")
+PROJECT_CLASSES = ("standard", "expedite")
+# The project `priority` was a hard first sort key: every task of a
+# better-ranked project, even a `low` one, launched before any task of the
+# others. `rank` only breaks ties between equally urgent tasks, so the old
+# numbers do not carry over and are refused, not reinterpreted.
+RETIRED_PROJECT_KEYS = {
+    "priority": "use `rank` (a tie-breaker, see lib/tasks.py) and "
+                "`class: expedite` for work that must go first",
+}
+
+
 def projects(cfg):
-    """Project registry {name: project}. Validates account references."""
+    """Project registry {name: project}. Validates account references and
+    refuses unknown or retired keys."""
     known = {a["name"] for a in accounts(cfg)}
     raw = cfg.get("projects")
     if not raw:
@@ -264,11 +286,27 @@ def projects(cfg):
                              f"unknown account {p['account']!r}")
         if p["name"] in out:
             raise ValueError(f"config: duplicate project name {p['name']!r}")
+        for key in p:
+            if key in RETIRED_PROJECT_KEYS:
+                raise ValueError(f"config: project {p['name']!r} carries retired "
+                                 f"key {key!r}: {RETIRED_PROJECT_KEYS[key]}")
+            if key not in PROJECT_KEYS:
+                raise ValueError(f"config: project {p['name']!r} has unknown "
+                                 f"key {key!r}")
+        cls = str(p.get("class", "standard"))
+        if cls not in PROJECT_CLASSES:
+            raise ValueError(f"config: project {p['name']!r} has unknown class "
+                             f"{cls!r} (expected one of {', '.join(PROJECT_CLASSES)})")
+        rank = p.get("rank", 100)
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            raise ValueError(f"config: project {p['name']!r} rank {rank!r} "
+                             f"is not an integer")
         out[p["name"]] = {
             "name": p["name"],
             "account": p["account"],
             "dirs": [os.path.expanduser(d) for d in split_values(p.get("dirs", ""))],
-            "priority": int(p.get("priority", 100)),
+            "rank": rank,
+            "expedite": cls == "expedite",
             "local_only_default": bool(p.get("local_only_default", False)),
         }
     return out

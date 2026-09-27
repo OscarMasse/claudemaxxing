@@ -163,6 +163,17 @@ The share is back-loaded: with `night_budget_ratio` r, the j-th of the n remaini
 A night absorbs one 5h quota window, except the last one: it is the pre-reset burn-down, bounded by neither night_end nor the morning guard, so it spans `ceil(prereset_burn_hours / 5)` windows and the plan may hoard that much for it.
 It adapts without any memory: `available` is recomputed from measured usage on every tick, so a heavy interactive day shrinks every later night and a quiet one grows it.
 
+**Queue order.**
+The queue follows Kanban classes of service, lexicographic inside each class.
+Tasks of a project declaring `class: expedite` go first, whatever their priority.
+Then come dated tasks (`due: YYYY-MM-DD`, the fixed-date class) whose deadline is near, earliest deadline first.
+Then everything else, by the task's own priority, with the project's `rank` only breaking ties, then age.
+So a `high` task of the lowest-ranked project passes a `medium` one of the best-ranked: the project used to be the first sort key, and one busy project starved all the others.
+A weighted score (priority weight times project weight, as in WSJF) was rejected for the same reason: a heavy enough project weight overrides task priority.
+Priority and deadlines both propagate through `prerequisites`: a blocker inherits the best priority and the earliest deadline of the unfinished tasks waiting on it.
+A dated task is "near" when the nights left are fewer than its chain needs (itself, then each dependent down to the dated one) plus one of margin, which is backward scheduling from the deadline.
+`gate.py status` reports a past deadline as `overdue`, and a chain that can no longer fit or waits on a `blocked` task as `at_risk` with the date by which the owner must act; the digest relays both.
+
 **Recurring work.**
 Two scheduling classes sit outside the priority queue.
 A task with `duty: nightly|weekly` is mandatory: it is taken off the top once per period, charged to the budget but never gated by it, so the queue cannot starve it.

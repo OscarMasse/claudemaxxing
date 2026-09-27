@@ -3,7 +3,7 @@
 Selection is deterministic and happens in the gatekeeper (not in the session),
 because the task's declared model must be known before launching the session.
 Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
-priority, created, model (sonnet|opus|fable, default sonnet),
+priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low),
 prerequisites (space-separated task basenames, `.md` suffix optional).
 
@@ -15,8 +15,38 @@ no taxonomy beyond that: projects are whatever the config declares. A ready task
 whose project does not resolve can never be scheduled; `orphaned` reports those
 so a typo or a renamed project does not silently swallow work.
 
-Ordering within an account: project `priority` (integer, lower preferred),
-then task `priority` (high/medium/low), then oldest `created`, then filename.
+Ordering within an account's queue, by class of service (Kanban), then
+lexicographically inside each class:
+
+  1. expedite - every task of a project declaring `class: expedite` (work),
+     by effective task priority, then project `rank`, then age;
+  2. fixed date, due soon - tasks whose (effective) `due:` deadline is close,
+     earliest deadline first (EDF), then effective priority, rank, age;
+  3. standard - everything else, by effective task priority
+     (high/medium/low), then project `rank` (lower preferred), then oldest
+     `created`, then filename.
+
+The project only breaks ties: a `high` task of the lowest-ranked project
+launches before a `medium` one of the best-ranked. It used to be the other
+way round (a project `priority` as the first sort key), so every task of one
+project, even a `low` one, starved every other project. A weighted score
+(priority weight times project weight, as in WSJF) was rejected for the same
+reason: a heavy enough project weight overrides task priority, which is
+exactly what the owner ruled out. Aging, the classic cure for starvation of
+`low` tasks, is only worth adding once measurement shows them starving.
+
+Deadlines (`due: YYYY-MM-DD`, the Kanban fixed-date class): a dated task keeps
+its standard place until the nights left before its deadline get fewer than
+the nights its chain needs plus one of margin, then it jumps ahead of
+everything but expedite. The chain is the task itself plus every unfinished
+task that transitively depends on it and must run after it: a prerequisite
+inherits the EARLIEST deadline of its dependents (the blocker of a dated task
+is promoted, not the blocked task) and starts early enough for the whole
+chain to fit, which is backward scheduling from the deadline as in
+critical-path planning. A task needs one night by default, or
+ceil(estimated runs) once the caller knows better (`est_runs`). A past
+deadline, or a chain that cannot fit or waits on a `blocked` task, is
+reported by `deadline_alerts`, never dropped silently. See `_deadlines`.
 
 `delivery` states where the task's output must end up, and it is mandatory:
 
@@ -82,7 +112,9 @@ dependent is skipped every tick (unmet prerequisite) while its blocker waits
 behind unrelated tasks. Only the effective priority is used for ordering; the
 declared `priority:` in the file is never rewritten. See `_effective_priorities`.
 """
+import math
 import re
+from datetime import date
 from pathlib import Path
 
 from lib import config
@@ -177,6 +209,13 @@ def _own_priority(fm):
     return PRIORITY_ORDER.get(fm.get("priority", "low"), PRIORITY_ORDER["low"])
 
 
+def _all_frontmatter(root):
+    """Map task basename -> frontmatter, for every task file."""
+    return {p.stem: _frontmatter(p)
+            for p in (Path(root) / "tasks").glob("*.md")
+            if p.name != "TEMPLATE.md"}
+
+
 def _effective_priorities(root):
     """Map task basename -> effective priority rank, lower being more urgent.
 
@@ -194,11 +233,7 @@ def _effective_priorities(root):
     does not recurse for the same reason; this function is the one place that
     walks the graph, and it is written not to trust it.
     """
-    fms = {}
-    for p in (Path(root) / "tasks").glob("*.md"):
-        if p.name != "TEMPLATE.md":
-            fms[p.stem] = _frontmatter(p)
-
+    fms = _all_frontmatter(root)
     eff = {name: _own_priority(fm) for name, fm in fms.items()}
     # A dependent only pulls its blockers forward while it is still pending.
     pending = [n for n, fm in fms.items() if fm.get("status") != "done"]
@@ -214,6 +249,105 @@ def _effective_priorities(root):
         if not changed:
             break
     return eff
+
+
+MARGIN_NIGHTS = 1
+
+
+def _declared_due(fm):
+    """(ok, date or None): the task's `due:` deadline. `ok` is False when the
+    key is present but not an ISO date, which makes the task unschedulable
+    and reported, like any unreadable value the engine interprets."""
+    raw = fm.get("due")
+    if raw is None:
+        return True, None
+    try:
+        return True, date.fromisoformat(raw.strip("'\""))
+    except ValueError:
+        return False, None
+
+
+def _nights(name, est_runs):
+    """Nights one task needs: ceil(estimated runs), at least one."""
+    return max(1, math.ceil((est_runs or {}).get(name, 1)))
+
+
+def _deadlines(fms, est_runs=None):
+    """Map task basename -> {"due", "latest_start"} for every unfinished task
+    that is dated or that a dated task transitively waits on.
+
+    `due` is the effective deadline: the earliest `due:` of the task and of
+    every unfinished task depending on it, the way `_effective_priorities`
+    propagates priority. `latest_start` is the last day the task can start
+    and still let its whole chain (itself, then each dependent down to the
+    dated one, one after the other) finish by that dependent's deadline; it
+    is the minimum over every chain the task belongs to.
+
+    Bounded relaxation, like `_effective_priorities`, so a prerequisite cycle
+    cannot loop: dates only ever move earlier and the pass count is capped."""
+    pending = {n: fm for n, fm in fms.items() if fm.get("status") != "done"}
+    out = {}
+    for name, fm in pending.items():
+        _, due = _declared_due(fm)
+        if due is not None:
+            out[name] = {"due": due, "latest_start":
+                         date.fromordinal(due.toordinal() - _nights(name, est_runs))}
+    for _ in range(len(fms) + 1):
+        changed = False
+        for name in pending:
+            if name not in out:
+                continue
+            for prereq in _prereq_names(pending[name]):
+                if prereq not in pending:
+                    continue  # done or missing: nothing left to schedule
+                start = date.fromordinal(out[name]["latest_start"].toordinal()
+                                         - _nights(prereq, est_runs))
+                cur = out.get(prereq)
+                if cur is None:
+                    out[prereq] = {"due": out[name]["due"], "latest_start": start}
+                    changed = True
+                    continue
+                if out[name]["due"] < cur["due"]:
+                    cur["due"] = out[name]["due"]
+                    changed = True
+                if start < cur["latest_start"]:
+                    cur["latest_start"] = start
+                    changed = True
+        if not changed:
+            break
+    return out
+
+
+def _due_soon(entry, today):
+    """True when fewer than MARGIN_NIGHTS nights of slack are left before the
+    task's chain must start: from then on it jumps the standard queue."""
+    return (entry["latest_start"] - today).days < MARGIN_NIGHTS
+
+
+def deadline_alerts(root, today, est_runs=None):
+    """Deadlines the owner must hear about: list of (task filename, kind,
+    due, act_by), kind being:
+
+    - `overdue`: the task's own `due:` is in the past and it is not done;
+    - `at_risk`: its chain can no longer fit before the (effective) deadline
+      even at the front of the queue, or the task is `blocked` on the owner,
+      so the chain waits on him. `act_by` is the last day the chain can
+      start: the date by which the owner must act.
+
+    Account-independent, printed once by gate.py status for the digest."""
+    fms = _all_frontmatter(root)
+    out = []
+    for name, entry in sorted(_deadlines(fms, est_runs).items()):
+        fm = fms[name]
+        _, own = _declared_due(fm)
+        if own is not None and own < today:
+            out.append((f"{name}.md", "overdue", own, None))
+            continue
+        slack = (entry["latest_start"] - today).days
+        if slack < 0 or fm.get("status") == "blocked":
+            out.append((f"{name}.md", "at_risk", entry["due"],
+                        entry["latest_start"]))
+    return out
 
 
 DUTY_PERIODS = ("nightly", "weekly")
@@ -233,14 +367,24 @@ def _sched_class(fm):
     return None
 
 
-def _ordered(root, projects, account, sched_class=None):
+CLASS_EXPEDITE, CLASS_DUE_SOON, CLASS_STANDARD = 0, 1, 2
+
+
+def _ordered(root, projects, account, sched_class=None, today=None,
+             est_runs=None):
     """Eligible tasks for `account` in launch order.
 
     `sched_class` selects which scheduling class to return: None for the
     ordinary priority queue, "duty" or "filler" for the recurring classes.
     Every other eligibility rule is shared, so the classes cannot drift apart
-    from the queue on prerequisites or account routing."""
+    from the queue on prerequisites or account routing.
+
+    `today` (a date, default the real one) decides which deadlines are due
+    soon, and `est_runs` ({task basename: runs}) how many nights each task
+    needs; see the module docstring for the order itself."""
+    today = today or date.today()
     effective = _effective_priorities(root)
+    dated = _deadlines(_all_frontmatter(root), est_runs)
     found = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -265,8 +409,18 @@ def _ordered(root, projects, account, sched_class=None):
             continue  # contradicts the project's local-only floor, same
         if "local_only" in fm:
             continue  # superseded key, also reported by misconfigured()
-        key = (proj["priority"],
+        if not _declared_due(fm)[0]:
+            continue  # unreadable deadline, reported by misconfigured()
+        entry = dated.get(p.stem)
+        if proj["expedite"]:
+            cls, deadline = CLASS_EXPEDITE, 0
+        elif entry is not None and _due_soon(entry, today):
+            cls, deadline = CLASS_DUE_SOON, entry["due"].toordinal()
+        else:
+            cls, deadline = CLASS_STANDARD, 0
+        key = (cls, deadline,
                effective.get(p.stem, _own_priority(fm)),
+               proj["rank"],
                fm.get("created", "9999"), p.name)
         found.append((key, {"path": str(p), "model": model,
                             "effort": fm.get("effort", "low"),
@@ -503,6 +657,7 @@ def misconfigured(root, projects):
     - `delivery:` absent, or naming something outside DELIVERY_VALUES.
     - `delivery:` breaching the project's local-only floor.
     - a leftover `local_only:` key, which `delivery:` replaced.
+    - `due:` that is not an ISO date.
 
     One task can be reported for several of these; each line names its key, so
     fixing the file needs no guessing. Account-independent by construction, so
@@ -526,13 +681,15 @@ def misconfigured(root, projects):
         if "local_only" in fm:
             out.append((p.name, "local_only= (replaced by delivery:, "
                                 "remove the key)"))
+        if not _declared_due(fm)[0]:
+            out.append((p.name, f"due={fm['due']} (expected YYYY-MM-DD)"))
     return out
 
 
-def pick(root, projects, account):
+def pick(root, projects, account, today=None, est_runs=None):
     """Best task for the account: {"path", "model", "effort", "project",
     "delivery", "local_only", "parallel"} or None."""
-    picked = pick_multi(root, projects, account, 1)
+    picked = pick_multi(root, projects, account, 1, today, est_runs)
     return picked[0] if picked else None
 
 
@@ -599,16 +756,17 @@ def _pad_parallel(out, queue, count, slots):
     return out
 
 
-def pick_multi(root, projects, account, count):
+def pick_multi(root, projects, account, count, today=None, est_runs=None):
     """Up to `count` session assignments from the ordinary priority queue:
     distinct tasks first, then parallel shards."""
-    queue = _ordered(root, projects, account)
+    queue = _ordered(root, projects, account, today=today, est_runs=est_runs)
     slots = _ModelSlots(None)
     return _pad_parallel(queue[:count], queue, count, slots)
 
 
 def launch_order(root, projects, account, count,
-                 done=None, period_keys=None, model_slots=None, exclude=()):
+                 done=None, period_keys=None, model_slots=None,
+                 today=None, est_runs=None, exclude=()):
     """Up to `count` session assignments for one tick, in launch order.
 
     The three scheduling classes are served in a fixed order that encodes their
@@ -616,7 +774,7 @@ def launch_order(root, projects, account, count,
 
     1. duties - mandatory recurring work, taken off the top so the priority
        queue can never starve them;
-    2. the ordinary priority queue;
+    2. the ordinary priority queue (expedite, due soon, standard);
     3. fillers - opportunistic recurring work, reached only once the queue is
        exhausted (the caller additionally launches them only if budget is left);
     4. parallel shards of queue tasks, as padding.
@@ -629,6 +787,7 @@ def launch_order(root, projects, account, count,
 
     `exclude` holds queue task basenames the caller will not launch this tick
     (stalls.ladder_blocked); the next ones in the queue take their slots.
+    `today` and `est_runs` order the queue's deadlines, see `_ordered`.
 
     Each assignment carries `sched` ("duty", "filler" or None) so the caller can
     apply the budget rule that matches the class."""
@@ -637,7 +796,7 @@ def launch_order(root, projects, account, count,
     slots = _ModelSlots(model_slots)
     out = _take(duties_due(root, projects, account, done or {}, period_keys or {}),
                 count, slots)
-    queue = [t for t in _ordered(root, projects, account)
+    queue = [t for t in _ordered(root, projects, account, today=today, est_runs=est_runs)
              if Path(t["path"]).name not in exclude]
     out += _take(queue, count - len(out), slots)
     if len(out) < count:

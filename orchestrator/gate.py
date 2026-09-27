@@ -379,7 +379,8 @@ def tick_account(p, acct, projs):
                                         done=duties_served(state),
                                         period_keys=keys,
                                         model_slots=model_slots,
-                                        exclude=ladder)
+                                        exclude=ladder,
+                                        today=now.date())
         # What a session costs is a property of the work, not of the slice it
         # was allotted: sessions do not fill their slice (measured median
         # utilisation here: 3%), so both the measured figure and the cold-start
@@ -630,6 +631,11 @@ def status(p):
         print(f"orphaned task={task_name} project={project}")
     for task_name, problem in tasks.misconfigured(p["root"], projs):
         print(f"misconfigured task={task_name} {problem}")
+    # A dated task that cannot make it is the owner's call, never a silent drop.
+    for task_name, kind, due, act_by in tasks.deadline_alerts(p["root"],
+                                                             datetime.now().date()):
+        act = f" act_by={act_by.isoformat()}" if act_by else ""
+        print(f"{kind} task={task_name} due={due.isoformat()}{act}")
 
 
 def plan(p):

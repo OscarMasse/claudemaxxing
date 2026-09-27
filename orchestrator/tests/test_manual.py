@@ -32,7 +32,7 @@ CFG = (
     "  - name: side-projects\n"
     "    account: personal\n"
     "    dirs: ~/projects\n"
-    "    priority: 10\n"
+    "    rank: 10\n"
 )
 
 

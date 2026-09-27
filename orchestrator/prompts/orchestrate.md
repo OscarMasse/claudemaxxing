@@ -23,9 +23,11 @@ Procedure:
    gatekeeper pre-selected for you arrives already `status: in-progress`: it claimed
    the task at launch so the next tick does not launch it twice. That is your task,
    not someone else's - do not skip it for not being `ready`. Never touch
-   `gated` autonomy actions. Order candidates by their project's `priority` in
-   the live config ({{CONFIG_FILE}}, lower number first), then by the task's own `priority`
-   (high > medium > low); tie-break by oldest `created`.
+   `gated` autonomy actions. Order candidates as the gatekeeper does: tasks of a
+   project with `class: expedite` in the live config ({{CONFIG_FILE}}) first, then tasks
+   whose `due:` deadline is near (earliest first), then by the task's own `priority`
+   (high > medium > low); the project's `rank` (lower first) only breaks ties, then
+   oldest `created`.
    Delivery contract (non-negotiable): every task declares `delivery:`, and it is an
    OBLIGATION, not a permission. It says where the work must end up, and the task is
    not finished until it is there:

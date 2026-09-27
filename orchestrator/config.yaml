@@ -158,8 +158,12 @@ accounts:
 #   account            required, the account this project's tasks run on
 #   dirs               directories handed to the session via --add-dir,
 #                      flow-style list [a, b], ~ expands to $HOME
-#   priority           optional integer, LOWER is preferred (default 100);
-#                      orders projects within an account before per-task rules
+#   rank               optional integer, LOWER is preferred (default 100);
+#                      only breaks ties between tasks of equal priority, it
+#                      never lets a `low` task pass a `high` one
+#   class              optional, `standard` (default) or `expedite`: every
+#                      task of an expedite project launches before the rest
+#                      of the queue, whatever its priority
 #   local_only_default optional; marks the project strictly local. This is a
 #                      FLOOR, not a default: every task here must declare
 #                      `delivery: local`, and one declaring `branch` or `pr`
@@ -168,14 +172,14 @@ projects:
   - name: side-projects
     account: personal
     dirs: [~/projects]
-    priority: 10
+    rank: 1
   - name: life
     account: personal
     dirs: [~/personal]
-    priority: 50
+    rank: 2
     local_only_default: true
   - name: work
     account: work
     dirs: [~/work]
-    priority: 10
+    class: expedite
     local_only_default: true

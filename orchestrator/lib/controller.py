@@ -252,15 +252,12 @@ def decide(cfg, now, usage, idle_min):
     floor = int(cfg.get("min_slice_min", 20))
     window_end = block["end"] if (block and block["active"]) else now + WINDOW
     if window_end > guard + tolerance:
-        if block and block["active"]:
-            # An open late-evening window: use its remainder, never past the guard.
-            remainder_min = (min(block["end"], guard) - now).total_seconds() / 60
-        else:
-            remainder_min = 0
-        if remainder_min < 5:
+        if not (block and block["active"]):
             return Decision("skip", "night: window would cross morning guard", 0, "night")
+        # An open late-evening window: use its remainder, never past the guard.
+        remainder_min = (min(block["end"], guard) - now).total_seconds() / 60
         slice_min = min(int(cfg["night_slice_min"]), int(remainder_min))
-        if slice_min < floor:
+        if slice_min < max(floor, 5):
             return _end_of_window(slice_min, floor)
         return Decision("run", "night: open-window remainder", slice_min, "night",
                         min(tonight, _window_headroom(cfg, block)))
@@ -269,10 +266,8 @@ def decide(cfg, now, usage, idle_min):
     slice_min = int(cfg["night_slice_min"])
     if window_end + WINDOW > guard + tolerance:
         remainder_min = (window_end - now).total_seconds() / 60
-        if remainder_min < 5:
-            return Decision("skip", "night: window would cross morning guard", 0, "night")
         slice_min = min(slice_min, int(remainder_min))
-        if slice_min < floor:
+        if slice_min < max(floor, 5):
             return _end_of_window(slice_min, floor)
     return Decision("run", "night regime", slice_min, "night",
                     min(tonight, _window_headroom(cfg, block)))

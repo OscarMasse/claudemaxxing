@@ -121,6 +121,11 @@ class StallTest(Base):
         self.assertLessEqual(len(stalls._own_launches(runs)), 2)
         self.assertEqual(stalls.detect(self.root, self.state, now), [])
 
+    def test_failing_sessions_in_shrinking_slices_still_count(self):
+        runs = [{"ts": self.t0 + timedelta(minutes=5 * i), "task": "a.md",
+                 "exit": 1, "slice": 50 - 5 * i} for i in range(5)]
+        self.assertEqual(len(stalls._own_launches(runs)), 5)
+
     def test_full_slices_still_storm(self):
         path = self.task()
         for i in range(stalls.STORM_NIGHT_RUNS):
@@ -138,6 +143,12 @@ class StallTest(Base):
         t = datetime(2026, 9, 27, 3, 0)
         self.ledger("a.md", t, 33, 8)      # used a quarter: early exit
         self.ledger("b.md", t, 33, 20)     # used most of it: working
+        self.assertEqual(stalls.ladder_blocked(self.state, t, 23), {"a.md"})
+        # A session killed at its hard limit has no duration: not an early exit.
+        with open(self.state / "costs.jsonl", "a") as f:
+            f.write(json.dumps({"ts": t.isoformat(), "mode": "orchestrate",
+                                "task": "/x/tasks/c.md", "slice_min": 33,
+                                "exit": 124}) + "\n")
         self.assertEqual(stalls.ladder_blocked(self.state, t, 23), {"a.md"})
         # A slice at least as long as the last one is always allowed.
         self.assertEqual(stalls.ladder_blocked(self.state, t, 33), set())

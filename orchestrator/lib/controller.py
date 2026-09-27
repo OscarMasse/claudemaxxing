@@ -160,6 +160,18 @@ def _window_headroom(cfg, block):
     return cap
 
 
+def _end_of_window(slice_min, floor):
+    """Skip a slice too short to be worth its cold start.
+
+    Every session pays the same fixed cost before doing anything (0.5-1M
+    cached tokens of context, often a rebuilt dev stack), so a 7-minute slice
+    buys almost nothing for that price. The reason names the window end, not
+    the budget, so the log never reads as a money problem."""
+    return Decision("skip",
+                    f"night: end of window, only {slice_min}min left "
+                    f"< min_slice_min={floor}", 0, "night")
+
+
 def decide(cfg, now, usage, idle_min):
     reset = next_reset(cfg, now)
     cap = float(cfg["weekly_cap_usd"])
@@ -231,8 +243,15 @@ def decide(cfg, now, usage, idle_min):
                         f"night: tonight's allocation spent "
                         f"(available={available:.2f})", 0, "night")
     guard = _today_at(now, cfg["morning_guard"])
+    # A window may end this many minutes past the guard. On 2026-09-27 the
+    # follow-on window would have ended at 08:32, two minutes past an 08:30
+    # guard, and that alone chopped the rest of the night into 33/23/18/13/7
+    # minute slices. The owner sharing a few morning minutes with the tail of
+    # a background window costs far less than a night of cold starts.
+    tolerance = timedelta(minutes=int(cfg.get("guard_tolerance_min", 15)))
+    floor = int(cfg.get("min_slice_min", 20))
     window_end = block["end"] if (block and block["active"]) else now + WINDOW
-    if window_end > guard:
+    if window_end > guard + tolerance:
         if block and block["active"]:
             # An open late-evening window: use its remainder, never past the guard.
             remainder_min = (min(block["end"], guard) - now).total_seconds() / 60
@@ -240,16 +259,20 @@ def decide(cfg, now, usage, idle_min):
             remainder_min = 0
         if remainder_min < 5:
             return Decision("skip", "night: window would cross morning guard", 0, "night")
-        return Decision("run", "night: open-window remainder",
-                        min(int(cfg["night_slice_min"]), int(remainder_min)), "night",
+        slice_min = min(int(cfg["night_slice_min"]), int(remainder_min))
+        if slice_min < floor:
+            return _end_of_window(slice_min, floor)
+        return Decision("run", "night: open-window remainder", slice_min, "night",
                         min(tonight, _window_headroom(cfg, block)))
     # Current window closes before the guard, but work crossing into a
     # follow-on window is only safe if that one also closes before the guard.
     slice_min = int(cfg["night_slice_min"])
-    if window_end + WINDOW > guard:
+    if window_end + WINDOW > guard + tolerance:
         remainder_min = (window_end - now).total_seconds() / 60
         if remainder_min < 5:
             return Decision("skip", "night: window would cross morning guard", 0, "night")
         slice_min = min(slice_min, int(remainder_min))
+        if slice_min < floor:
+            return _end_of_window(slice_min, floor)
     return Decision("run", "night regime", slice_min, "night",
                     min(tonight, _window_headroom(cfg, block)))

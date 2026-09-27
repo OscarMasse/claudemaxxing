@@ -38,6 +38,7 @@ GLOBAL_FAIL_RUNS = 5    # consecutive zero-work failures, any task, before PAUSE
 NIGHT_SHIFT = timedelta(hours=12)
 
 _RUN_RE = re.compile(r"^(\S+ \S+) mode=(\S+) .*?task=(\S+) .* exit=(-?\d+)\s*$")
+_SLICE_RE = re.compile(r" slice=(\d+)min ")
 # Lines the gatekeeper itself adds to a task on every launch: they change the
 # file without the session having advanced anything.
 _NOISE_RE = re.compile(r"^(status:.*|- \S+: claimed by the gatekeeper at launch.*)$",
@@ -82,8 +83,10 @@ def orchestrate_runs(state_root):
         ts = _parse_ts(m.group(1))
         if ts is None:
             continue
+        s = _SLICE_RE.search(line)
         out.append({"ts": ts, "task": task_name(m.group(3)),
-                    "exit": int(m.group(4))})
+                    "exit": int(m.group(4)),
+                    "slice": int(s.group(1)) if s else None})
     return out
 
 
@@ -192,7 +195,8 @@ def detect(root, state_root, now):
             continue
         rs = runs.get(name, [])
         night = (_naive(now) - NIGHT_SHIFT).date()
-        tonight = sum(1 for r in rs if (r["ts"] - NIGHT_SHIFT).date() == night)
+        tonight = len(_own_launches(
+            [r for r in rs if (r["ts"] - NIGHT_SHIFT).date() == night]))
         if tonight >= STORM_NIGHT_RUNS:
             found.append((name, "storming", len(rs),
                           f"{tonight} launches in the night of {night}"))
@@ -203,6 +207,73 @@ def detect(root, state_root, now):
             found.append((name, "storming", len(rs),
                           f"last {STORM_SAME_EXIT} sessions all exited {tail[0]}"))
     return found
+
+
+def _own_launches(runs):
+    """One night's runs of one task minus the relaunches the scheduler caused.
+
+    A run whose slice is shorter than the previous run's was clamped by the
+    window end: the task was relaunched because the scheduler cut its last
+    slice short, not because it keeps failing. On 2026-09-27 such a ladder
+    (33/23/18/13/7 minutes, each session doing real work) was charged to the
+    task as a storm and blocked it."""
+    own, prev = [], None
+    for r in sorted(runs, key=lambda r: r["ts"]):
+        if not (prev is not None and r["slice"] is not None and r["slice"] < prev):
+            own.append(r)
+        if r["slice"] is not None:
+            prev = r["slice"]
+    return own
+
+
+def _local(ts, tz):
+    """A timestamp as naive wall-clock time in `tz` (the scheduler's zone)."""
+    return ts.astimezone(tz).replace(tzinfo=None) if ts.tzinfo else ts
+
+
+def _night(ts, tz):
+    """The night bucket of a timestamp, in the scheduler's local time."""
+    return (_local(ts, tz) - NIGHT_SHIFT).date()
+
+
+def ladder_blocked(state_root, now, slice_min):
+    """Queue tasks that must not be relaunched into a slice of `slice_min`.
+
+    A task whose last session tonight had a longer slice and used less than
+    half of it gains nothing from a shorter one: it would only pay another
+    cold start for less time. Relaunching into shorter and shorter slices is
+    how 2026-09-27 cut one task into five sessions. A task whose last session
+    used at least half its slice was working, not guessing, and stays
+    eligible: its work is not done (it is `ready` again) and a shorter slice
+    still advances it."""
+    night = _night(now, now.tzinfo)
+    last = {}
+    for row in ledger_rows(state_root):
+        if row.get("mode") != "orchestrate" or row.get("task") in (None, "auto"):
+            continue
+        ts = _parse_ts(row["ts"])
+        if (ts is None or _night(ts, now.tzinfo) != night
+                or _local(ts, now.tzinfo) > _local(now, now.tzinfo)):
+            continue
+        last[task_name(row["task"])] = row
+    out = set()
+    for name, row in last.items():
+        prev = int(row.get("slice_min") or 0)
+        used_min = float(row.get("duration_ms") or 0) / 60000
+        if slice_min < prev and used_min < prev / 2:
+            out.add(name)
+    return out
+
+
+def early_exit(slice_min, duration_min, status):
+    """Whether a session left more than half its slice unused while its task
+    still has work left (`ready`, or `in-progress` if it never released it).
+
+    A task finished (`done`) or handed to the owner (`blocked`) early is a
+    good outcome. One sent back to `ready` after a few minutes of a long slice
+    is the 2026-09-27 pattern: the session guessed its time was up."""
+    return (status in ("ready", "in-progress")
+            and float(duration_min) < float(slice_min) / 2)
 
 
 BLOCK_NOTE = (
@@ -305,3 +376,15 @@ def trip_global(state_root, paused, needs):
     data["global_tripped_at"] = tail[-1]["ts"]
     _save_state(state_root, data)
     return tail
+
+
+if __name__ == "__main__":
+    import sys
+    # early-exit <slice_min> <duration_min> <task_file>: exit 0 when early.
+    if len(sys.argv) == 5 and sys.argv[1] == "early-exit":
+        path = Path(sys.argv[4])
+        status = _status(path) if path.exists() else None
+        sys.exit(0 if early_exit(sys.argv[2], sys.argv[3], status) else 1)
+    print("usage: stalls.py early-exit <slice_min> <duration_min> <task_file>",
+          file=sys.stderr)
+    sys.exit(2)

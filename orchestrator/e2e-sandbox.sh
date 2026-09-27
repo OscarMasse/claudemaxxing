@@ -60,7 +60,7 @@ projects:
   - name: demo
     account: max
     dirs: $SANDBOX/proj
-    priority: 10
+    rank: 10
 CFG
 
 task() {  # task <file> <priority> [extra frontmatter line]

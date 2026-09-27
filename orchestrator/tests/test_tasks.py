@@ -738,6 +738,12 @@ class TestPriorityModel(unittest.TestCase):
                   due="2026-10-10")
         self.task("b", "personal", "low", delivery="local", prerequisites="a")
         self.assertEqual(self.order(), [])  # both wait on each other
+        # The cycle is cut where it closes: b starts one night before a,
+        # not one night earlier per relaxation lap.
+        dl = tasks._deadlines(tasks._all_frontmatter(self.root))
+        self.assertEqual(dl["a"]["latest_start"], date(2026, 10, 9))
+        self.assertEqual(dl["b"]["latest_start"], date(2026, 10, 8))
+        self.assertEqual(tasks.deadline_alerts(self.root, TODAY), [])
 
     def test_overdue_task_is_reported(self):
         self.task("late", "personal", "low", due="2026-09-20", delivery="local")

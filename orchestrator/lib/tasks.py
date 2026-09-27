@@ -283,38 +283,27 @@ def _deadlines(fms, est_runs=None):
     dated one, one after the other) finish by that dependent's deadline; it
     is the minimum over every chain the task belongs to.
 
-    Bounded relaxation, like `_effective_priorities`, so a prerequisite cycle
-    cannot loop: dates only ever move earlier and the pass count is capped."""
+    Walked backwards from each dated task, never revisiting a task already on
+    the current path: a prerequisite cycle is cut where it closes instead of
+    pushing `latest_start` one night earlier on every lap."""
     pending = {n: fm for n, fm in fms.items() if fm.get("status") != "done"}
     out = {}
+
+    def visit(name, due, start, path):
+        cur = out.setdefault(name, {"due": due, "latest_start": start})
+        cur["due"] = min(cur["due"], due)
+        cur["latest_start"] = min(cur["latest_start"], start)
+        for prereq in _prereq_names(pending[name]):
+            if prereq in pending and prereq not in path:
+                visit(prereq, due, date.fromordinal(
+                    start.toordinal() - _nights(prereq, est_runs)),
+                    path | {prereq})
+
     for name, fm in pending.items():
         _, due = _declared_due(fm)
         if due is not None:
-            out[name] = {"due": due, "latest_start":
-                         date.fromordinal(due.toordinal() - _nights(name, est_runs))}
-    for _ in range(len(fms) + 1):
-        changed = False
-        for name in pending:
-            if name not in out:
-                continue
-            for prereq in _prereq_names(pending[name]):
-                if prereq not in pending:
-                    continue  # done or missing: nothing left to schedule
-                start = date.fromordinal(out[name]["latest_start"].toordinal()
-                                         - _nights(prereq, est_runs))
-                cur = out.get(prereq)
-                if cur is None:
-                    out[prereq] = {"due": out[name]["due"], "latest_start": start}
-                    changed = True
-                    continue
-                if out[name]["due"] < cur["due"]:
-                    cur["due"] = out[name]["due"]
-                    changed = True
-                if start < cur["latest_start"]:
-                    cur["latest_start"] = start
-                    changed = True
-        if not changed:
-            break
+            visit(name, due, date.fromordinal(
+                due.toordinal() - _nights(name, est_runs)), {name})
     return out
 
 

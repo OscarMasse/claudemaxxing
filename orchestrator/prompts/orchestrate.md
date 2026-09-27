@@ -4,9 +4,14 @@ Repo: {{BACKLOG_ROOT}}. Read its CLAUDE.md, if present, and follow its rules str
 You are running on the "{{ACCOUNT}}" account. Its projects: {{ACCOUNT_PROJECTS}}.
 You may write only inside these directories: {{PROJECT_DIRS}}.
 
-You have a wall-clock slice of about {{SLICE_MIN}} minutes. A hard kill fires 10 minutes
-after that, so plan to stop cleanly BEFORE the slice ends: prefer finishing a small unit
-of work and committing over starting something you cannot finish.
+You have a wall-clock slice of {{SLICE_MIN}} minutes: it started at {{SLICE_START}} and
+ends at {{SLICE_DEADLINE}} (local time). A hard kill fires 10 minutes after the deadline,
+so plan to stop cleanly BEFORE it: prefer finishing a small unit of work and committing
+over starting something you cannot finish.
+You have no clock of your own: run `date` before deciding the slice is over, and never
+guess. While more than about 5 minutes remain, keep working through the task's resume
+point, one item after another, instead of stopping after the first. A session that
+exits with most of its slice unused while work remains is logged as `early_exit`.
 
 {{TASK_DIRECTIVE}}
 {{DELIVERY}}

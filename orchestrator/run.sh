@@ -165,15 +165,19 @@ if ! RULES="$(python3 lib/permissions.py "$DELIVERY")" || [ -z "$RULES" ]; then
 fi
 PERM_ARGS=(--disallowedTools)
 while IFS= read -r rule; do PERM_ARGS+=("$rule"); done <<< "$RULES"
-PROMPT="$(sed -e "s/{{SLICE_MIN}}/$SLICE_MIN/g" -e "s|{{TASK_DIRECTIVE}}|$DIRECTIVE|g" \
-              -e "s|{{BACKLOG_ROOT}}|$BACKLOG_ROOT|g" \
-              -e "s|{{ORCH_DIR}}|$ORCH_DIR|g" \
-              -e "s|{{CONFIG_FILE}}|$CONFIG_FILE|g" \
-              -e "s|{{ACCOUNT}}|$ACCOUNT|g" \
-              -e "s|{{ACCOUNT_PROJECTS}}|${ACCOUNT_PROJECTS% }|g" \
-              -e "s|{{PROJECT_DIRS}}|$BACKLOG_ROOT $DIRS|g" \
-              -e "s|{{DELIVERY}}|$DELIVERY_DIRECTIVE|g" \
-              -e "s|{{DIGEST_FILE}}|$DIGEST_FILE|g" "prompts/$MODE.md")"
+# The slice's absolute bounds go into the prompt: a headless session has no
+# clock unless it runs `date`, and sessions told only "about N minutes" guessed
+# their slice was over after a few minutes (2026-09-27).
+IFS=$'\t' read -r SLICE_START SLICE_DEADLINE < <(python3 lib/prompt.py times "$SLICE_MIN")
+if ! PROMPT="$(python3 lib/prompt.py render "prompts/$MODE.md" \
+    "SLICE_MIN=$SLICE_MIN" "SLICE_START=$SLICE_START" "SLICE_DEADLINE=$SLICE_DEADLINE" \
+    "TASK_DIRECTIVE=$DIRECTIVE" "BACKLOG_ROOT=$BACKLOG_ROOT" "ORCH_DIR=$ORCH_DIR" \
+    "CONFIG_FILE=$CONFIG_FILE" "ACCOUNT=$ACCOUNT" \
+    "ACCOUNT_PROJECTS=${ACCOUNT_PROJECTS% }" "PROJECT_DIRS=$BACKLOG_ROOT $DIRS" \
+    "DELIVERY=$DELIVERY_DIRECTIVE" "DIGEST_FILE=$DIGEST_FILE")"; then
+  echo "$(date '+%F %T') prompt rendering failed, not launching" >&2
+  exit 1
+fi
 TIMEOUT_S=$(( (SLICE_MIN + 10) * 60 ))
 START="$(date '+%F %T')"
 
@@ -229,15 +233,25 @@ TASK_BASENAME="auto"
 # ORCH_LAUNCH=manual is set by manual.py: the owner launched this session by
 # hand, which the digest must be able to tell from what the night decided.
 LAUNCH_TAG=""; [ "${ORCH_LAUNCH:-}" = "manual" ] && LAUNCH_TAG=" launch=manual"
-echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=$TASK_BASENAME project=${PROJECT:-auto} model=$MODEL/$EFFORT${LAUNCH_TAG} exit=$CODE" >> "$STATE_ROOT/runs.log"
+# A session that left more than half its slice unused while its task still has
+# work left misjudged its time (lib/stalls.py early_exit). Tagged so the
+# pattern shows in runs.log and the digest instead of hiding behind
+# "stopped=slice end".
+EARLY_TAG=""
+if [ "$MODE" = "orchestrate" ] && [ -n "$TASK_FILE" ] && [ "$CODE" -eq 0 ] \
+   && python3 lib/stalls.py early-exit "$SLICE_MIN" "$DURATION_MIN" "$TASK_FILE"; then
+  EARLY_TAG=" early_exit"
+fi
+echo "$START mode=$MODE account=$ACCOUNT slot=$SLOT slice=${SLICE_MIN}min task=$TASK_BASENAME project=${PROJECT:-auto} model=$MODEL/$EFFORT${LAUNCH_TAG}${EARLY_TAG} exit=$CODE" >> "$STATE_ROOT/runs.log"
 
 # Mechanical journal entry: one line per run, appended to this run's digest
 # file (creating the header/section on first write). A single `>>` write per
 # invocation - never split across two writes - because parallel slots append
 # to the same file concurrently.
-ENTRY_LINE="$(printf -- '- %s [%s/%s] %s (%s/%s, $%s, %smin, exit %s%s)' \
+ENTRY_LINE="$(printf -- '- %s [%s/%s] %s (%s/%s, $%s, %smin of %s, exit %s%s%s)' \
   "$(date '+%H:%M')" "$ACCOUNT" "${PROJECT:-auto}" "$TASK_BASENAME" \
-  "$MODEL" "$EFFORT" "$COST_USD" "$DURATION_MIN" "$CODE" "${LAUNCH_TAG:+, manual}")"
+  "$MODEL" "$EFFORT" "$COST_USD" "$DURATION_MIN" "$SLICE_MIN" "$CODE" \
+  "${LAUNCH_TAG:+, manual}" "${EARLY_TAG:+, early exit}")"
 mkdir -p "$(dirname "$DIGEST_FILE")"
 if [ -s "$DIGEST_FILE" ]; then
   printf '%s\n' "$ENTRY_LINE" >> "$DIGEST_FILE"

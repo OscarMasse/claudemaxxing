@@ -85,6 +85,56 @@ class TestDecide(unittest.TestCase):
         self.assertEqual(d.action, "skip")
         self.assertIn("guard", d.reason)
 
+    def night_0327(self, now, window_end):
+        """The 2026-09-27 shape: a window open since 22:32 ends at 03:32."""
+        block = {"start": window_end - timedelta(hours=5), "end": window_end,
+                 "usd": 2, "active": True}
+        return controller.decide(CFG, now, usage(week=0, block=block), idle_min=999)
+
+    def test_follow_on_window_a_few_minutes_past_the_guard_gets_full_slices(self):
+        # 2026-09-27: the window ends 03:32, the follow-on one would end 08:32,
+        # two minutes past the 08:30 guard. That used to clamp the slices to
+        # 33/23/18/13/7 minutes; inside the tolerance the night runs normally.
+        end = datetime(2026, 8, 11, 3, 32, tzinfo=TZ)
+        for minute in (59, 69, 74, 79, 84):  # 02:59, 03:09, ... 03:24
+            now = end - timedelta(minutes=33) + timedelta(minutes=minute - 59)
+            d = self.night_0327(now, end)
+            self.assertEqual((d.action, d.slice_min), ("run", 50), now)
+
+    def test_no_slice_below_the_floor_when_the_follow_on_window_crosses(self):
+        # Same night, but the follow-on window crosses by 30 minutes: beyond the
+        # tolerance, so slices clamp to the window end - and never below the floor.
+        end = datetime(2026, 8, 11, 3, 0, tzinfo=TZ)
+        cfg = {**CFG, "morning_guard": "07:30"}
+        for left in (33, 23, 18, 13, 7):
+            block = {"start": end - timedelta(hours=5), "end": end,
+                     "usd": 2, "active": True}
+            d = controller.decide(cfg, end - timedelta(minutes=left),
+                                  usage(week=0, block=block), idle_min=999)
+            if left >= 20:
+                self.assertEqual((d.action, d.slice_min), ("run", left))
+            else:
+                self.assertEqual(d.action, "skip")
+                self.assertIn("end of window", d.reason)
+                self.assertNotIn("available", d.reason)
+
+    def test_open_window_remainder_below_the_floor_skips(self):
+        # 04:15 with the open window ending 04:30: 15 minutes is below the floor.
+        now = datetime(2026, 8, 11, 4, 15, tzinfo=TZ)
+        block = {"start": now - timedelta(hours=4, minutes=45),
+                 "end": now + timedelta(minutes=15), "usd": 2, "active": True}
+        d = controller.decide(CFG, now, usage(week=0, block=block), idle_min=999)
+        self.assertEqual(d.action, "skip")
+        self.assertIn("end of window", d.reason)
+
+    def test_floor_is_configurable(self):
+        now = datetime(2026, 8, 11, 4, 15, tzinfo=TZ)
+        block = {"start": now - timedelta(hours=4, minutes=45),
+                 "end": now + timedelta(minutes=15), "usd": 2, "active": True}
+        d = controller.decide({**CFG, "min_slice_min": 10}, now,
+                              usage(week=0, block=block), idle_min=999)
+        self.assertEqual((d.action, d.slice_min), ("run", 15))
+
     def test_night_activity_lock(self):
         now = datetime(2026, 8, 11, 2, 30, tzinfo=TZ)
         d = controller.decide(CFG, now, usage(week=0), idle_min=20)  # < 40

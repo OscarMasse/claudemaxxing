@@ -101,6 +101,50 @@ class StallTest(Base):
                 self.session(path, self.t0 + timedelta(days=i), code=1)
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
 
+    def test_clamped_ladder_is_not_charged_to_the_task(self):
+        # The 2026-09-27 replay: rankr-control-skill launched five times in
+        # slices the window end clamped to 33/23/18/13/7 minutes, each session
+        # doing real work. Only the first launch is the task's own.
+        path = self.task("rankr-control-skill.md")
+        t = datetime(2026, 9, 27, 2, 59)
+        for i, (minute, slice_min) in enumerate(
+                ((0, 33), (10, 23), (15, 18), (20, 13), (25, 7))):
+            stalls.record_launch(self.state, path, t + timedelta(minutes=minute))
+            tasks.set_status(path, "ready", f"- slice {i}\n")
+            with open(self.state / "runs.log", "a") as f:
+                f.write(f"{t + timedelta(minutes=minute):%F %T} mode=orchestrate "
+                        f"account=max slot=2 slice={slice_min}min "
+                        f"task=rankr-control-skill.md project=rankr "
+                        f"model=opus/high exit=0\n")
+        now = t + timedelta(minutes=30)
+        runs = stalls.orchestrate_runs(self.state)
+        self.assertLessEqual(len(stalls._own_launches(runs)), 2)
+        self.assertEqual(stalls.detect(self.root, self.state, now), [])
+
+    def test_full_slices_still_storm(self):
+        path = self.task()
+        for i in range(stalls.STORM_NIGHT_RUNS):
+            self.session(path, self.t0 + timedelta(minutes=50 * i), note=f"s{i}")
+        self.assertEqual(stalls.detect(self.root, self.state, self.now)[0][1],
+                         "storming")
+
+    def ledger(self, task, ts, slice_min, used_min):
+        with open(self.state / "costs.jsonl", "a") as f:
+            f.write(json.dumps({"ts": ts.isoformat(), "mode": "orchestrate",
+                                "task": f"/x/tasks/{task}", "slice_min": slice_min,
+                                "duration_ms": used_min * 60000}) + "\n")
+
+    def test_ladder_blocked_after_an_early_exit(self):
+        t = datetime(2026, 9, 27, 3, 0)
+        self.ledger("a.md", t, 33, 8)      # used a quarter: early exit
+        self.ledger("b.md", t, 33, 20)     # used most of it: working
+        self.assertEqual(stalls.ladder_blocked(self.state, t, 23), {"a.md"})
+        # A slice at least as long as the last one is always allowed.
+        self.assertEqual(stalls.ladder_blocked(self.state, t, 33), set())
+        # Last night's sessions do not count.
+        self.assertEqual(
+            stalls.ladder_blocked(self.state, t + timedelta(days=1), 23), set())
+
     def test_same_nonzero_exit_is_storming(self):
         path = self.task()
         for i in range(stalls.STORM_SAME_EXIT):

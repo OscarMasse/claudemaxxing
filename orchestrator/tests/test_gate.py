@@ -169,6 +169,38 @@ class TestGate(unittest.TestCase):
         self.assertTrue(r.stdout.startswith("RUN"), r.stdout + r.stderr)
         self.assertIn("t1.md fable", r.stdout)
 
+    def ledger_row(self, task, slice_min, used_min, ts="2026-08-11T00:05:00+00:00"):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        with open(state / "costs.jsonl", "a") as f:
+            f.write(json.dumps({"ts": ts, "mode": "orchestrate",
+                                "task": str(self.root / "tasks" / task),
+                                "model": "sonnet", "slice_min": slice_min,
+                                "exit": 0, "cost_usd": 1.0,
+                                "duration_ms": used_min * 60000}) + "\n")
+
+    def test_task_not_relaunched_into_a_shorter_slice_after_an_early_exit(self):
+        # t1's last session tonight had 60 minutes and used 5: a 50-minute
+        # slice would only buy another cold start. The next task takes the slot.
+        self.write_task("t2.md", "---\ntitle: Y\nproject: side-projects\n"
+                        "status: ready\npriority: low\ncreated: 2026-08-02\n---\n")
+        self.ledger_row("t1.md", 60, 5)
+        r = run_gate(self.root, self.env)
+        self.assertIn("t2.md", r.stdout, r.stdout + r.stderr)
+        self.assertNotIn("t1.md", r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("not relaunched into a shorter slice", log)
+
+    def test_task_that_used_half_its_slice_is_relaunched(self):
+        self.ledger_row("t1.md", 60, 35)
+        r = run_gate(self.root, self.env)
+        self.assertIn("t1.md", r.stdout, r.stdout + r.stderr)
+
+    def test_last_nights_session_does_not_block_a_relaunch(self):
+        self.ledger_row("t1.md", 60, 5, ts="2026-08-10T00:05:00+00:00")
+        r = run_gate(self.root, self.env)
+        self.assertIn("t1.md", r.stdout, r.stdout + r.stderr)
+
     def test_no_eligible_task(self):
         (self.root / "tasks" / "t1.md").unlink()
         r = run_gate(self.root, self.env)

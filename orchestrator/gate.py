@@ -369,10 +369,17 @@ def tick_account(p, acct, projs):
         # with four free slots launched two, all night).
         model_slots = {family: 0 for family in out_of_quota}
         model_slots.setdefault("fable", max(fable_slots - fable_running, 0))
+        # A task whose last session tonight left most of a longer slice
+        # unused is not relaunched into a shorter one (stalls.ladder_blocked).
+        ladder = stalls.ladder_blocked(p["state"], now, d.slice_min)
+        if ladder:
+            log(p, f"account={name} not relaunched into a shorter slice "
+                   f"({d.slice_min}min): {sorted(ladder)}")
         candidates = tasks.launch_order(p["root"], projs, name, count=free,
                                         done=duties_served(state),
                                         period_keys=keys,
-                                        model_slots=model_slots)
+                                        model_slots=model_slots,
+                                        exclude=ladder)
         # What a session costs is a property of the work, not of the slice it
         # was allotted: sessions do not fill their slice (measured median
         # utilisation here: 3%), so both the measured figure and the cold-start

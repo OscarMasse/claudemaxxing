@@ -47,6 +47,10 @@ notify_open_cmd: open
 night_start: 02:00
 night_end: 06:00
 morning_guard: 08:30
+# Minutes a background quota window may end past morning_guard. Without it, a
+# follow-on window ending two minutes past the guard chopped the rest of a
+# night into ever shorter slices (2026-09-27).
+guard_tolerance_min: 15
 # When the daily digest job runs (local time). Also the boundary a run's
 # journal entry uses to pick its digest day: strictly before this time, a
 # finishing run journals into TODAY's digest file; at or after, TOMORROW's
@@ -62,6 +66,10 @@ prereset_burn_hours: 8
 activity_idle_night_min: 40
 # Slice size (wall-clock minutes handed to the claude session).
 night_slice_min: 50
+# Shortest slice worth a launch. Every session pays a fixed cold start (context,
+# dev stack) before doing anything, so near the end of a window the tick skips
+# instead of launching a slice shorter than this.
+min_slice_min: 20
 # Session slots. The count is decided by the budget alone; this is a SAFETY
 # ceiling for the machine, not a pacing tool (8 max: run.sh allocates
 # RUNNING.1..8). Start conservative, read the `estimate` and `cost` lines of

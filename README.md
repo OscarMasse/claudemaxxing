@@ -104,6 +104,10 @@ Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sle
 **Scheduling regimes, per account.**
 Night: as many slots as tonight's token allocation pays for (up to the `max_parallel_sessions` safety ceiling), every model reachable, guarded so no 5h quota window crosses the morning guard into the workday.
 The usable night is `night_start` .. `morning_guard - 5h`, not `night_start` .. `night_end`: a launch opens a 5h quota window that runs in wall-clock time however short the session is, so past that hour there is nothing a shorter slice can buy.
+A window may end up to `guard_tolerance_min` (15) past the guard: on 2026-09-27 a follow-on window ending two minutes past it chopped the rest of the night into 33/23/18/13/7-minute slices, and the owner sharing a few morning minutes costs far less than a night of cold starts.
+Near the end of a window a slice is clamped to what is left, but never launched below `min_slice_min` (20): every session pays a fixed cold start, so the tick skips with an "end of window" reason instead.
+A queue task whose last session tonight left most of a longer slice unused is not relaunched into a shorter one, and the storm detector does not count such clamped relaunches against the task.
+Each session's prompt carries its absolute start and deadline, since a headless session has no clock; one that exits with more than half its slice unused while its task has work left is tagged `early_exit` in runs.log and the digest.
 The model a session runs is the one its task declares, always: nothing caps it, nothing upgrades it, and the engine holds no ordering between the models at all - the scheduler reads a task's model only to estimate what its session will cost.
 The budget is the single gate on what a night may spend, so a `fable` task competes on priority like any other and a night normally mixes models; `max_fable_slots` paces the one model with a separate limit of its own.
 Pre-reset burn-down: the last hours before the weekly reset run without a budget at all, because quota left unspent at the reset is simply lost. A dying surplus buys more sessions, not dearer ones.

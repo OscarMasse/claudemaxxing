@@ -608,7 +608,7 @@ def pick_multi(root, projects, account, count):
 
 
 def launch_order(root, projects, account, count,
-                 done=None, period_keys=None, model_slots=None):
+                 done=None, period_keys=None, model_slots=None, exclude=()):
     """Up to `count` session assignments for one tick, in launch order.
 
     The three scheduling classes are served in a fixed order that encodes their
@@ -627,6 +627,9 @@ def launch_order(root, projects, account, count,
     A duty whose model has no slot is not starved by this - it cannot run
     anyway - and comes back the next tick, its period still unserved.
 
+    `exclude` holds queue task basenames the caller will not launch this tick
+    (stalls.ladder_blocked); the next ones in the queue take their slots.
+
     Each assignment carries `sched` ("duty", "filler" or None) so the caller can
     apply the budget rule that matches the class."""
     if count <= 0:
@@ -634,7 +637,8 @@ def launch_order(root, projects, account, count,
     slots = _ModelSlots(model_slots)
     out = _take(duties_due(root, projects, account, done or {}, period_keys or {}),
                 count, slots)
-    queue = _ordered(root, projects, account)
+    queue = [t for t in _ordered(root, projects, account)
+             if Path(t["path"]).name not in exclude]
     out += _take(queue, count - len(out), slots)
     if len(out) < count:
         key = (period_keys or {}).get("filler")

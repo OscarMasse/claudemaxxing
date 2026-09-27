@@ -216,13 +216,18 @@ def _own_launches(runs):
     window end: the task was relaunched because the scheduler cut its last
     slice short, not because it keeps failing. On 2026-09-27 such a ladder
     (33/23/18/13/7 minutes, each session doing real work) was charged to the
-    task as a storm and blocked it."""
+    task as a storm and blocked it.
+
+    Only a relaunch after a run that did not fail counts as the scheduler's:
+    after a failure, a shorter slice does not explain the relaunch away."""
     own, prev = [], None
     for r in sorted(runs, key=lambda r: r["ts"]):
-        if not (prev is not None and r["slice"] is not None and r["slice"] < prev):
+        clamped = (prev is not None and r["slice"] is not None
+                   and prev["slice"] is not None and r["slice"] < prev["slice"]
+                   and prev["exit"] in (0, TIMEOUT_EXIT))
+        if not clamped:
             own.append(r)
-        if r["slice"] is not None:
-            prev = r["slice"]
+        prev = r
     return own
 
 
@@ -258,8 +263,12 @@ def ladder_blocked(state_root, now, slice_min):
         last[task_name(row["task"])] = row
     out = set()
     for name, row in last.items():
+        if row.get("duration_ms") is None:
+            # No result JSON: killed at the slice's hard limit or crashed.
+            # Either way it did not exit early by its own judgement.
+            continue
         prev = int(row.get("slice_min") or 0)
-        used_min = float(row.get("duration_ms") or 0) / 60000
+        used_min = float(row["duration_ms"]) / 60000
         if slice_min < prev and used_min < prev / 2:
             out.add(name)
     return out

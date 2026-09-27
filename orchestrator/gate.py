@@ -371,7 +371,7 @@ def tick_account(p, acct, projs):
         model_slots.setdefault("fable", max(fable_slots - fable_running, 0))
         # A task whose last session tonight left most of a longer slice
         # unused is not relaunched into a shorter one (stalls.ladder_blocked).
-        ladder = stalls.ladder_blocked(p["state"], now, d.slice_min)
+        ladder = stalls.ladder_blocked(state, now, d.slice_min)
         if ladder:
             log(p, f"account={name} not relaunched into a shorter slice "
                    f"({d.slice_min}min): {sorted(ladder)}")

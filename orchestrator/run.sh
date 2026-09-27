@@ -168,7 +168,11 @@ while IFS= read -r rule; do PERM_ARGS+=("$rule"); done <<< "$RULES"
 # The slice's absolute bounds go into the prompt: a headless session has no
 # clock unless it runs `date`, and sessions told only "about N minutes" guessed
 # their slice was over after a few minutes (2026-09-27).
-IFS=$'\t' read -r SLICE_START SLICE_DEADLINE < <(python3 lib/prompt.py times "$SLICE_MIN")
+if ! TIMES="$(python3 lib/prompt.py times "$SLICE_MIN")"; then
+  echo "$(date '+%F %T') slice times failed, not launching" >&2
+  exit 1
+fi
+SLICE_START="${TIMES%%$'\t'*}"; SLICE_DEADLINE="${TIMES#*$'\t'}"
 if ! PROMPT="$(python3 lib/prompt.py render "prompts/$MODE.md" \
     "SLICE_MIN=$SLICE_MIN" "SLICE_START=$SLICE_START" "SLICE_DEADLINE=$SLICE_DEADLINE" \
     "TASK_DIRECTIVE=$DIRECTIVE" "BACKLOG_ROOT=$BACKLOG_ROOT" "ORCH_DIR=$ORCH_DIR" \

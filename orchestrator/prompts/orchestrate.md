@@ -27,6 +27,11 @@ Procedure:
    - `delivery: pr` - commit on a dedicated branch, push it, and open a pull request.
      Record the PR URL in the task's `## Notes` and in your digest bullet. Work that
      stops at an unpushed branch is NOT done, whatever its state otherwise.
+     The PR's draft state tells the owner whether it is his turn: open it as a draft
+     (`gh pr create --draft`) and keep it draft while any work remains on the task,
+     including fixes from his review. Mark it ready (`gh pr ready <n>`) only when the
+     task's verification has passed and the PR only waits for his review or merge.
+     A slice that resumes work on a ready PR puts it back to draft (`gh pr ready --undo <n>`).
      Push with the explicit HTTPS URL: `git push https://github.com/<owner>/<repo>.git
      <branch>` (SSH remotes have no key in a headless session). Only a `pr` session
      may push: the launcher denies `git push` outright for `branch` and `local`

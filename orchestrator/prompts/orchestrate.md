@@ -32,9 +32,10 @@ Procedure:
      may push: the launcher denies `git push` outright for `branch` and `local`
      tasks, so a refused push there means the delivery contract, not a permission
      problem to diagnose.
-     A push touching `.github/workflows/*` is rejected by GitHub: the agent token has
-     no `workflow` scope. Leave workflow edits out of the branch, describe the hunk in
-     the PR body, and set the task `blocked` with that question for the owner (step 6).
+     Workflow files (`.github/workflows/*`) are pushed like any other file: the agent
+     token has the Workflows permission (since 2026-09-25). Only if GitHub actually
+     rejects such a push, quote the rejection in the task notes, leave the hunk out,
+     and set the task `blocked` (step 6).
    - `delivery: branch` - commit on a dedicated branch and never push. No PR.
    - `delivery: local` - the strictly-local rails below apply in full.
    A task with no `delivery:` key never reaches you (the gatekeeper reports it as
@@ -114,8 +115,8 @@ Procedure:
 10. Commit ALL repo changes you made (backlog repo and any project repo you touched),
     clear messages, no co-author lines. Then honor the task's `delivery:` contract from
     step 1: push and open the PR (recording its URL) for `pr`, stop at the local commit
-    for `branch`, never push for `local`. Push by explicit HTTPS URL, never `origin`,
-    and never push `.github/workflows/*` (see the `pr` bullet in step 1).
+    for `branch`, never push for `local`. Push by explicit HTTPS URL, never `origin`
+    (workflow files included, see the `pr` bullet in step 1).
     Before exiting, `docker compose down` every stack you brought up in your
     worktree (volumes may stay); a later slice brings it back up in seconds.
 

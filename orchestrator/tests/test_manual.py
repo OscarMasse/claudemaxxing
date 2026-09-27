@@ -211,6 +211,19 @@ class TestManual(unittest.TestCase):
         self.assertEqual(m.launched, [])
         self.assertIn("kill switch", reason)
 
+    def test_unknown_task_is_refused_in_the_foreground(self):
+        self.task("a")
+        with mock.patch("sys.stderr"):
+            self.assertEqual(manual.main(["--tasks", "a", "nope", "--check"]), 2)
+        self.assertEqual(manual.main(["--tasks", "a", "--check"]), 0)
+
+    def test_list_with_nothing_launchable_says_so(self):
+        (self.root / "tasks" / "b.md").write_text(
+            "---\ntitle: x\nproject: side-projects\nstatus: blocked\ndelivery: branch\n---\n")
+        m, reason = self.run_plan(self.plan("--tasks", "b"))
+        self.assertEqual(m.launched, [])
+        self.assertEqual(reason, "nothing launched")
+
     def test_duration_parsing(self):
         self.assertEqual(manual.parse_duration("5h"), timedelta(hours=5))
         self.assertEqual(manual.parse_duration("1h30m"), timedelta(minutes=90))

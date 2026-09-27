@@ -204,7 +204,7 @@ def run(p, acct, projs, plan, clock, sleep, start=launch, stopped=lambda: False)
         if plan.count_left == 0:
             plan.done = "count reached"
         elif plan.mode == "tasks" and not plan.refs:
-            plan.done = "task list launched"
+            plan.done = "task list launched" if launched else "nothing launched"
         elif not picked and gate.active_slots(p, state) == 0:
             # Nothing launchable and nothing running that could change that
             # (a finishing session is what unblocks a prerequisite).
@@ -226,7 +226,7 @@ def dry_run(p, acct, projs, plan, now):
     state = p["state"] / name
     measured = ledger.session_costs(state)
     default_cost = float(acct.get("est_session_usd", 2.85))
-    print(f"account={name} {plan.describe()}")
+    print(f"account={name} backlog={p['root']} {plan.describe()}")
     if plan.mode == "tasks":
         rows = []
         listed = {tasks.task_name(r) for r in plan.refs}
@@ -327,6 +327,17 @@ def main(argv=None):
               f"(the stall detectors set it too: check gatekeeper.log first)",
               file=sys.stderr)
         return 1
+    if plan.mode == "tasks":
+        # Checked in the foreground: once detached, a typo or a wrong backlog
+        # root would only reach a log (2026-09-27: every task of a list was
+        # dropped as "no such task" because BACKLOG_ROOT was unset, and the
+        # runner still reported the list as launched).
+        missing = [tasks.task_name(r) for r in plan.refs
+                   if tasks.resolve(p["root"], projs, acct["name"], r)[2] == "no such task"]
+        if missing:
+            print(f"manual: no such task in {p['root'] / 'tasks'}: {', '.join(missing)}"
+                  f" (is BACKLOG_ROOT set?)", file=sys.stderr)
+            return 2
     if args.check:
         return 0
     stop = []

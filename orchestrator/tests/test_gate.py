@@ -42,7 +42,7 @@ PROJECTS = (
     "  - name: side-projects\n"
     "    account: personal\n"
     "    dirs: ~/projects\n"
-    "    priority: 10\n"
+    "    rank: 10\n"
 )
 
 
@@ -779,7 +779,7 @@ class TestGateMultiAccount(unittest.TestCase):
         "  - name: job\n"
         "    account: work\n"
         "    dirs: ~/work\n"
-        "    priority: 10\n"
+        "    rank: 10\n"
     )
 
     def setUp(self):

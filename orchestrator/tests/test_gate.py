@@ -662,7 +662,7 @@ class TestGate(unittest.TestCase):
                         "status: ready\npriority: high\ndelivery: branch\n"
                         "mode: interactive\nprerequisites: dep other\n---\n")
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("interactive task=t3.md priority=high unmet=dep,other",
+        self.assertIn("interactive task=t3.md priority=high unmet=dep other",
                       r.stdout)
         self.assertNotIn("blocked task=t3.md", r.stdout)
 

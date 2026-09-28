@@ -125,6 +125,17 @@ if [ -n "$PROJECT" ]; then
 else
   DIRS="$(cfg account-dirs "$ACCOUNT")"
 fi
+# A pre-selected task never gets a repo's main checkout: lib/workspace.py
+# swaps each repo dir for the task's own worktree (created or reused), unless
+# the task declares `workdir: main`. Fail closed: a session that cannot get its
+# worktree is not launched, rather than launched in a shared checkout.
+if [ -n "$TASK_FILE" ] && [ -n "$PROJECT" ] && [ "$MODE" = "orchestrate" ]; then
+  if ! DIRS="$(python3 lib/workspace.py dirs "$TASK_FILE" "$BACKLOG_ROOT" $DIRS 2>&1)"; then
+    echo "$(date '+%F %T') task=$(basename "$TASK_FILE") workspace failed, not launching: ${DIRS//$'\n'/ }" >> "$STATE_ROOT/runs.log"
+    exit 1
+  fi
+  DIRS="$(printf '%s' "$DIRS" | tr '\n' ' ')"; DIRS="${DIRS% }"
+fi
 ADD_DIRS=(--add-dir "$BACKLOG_ROOT")
 for d in $DIRS; do ADD_DIRS+=(--add-dir "$d"); done
 ACCOUNT_PROJECTS="$(cfg account-projects "$ACCOUNT" | tr '\n' ' ')"

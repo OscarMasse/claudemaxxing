@@ -354,6 +354,20 @@ class TestPick(unittest.TestCase):
             tasks.misconfigured(self.root, PROJECTS),
             [("old.md", "local_only= (replaced by delivery:, remove the key)")])
 
+    def test_workdir_main_is_schedulable(self):
+        write_task(self.root, "seeds.md", project="side-projects",
+                   status="ready", workdir="main")
+        self.assertTrue(self.pick()["path"].endswith("seeds.md"))
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
+
+    def test_unknown_workdir_is_reported_not_guessed(self):
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", workdir="checkout")
+        self.assertIsNone(self.pick())
+        self.assertEqual(
+            tasks.misconfigured(self.root, PROJECTS),
+            [("ghost.md", "workdir=checkout (only `main`, or no key for a worktree)")])
+
     def test_only_ready_tasks_are_reported(self):
         # An inbox task without `delivery:` is not misconfigured, it is simply
         # not written yet; reporting it would make the list permanent noise.

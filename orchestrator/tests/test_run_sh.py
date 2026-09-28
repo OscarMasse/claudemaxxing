@@ -22,13 +22,14 @@ CFG = (
     "  - name: side-projects\n"
     "    account: personal\n"
     "    dirs: {root}/projects\n"
-    "    priority: 10\n"
+    "    rank: 1\n"
 )
 
 # Saves the prompt it receives on stdin, then answers like `claude -p
 # --output-format json` would after running FAKE_DURATION_MS.
 FAKE_CLAUDE = """#!/bin/bash
 cat > "$FAKE_PROMPT_OUT"
+printf '%s\\n' "$@" > "$FAKE_ARGS_OUT"
 printf '{"total_cost_usd": 0.5, "duration_ms": %s, "result": "ok"}' "$FAKE_DURATION_MS"
 """
 
@@ -50,7 +51,8 @@ class RunShTest(unittest.TestCase):
         self.env = dict(os.environ, BACKLOG_ROOT=str(self.root),
                         ORCH_CONFIG=str(cfg), ORCH_PLATFORM="none",
                         HOME=str(self.root),
-                        FAKE_PROMPT_OUT=str(self.root / "prompt.txt"))
+                        FAKE_PROMPT_OUT=str(self.root / "prompt.txt"),
+                        FAKE_ARGS_OUT=str(self.root / "args.txt"))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -68,6 +70,41 @@ class RunShTest(unittest.TestCase):
         runs = (self.root / "orchestrator" / "state" / "runs.log").read_text()
         digest = next((self.root / "digests").glob("*.md")).read_text()
         return runs.splitlines()[-1], digest.splitlines()[-1]
+
+    def add_dirs(self):
+        args = (self.root / "args.txt").read_text().splitlines()
+        return [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
+
+    def test_repo_task_gets_its_worktree_never_the_main_checkout(self):
+        from tests.test_workspace import make_repo
+        # Resolved: macOS temp dirs sit behind the /var -> /private/var link,
+        # and the worktree path comes back resolved.
+        repo = make_repo(self.root.resolve(), "rankr")
+        cfg = Path(self.env["ORCH_CONFIG"])
+        cfg.write_text(cfg.read_text().replace(
+            f"dirs: {self.root}/projects", f"dirs: {repo}"))
+        self.run_session(40, "ready")
+        wt = repo / ".agent-worktrees" / "t"
+        self.assertIn(str(wt), self.add_dirs())
+        self.assertNotIn(str(repo), self.add_dirs())
+        self.assertIn(str(wt), (self.root / "prompt.txt").read_text())
+        self.assertEqual(
+            subprocess.run(["git", "-C", str(wt), "branch", "--show-current"],
+                           capture_output=True, text=True).stdout.strip(),
+            "agent/t")
+
+    def test_session_is_not_launched_without_its_workspace(self):
+        self.task.write_text(self.task.read_text().replace(
+            "delivery: local", "delivery: local\nworkdir: checkout"))
+        r = subprocess.run(
+            ["bash", str(ORCH / "run.sh"), "--account", "personal", "50",
+             str(self.task), "sonnet", "low", "side-projects", "0", "local"],
+            env=dict(self.env, FAKE_DURATION_MS="1"),
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.root / "prompt.txt").exists())
+        runs = (self.root / "orchestrator" / "state" / "runs.log").read_text()
+        self.assertIn("task=t.md workspace failed, not launching", runs)
 
     def test_prompt_carries_the_slice_start_and_deadline(self):
         self.run_session(40, "ready")

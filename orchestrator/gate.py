@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (activity, config, controller, janitor, ledger, quota,  # noqa: E402
-                 ratelimits, stalls, tasks, usage)
+                 ratelimits, stalls, tasks, usage, workspace)
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -526,6 +526,11 @@ def tick(p):
         dirs = sorted({d for proj in projs.values() for d in proj["dirs"]})
         for name, ok in janitor.sweep(dirs):
             log(p, f"janitor compose down project={name} ok={ok}")
+        try:
+            for path, outcome in workspace.reap(dirs):
+                log(p, f"janitor worktree {outcome} path={path}")
+        except Exception as e:  # noqa: BLE001
+            log(p, f"janitor worktree reap failed: {e!r}")
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))

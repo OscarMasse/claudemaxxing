@@ -4,7 +4,7 @@ Selection is deterministic and happens in the gatekeeper (not in the session),
 because the task's declared model must be known before launching the session.
 Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
 priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
-effort (low|medium|high, default low),
+effort (low|medium|high, default low), workdir (main, default a worktree),
 prerequisites (space-separated task basenames, `.md` suffix optional).
 
 Only tasks/*.md is ever scheduled. Done tasks move to tasks/archive/ (see
@@ -143,6 +143,27 @@ def _frontmatter(path):
             if k.strip() and v.strip():
                 fm[k.strip()] = v.strip()
     return fm
+
+
+WORKDIR_MAIN = "main"
+
+
+def _declared_workdir(fm):
+    """Where the task's session works: "worktree" (the default, a dedicated
+    git worktree per repo, see lib/workspace.py), "main" when the task
+    declares `workdir: main` because it must work in the main checkout, or
+    None for any other value, which is reported by misconfigured() and never
+    guessed: guessing "worktree" would break the task, guessing "main" would
+    reopen the shared-checkout hazard the key exists to close."""
+    raw = fm.get("workdir")
+    if raw is None:
+        return "worktree"
+    return raw if raw == WORKDIR_MAIN else None
+
+
+def task_workdir(path):
+    """`_declared_workdir` of the task file at `path`."""
+    return _declared_workdir(_frontmatter(Path(path)))
 
 
 def _declared_model(fm):
@@ -428,6 +449,8 @@ def _ordered(root, projects, account, sched_class=None, today=None,
             continue  # superseded key, also reported by misconfigured()
         if not _declared_due(fm)[0]:
             continue  # unreadable deadline, reported by misconfigured()
+        if _declared_workdir(fm) is None:
+            continue  # unknown workdir, reported by misconfigured()
         entry = dated.get(p.stem)
         if proj["expedite"]:
             cls, deadline = CLASS_EXPEDITE, 0
@@ -677,6 +700,7 @@ def misconfigured(root, projects):
     - `due:` that is not an ISO date.
     - a file in tasks/archive/ whose status is not `done`: archived means
       done, so the edit would otherwise be silently ignored.
+    - `workdir:` other than `main`.
 
     One task can be reported for several of these; each line names its key, so
     fixing the file needs no guessing. Account-independent by construction, so
@@ -702,6 +726,9 @@ def misconfigured(root, projects):
                                 "remove the key)"))
         if not _declared_due(fm)[0]:
             out.append((p.name, f"due={fm['due']} (expected YYYY-MM-DD)"))
+        if _declared_workdir(fm) is None:
+            out.append((p.name, f"workdir={fm['workdir']} (only `main`, or "
+                                "no key for a worktree)"))
     # An archived file is done by definition, so editing its status reopens
     # nothing: surface the edit instead of silently ignoring it.
     for p in sorted((Path(root) / "tasks" / ARCHIVE_DIR).glob("*.md")):

@@ -16,6 +16,19 @@ exits with most of its slice unused while work remains is logged as `early_exit`
 {{TASK_DIRECTIVE}}
 {{DELIVERY}}
 
+Workspace (non-negotiable): the launcher already gave a pre-selected task its own
+git worktree in every repo of its project, at `<repo>/.agent-worktrees/<task>` on
+branch `agent/<task>` (reused across slices). Those worktrees are the repo paths in
+the directory list above: do all code work there. A repo's main checkout belongs to
+the owner and to other concurrent sessions: never run `git checkout`, `git switch`,
+`git stash`, `git reset --hard` or `git clean` outside your own worktree, and never
+edit files there. Only a task declaring `workdir: main` works in the main checkout;
+it gets no worktree. If you picked the task yourself, create the worktree the same
+way (`git -C <repo> worktree add -b agent/<task> <repo>/.agent-worktrees/<task>
+origin/main`, or reuse it) before touching code. If `git status --short` in the
+directory you are about to branch or reset shows changes you did not make, stop:
+they are someone else's work.
+
 Procedure:
 1. List {{BACKLOG_ROOT}}/tasks/*.md and read their frontmatter. Eligible tasks:
    `status: ready` and a
@@ -66,8 +79,8 @@ Procedure:
    problem to work around. What the deny list cannot see:
    - Draft replies to reviewers are written to files for the owner to post themselves.
    - Never touch the owner's checkouts (current branch, working tree, stash, index).
-     All code work happens in a dedicated `git worktree` under
-     <project dir>/.agent-worktrees/<repo>-<topic>, commits stay local, never pushed.
+     All code work happens in your worktree (see Workspace above), commits stay
+     local, never pushed.
    - Nothing leaves the machine: no comments, no pushes, no external calls.
 2. Hard prerequisites are enforced by the scheduler through the task's own
    `prerequisites:` frontmatter, not by you re-reading prose: the gatekeeper never

@@ -319,6 +319,21 @@ class TestGate(unittest.TestCase):
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("unschedulable task=t1.md: delivery=<missing>", log)
 
+    def test_tick_archives_a_done_task_and_launches_its_dependent(self):
+        self.write_task("dep.md", "---\ntitle: D\nproject: side-projects\n"
+                        "status: done\n---\n")
+        old = time.time() - 10 * 3600
+        os.utime(self.root / "tasks" / "dep.md", (old, old))
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\nprerequisites: dep\n"
+                        "created: 2026-08-01\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertTrue((self.root / "tasks" / "archive" / "dep.md").is_file())
+        self.assertFalse((self.root / "tasks" / "dep.md").exists())
+        self.assertIn("t1.md sonnet low side-projects", r.stdout, r.stderr)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("archived task=dep.md to tasks/archive/", log)
+
     def test_status_reports_the_misconfigured_delivery(self):
         (self.root / "tasks" / "t1.md").write_text(
             "---\ntitle: X\nproject: side-projects\nstatus: ready\n"

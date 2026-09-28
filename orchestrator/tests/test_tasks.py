@@ -784,3 +784,125 @@ class TestPriorityModel(unittest.TestCase):
         self.assertIn(("bad.md", "due=next week (expected YYYY-MM-DD)"),
                       tasks.misconfigured(self.root, RANKED))
 
+
+
+class TestArchive(unittest.TestCase):
+    """Done tasks move to tasks/archive/; lookups by name still find them."""
+
+    TTL = 4.5 * 3600
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def age(self, name, age_s):
+        p = self.root / "tasks" / name
+        os.utime(p, (time.time() - age_s, time.time() - age_s))
+        return p
+
+    def archive(self):
+        return tasks.archive_done(self.root, time.time(), self.TTL)
+
+    def test_old_done_task_moves_to_archive(self):
+        write_task(self.root, "d.md", project="side-projects", status="done")
+        write_task(self.root, "r.md", project="side-projects", status="ready")
+        (self.root / "tasks" / "TEMPLATE.md").write_text("---\nstatus: done\n---\n")
+        self.age("d.md", 10 * 3600)
+        self.age("r.md", 10 * 3600)
+        self.age("TEMPLATE.md", 10 * 3600)
+        self.assertEqual(self.archive(), ["d.md"])
+        self.assertTrue((self.root / "tasks" / "archive" / "d.md").is_file())
+        self.assertFalse((self.root / "tasks" / "d.md").exists())
+        self.assertTrue((self.root / "tasks" / "r.md").is_file())
+        self.assertTrue((self.root / "tasks" / "TEMPLATE.md").is_file())
+
+    def test_recently_done_task_stays_until_its_session_is_over(self):
+        write_task(self.root, "d.md", project="side-projects", status="done")
+        self.assertEqual(self.archive(), [])
+        self.assertTrue((self.root / "tasks" / "d.md").is_file())
+
+    def test_archived_prerequisite_counts_as_done(self):
+        write_task(self.root, "dep.md", project="side-projects", status="done")
+        write_task(self.root, "main.md", project="side-projects", status="ready",
+                   priority="high", prerequisites="dep")
+        self.age("dep.md", 10 * 3600)
+        self.archive()
+        self.assertTrue(tasks.pick(self.root, PROJECTS, "personal")["path"]
+                        .endswith("main.md"))
+        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+
+    def test_archive_is_done_by_definition(self):
+        (self.root / "tasks" / "archive").mkdir()
+        write_task(self.root, "archive/dep.md", project="side-projects",
+                   status="ready")
+        write_task(self.root, "main.md", project="side-projects", status="ready",
+                   prerequisites="dep")
+        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+
+    def test_live_file_wins_over_archived_copy(self):
+        """A task copied back out of the archive to be reopened is not done."""
+        (self.root / "tasks" / "archive").mkdir()
+        write_task(self.root, "archive/dep.md", project="side-projects", status="done")
+        write_task(self.root, "dep.md", project="side-projects", status="ready")
+        write_task(self.root, "main.md", project="side-projects", status="ready",
+                   prerequisites="dep")
+        self.assertEqual(tasks.task_path(self.root, "dep"),
+                         self.root / "tasks" / "dep.md")
+        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"),
+                         [("main.md", ["dep"])])
+
+    def test_scheduler_never_lists_archived_tasks(self):
+        (self.root / "tasks" / "archive").mkdir()
+        write_task(self.root, "archive/old.md", project="side-projects",
+                   status="ready", priority="high")
+        write_task(self.root, "archive/duty.md", project="side-projects",
+                   status="ready", duty="nightly")
+        write_task(self.root, "archive/fill.md", project="side-projects",
+                   status="ready", filler="true")
+        write_task(self.root, "archive/stuck.md", project="side-projects",
+                   status="in-progress")
+        write_task(self.root, "archive/orphan.md", project="nowhere", status="ready")
+        self.assertIsNone(tasks.pick(self.root, PROJECTS, "personal"))
+        self.assertEqual(tasks.launch_order(self.root, PROJECTS, "personal", count=5), [])
+        self.assertEqual(tasks.duties(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.fillers(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
+        self.assertEqual(tasks.repair_stuck(self.root, time.time() + 10 * 3600,
+                                            self.TTL, "2026-09-28"), [])
+
+    def test_resolve_reports_archived_task_as_done(self):
+        write_task(self.root, "d.md", project="side-projects", status="done")
+        self.age("d.md", 10 * 3600)
+        self.archive()
+        self.assertEqual(tasks.resolve(self.root, PROJECTS, "personal", "d"),
+                         (None, [], "status=done"))
+
+    def test_cost_ledger_and_run_lookups_survive_archiving(self):
+        """The ledger and runs.log key a task by its launch path or basename,
+        which archiving never rewrites: history of an archived task keeps its
+        numbers, and a reopened task is priced from the same key again."""
+        from lib import ledger, stalls
+        write_task(self.root, "t.md", project="side-projects", status="ready")
+        launched = tasks.pick(self.root, PROJECTS, "personal")["path"]
+        state = self.root / "state"
+        state.mkdir()
+        (state / "costs.jsonl").write_text(
+            '{"task": "%s", "model": "sonnet", "cost_usd": 1.5}\n' % launched)
+        tasks.set_status(Path(launched), "done", "- finished")
+        self.age("t.md", 10 * 3600)
+        self.assertEqual(self.archive(), ["t.md"])
+        self.assertEqual(ledger.stats(state)[launched]["runs"], 1)
+        self.assertEqual(stalls.task_name(str(self.root / "tasks/archive/t.md")),
+                         stalls.task_name(launched))
+        # Reopened: moved back and set ready, it is priced from its history.
+        (self.root / "tasks" / "archive" / "t.md").replace(Path(launched))
+        tasks.set_status(Path(launched), "ready", "- reopened")
+        again = tasks.pick(self.root, PROJECTS, "personal")
+        self.assertEqual(again["path"], launched)
+        self.assertAlmostEqual(
+            ledger.session_costs(state)[(again["path"], "sonnet")], 1.5)

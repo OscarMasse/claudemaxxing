@@ -616,14 +616,22 @@ def blocked(root, projects, account):
     return out
 
 
-def interactive(root, projects):
+def interactive(root, projects, today=None):
     """Ready tasks declaring `mode: interactive`: list of (task filename,
-    effective priority, [unmet prerequisite names]). The engine never launches
-    them, since they need the owner in a live session, yet they stay `ready`
-    because they are actionable by him; this is where they surface. Ordered
-    like the queue: effective priority, then oldest `created`, then filename.
-    Account-independent by construction, so gate.py prints it once."""
+    effective priority, [unmet prerequisite names], effective due date or
+    None). The engine never launches them, since they need the owner in a
+    live session, yet they stay `ready` because they are actionable by him;
+    this is where they surface. Account-independent by construction, so
+    gate.py prints it once.
+
+    Ordered like the queue's classes: tasks whose effective deadline is at
+    most MARGIN_NIGHTS days away (or past) come first, earliest deadline
+    first; then everything else by effective priority, oldest `created`,
+    filename. The owner works in days, not nights, so the slack is measured
+    from the deadline itself rather than from a chain's latest start."""
+    today = today or date.today()
     effective = _effective_priorities(root)
+    dated = _deadlines(_all_frontmatter(root))
     names = {rank: name for name, rank in PRIORITY_ORDER.items()
              if name != "normal"}
     found = []
@@ -634,8 +642,14 @@ def interactive(root, projects):
         if fm.get("status") != "ready" or _declared_mode(fm) != MODE_INTERACTIVE:
             continue
         rank = effective.get(p.stem, _own_priority(fm))
-        found.append(((rank, fm.get("created", "9999"), p.name),
-                      (p.name, names[rank], _unmet_prerequisites(root, fm))))
+        due = (dated.get(p.stem) or {}).get("due")
+        if due is not None and (due - today).days <= MARGIN_NIGHTS:
+            cls, deadline = CLASS_DUE_SOON, due.toordinal()
+        else:
+            cls, deadline = CLASS_STANDARD, 0
+        found.append(((cls, deadline, rank, fm.get("created", "9999"), p.name),
+                      (p.name, names[rank], _unmet_prerequisites(root, fm),
+                       due)))
     return [t for _, t in sorted(found, key=lambda x: x[0])]
 
 

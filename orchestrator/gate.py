@@ -641,8 +641,9 @@ def status(p):
     for task_name, problem in tasks.misconfigured(p["root"], projs):
         print(f"misconfigured task={task_name} {problem}")
     # Never launched: these wait for the owner in a live session.
-    for task_name, priority, unmet in tasks.interactive(p["root"], projs):
-        extra = f" unmet={' '.join(unmet)}" if unmet else ""
+    for task_name, priority, unmet, due in tasks.interactive(p["root"], projs):
+        extra = f" due={due.isoformat()}" if due else ""
+        extra += f" unmet={' '.join(unmet)}" if unmet else ""
         print(f"interactive task={task_name} priority={priority}{extra}")
     # A dated task that cannot make it is the owner's call, never a silent drop.
     for task_name, kind, due, act_by in tasks.deadline_alerts(p["root"],

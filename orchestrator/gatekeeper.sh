@@ -3,10 +3,11 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-# Backlog root: env (set by the launchd plist when installed against an
-# external backlog) or the repo root. Exported so gate.py and run.sh resolve
-# config and state against the same root.
-export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
+# Backlog root: env (set by the launchd plist), else the file install.sh
+# records, resolved by lib/config.py (which exits non-zero, naming both, when
+# neither is set). Exported so gate.py and run.sh use the same root.
+BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2
+export BACKLOG_ROOT
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
 mkdir -p "$STATE_ROOT"
 

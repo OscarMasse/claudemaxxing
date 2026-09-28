@@ -6,7 +6,10 @@
 # the process ticks itself, and launchd only has to restart it if it dies.
 set -u
 cd "$(dirname "$0")"
-export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
+# Resolved by lib/config.py (env, then the file install.sh records); exits
+# non-zero with a message naming both when neither says where the backlog is.
+BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2
+export BACKLOG_ROOT
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
 mkdir -p "$STATE_ROOT"
 # Tick interval. A tick is pure local Python (~1s, zero tokens), so the cost of

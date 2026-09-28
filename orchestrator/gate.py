@@ -61,8 +61,7 @@ def notifications_disabled():
 
 
 def paths():
-    env_root = os.environ.get("ORCH_ROOT")
-    root = Path(env_root) if env_root else config.backlog_root()
+    root = config.backlog_root()
     orch = root / "orchestrator"
     return {
         "root": root, "orch": orch,
@@ -550,6 +549,7 @@ def caps_lines(derived, now):
 
 
 def status(p):
+    print(f"backlog={p['root']} config={p['config']}")
     cfg = config.load(p["config"])
     projs = config.projects(cfg)
     for acct in config.accounts(cfg):
@@ -678,7 +678,11 @@ def plan(p):
 
 
 def main():
-    p = paths()
+    try:
+        p = paths()
+    except config.BacklogRootError as e:
+        print(f"gate: {e}", file=sys.stderr)
+        sys.exit(2)
     cmd = sys.argv[1] if len(sys.argv) > 1 else "tick"
     if cmd == "tick":
         tick(p)

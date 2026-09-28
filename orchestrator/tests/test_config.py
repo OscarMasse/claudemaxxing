@@ -248,7 +248,7 @@ class TestLegacyFallback(unittest.TestCase):
 
 class TestResolution(unittest.TestCase):
     """resolve_path order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yaml,
-    then the repo's example orchestrator/config.yaml. Both the `.yaml` and the
+    then the repo's example orchestrator/config.yaml (ORCH_EXAMPLE=1 only). Both the `.yaml` and the
     legacy `.yml` spelling are accepted at every step, `.yaml` preferred."""
 
     def setUp(self):
@@ -259,6 +259,8 @@ class TestResolution(unittest.TestCase):
         self.env.start()
         os.environ.pop("ORCH_CONFIG", None)
         os.environ.pop("BACKLOG_ROOT", None)
+        os.environ.pop("ORCH_ROOT", None)
+        os.environ["XDG_CONFIG_HOME"] = str(self.root / "xdg")
 
     def tearDown(self):
         self.env.stop()
@@ -299,10 +301,90 @@ class TestResolution(unittest.TestCase):
         self.assertEqual(config.resolve_path(self.root),
                          self.root / "config.yml")
 
-    def test_backlog_root_defaults_to_repo_root(self):
+    def test_repo_root_only_under_orch_example(self):
         self.assertEqual(config.backlog_root(), config.repo_root())
-        os.environ["BACKLOG_ROOT"] = str(self.root)
-        self.assertEqual(config.backlog_root(), self.root)
+        os.environ.pop("ORCH_EXAMPLE")
+        with self.assertRaisesRegex(config.BacklogRootError,
+                                    "BACKLOG_ROOT.*backlog-root"):
+            config.backlog_root()
+
+    def test_root_order_orch_root_env_then_recorded_file(self):
+        os.environ.pop("ORCH_EXAMPLE")
+        recorded = self.root / "recorded"
+        config.root_file().parent.mkdir(parents=True)
+        config.root_file().write_text(f"{recorded}\n")
+        self.assertEqual(config.backlog_root(), recorded)
+        os.environ["BACKLOG_ROOT"] = str(self.root / "env")
+        self.assertEqual(config.backlog_root(), self.root / "env")
+        os.environ["ORCH_ROOT"] = str(self.root / "orch")
+        self.assertEqual(config.backlog_root(), self.root / "orch")
+
+    def test_root_without_config_fails_outside_example(self):
+        os.environ.pop("ORCH_EXAMPLE")
+        os.environ["BACKLOG_ROOT"] = str(self.root)  # no config in it
+        with self.assertRaisesRegex(config.BacklogRootError, "no config.yaml"):
+            config.resolve_path()
+
+    def test_record_root_cli_round_trips(self):
+        os.environ.pop("ORCH_EXAMPLE")
+        cli = [sys.executable, str(config.repo_root() / "orchestrator" / "lib" / "config.py")]
+        subprocess.run(cli + ["record-root", str(self.root)], check=True,
+                       capture_output=True)
+        out = subprocess.run(cli + ["backlog-root"], check=True,
+                             capture_output=True, text=True).stdout.strip()
+        self.assertEqual(Path(out), self.root.resolve())
+
+
+class TestEntryPointsFailLoudly(unittest.TestCase):
+    """With no ORCH_ROOT, BACKLOG_ROOT, recorded file nor ORCH_EXAMPLE, every
+    entry point exits non-zero naming the variable and the file, instead of
+    reading the repo's example config (2026-09-26 fake alarms)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = {k: v for k, v in os.environ.items()
+                    if k not in ("ORCH_ROOT", "BACKLOG_ROOT", "ORCH_EXAMPLE",
+                                 "ORCH_CONFIG")}
+        self.env["XDG_CONFIG_HOME"] = self.tmp.name
+        self.orch = config.repo_root() / "orchestrator"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def assert_fails_loudly(self, cmd):
+        r = subprocess.run(cmd, cwd=self.orch, env=self.env,
+                           capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("BACKLOG_ROOT", r.stderr)
+        self.assertIn(str(Path(self.tmp.name) / "claudemaxxing" / "backlog-root"),
+                      r.stderr)
+        self.assertNotIn("account=", r.stdout)
+
+    def test_gate_status(self):
+        self.assert_fails_loudly([sys.executable, "gate.py", "status"])
+
+    def test_manual_py(self):
+        self.assert_fails_loudly([sys.executable, "manual.py", "--count", "1",
+                                  "--dry-run"])
+
+    def test_shell_entry_points(self):
+        for script in ("run.sh", "manual.sh", "digest-wrapper.sh",
+                       "gatekeeper.sh"):
+            with self.subTest(script=script):
+                args = ["--count", "1", "--dry-run"] if script == "manual.sh" else []
+                self.assert_fails_loudly(["/bin/bash", script] + args)
+
+    def test_gate_status_prints_backlog_first_when_recorded(self):
+        root = Path(self.tmp.name) / "backlog"
+        root.mkdir()
+        (root / "config.yaml").write_text(
+            (self.orch / "config.yaml").read_text())
+        subprocess.run([sys.executable, "lib/config.py", "record-root", str(root)],
+                       cwd=self.orch, env=self.env, check=True, capture_output=True)
+        r = subprocess.run([sys.executable, "gate.py", "status"], cwd=self.orch,
+                           env=dict(self.env, ORCH_NO_NOTIFY="1"),
+                           capture_output=True, text=True, timeout=30)
+        self.assertTrue(r.stdout.startswith(f"backlog={root.resolve()} "), r.stdout)
 
 
 class TestDigestFileCLI(unittest.TestCase):

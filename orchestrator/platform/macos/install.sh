@@ -5,14 +5,12 @@
 #   __BACKLOG_ROOT__  -> the backlog root (tasks/, digests/, state/, config)
 #   __DIGEST_HOUR__   -> Hour of the digest StartCalendarInterval
 #   __DIGEST_MINUTE__ -> Minute of the digest StartCalendarInterval
-# BACKLOG_ROOT may be set in the environment to run the engine from this
-# checkout against a separate backlog directory; the default is the repo root
-# (the historical layout where the checkout doubles as the backlog root).
+# BACKLOG_ROOT comes from the dispatcher (../../install.sh), which resolves
+# and records it.
 set -euo pipefail
 cd "$(dirname "$0")"
 ORCH_DIR="$(cd ../.. && pwd)"
-BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd "$ORCH_DIR/.." && pwd)}"
-BACKLOG_ROOT="$(cd "$BACKLOG_ROOT" && pwd)"
+BACKLOG_ROOT="$(cd "${BACKLOG_ROOT:?run orchestrator/install.sh, not this adapter}" && pwd)"
 UID_N=$(id -u)
 mkdir -p "$BACKLOG_ROOT/orchestrator/state"
 

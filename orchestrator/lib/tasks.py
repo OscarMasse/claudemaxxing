@@ -6,7 +6,9 @@ Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
 priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
 branch to resume in the task's worktree, lib/workspace.py),
-prerequisites (space-separated task basenames, `.md` suffix optional).
+prerequisites (space-separated task basenames, `.md` suffix optional),
+mode (autonomous|interactive, default autonomous: an interactive task needs the
+owner in a live session, is never launched and is listed by `interactive`).
 
 Only tasks/*.md is ever scheduled. Done tasks move to tasks/archive/ (see
 `archive_done`); lookups by name resolve both places (see `task_path`).
@@ -160,6 +162,24 @@ def _declared_workdir(fm):
     if raw is None:
         return "worktree"
     return raw if raw == WORKDIR_MAIN else None
+
+
+MODE_AUTONOMOUS = "autonomous"
+MODE_INTERACTIVE = "interactive"
+MODES = (MODE_AUTONOMOUS, MODE_INTERACTIVE)
+
+
+def _declared_mode(fm):
+    """Who works the task: "autonomous" (the default, a background session),
+    "interactive" when it needs the owner in a live session (review,
+    arbitration, decisions) and must never be launched by the engine, or None
+    for any other value, which is reported by misconfigured() and never
+    guessed: guessing "autonomous" would launch work meant for the owner,
+    guessing "interactive" would silently park work meant for the engine."""
+    raw = fm.get("mode")
+    if raw is None:
+        return MODE_AUTONOMOUS
+    return raw if raw in MODES else None
 
 
 def task_workdir(path):
@@ -449,6 +469,11 @@ def _ordered(root, projects, account, sched_class=None, today=None,
         proj = projects.get(fm.get("project", "default"))
         if proj is None or proj["account"] != account:
             continue
+        mode = _declared_mode(fm)
+        if mode == MODE_INTERACTIVE:
+            continue  # needs the owner live, listed by interactive()
+        if mode is None:
+            continue  # unknown mode, reported by misconfigured()
         model = _declared_model(fm)
         if model is None:
             continue  # unknown model name, reported by misconfigured()
@@ -518,6 +543,8 @@ def resolve(root, projects, account, ref):
         return None, [], f"project={fm.get('project', 'default')} not configured"
     if proj["account"] != account:
         return None, [], f"routes to account {proj['account']}"
+    if _declared_mode(fm) == MODE_INTERACTIVE:
+        return None, [], "mode=interactive (run it in an interactive session)"
     problems = [problem for n, problem in misconfigured(root, projects)
                 if n == path.name]
     if problems:
@@ -569,7 +596,8 @@ def fillers(root, projects, account):
 def blocked(root, projects, account):
     """Ready tasks routed to `account` whose prerequisites are unmet: list of
     (task filename, [unmet prerequisite names]). Pure observability for
-    gate.py status."""
+    gate.py status. Interactive tasks are left to `interactive`, which reports
+    their unmet prerequisites itself."""
     out = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -580,10 +608,35 @@ def blocked(root, projects, account):
         proj = projects.get(fm.get("project", "default"))
         if proj is None or proj["account"] != account:
             continue
+        if _declared_mode(fm) == MODE_INTERACTIVE:
+            continue  # reported by interactive()
         unmet = _unmet_prerequisites(root, fm)
         if unmet:
             out.append((p.name, unmet))
     return out
+
+
+def interactive(root, projects):
+    """Ready tasks declaring `mode: interactive`: list of (task filename,
+    effective priority, [unmet prerequisite names]). The engine never launches
+    them, since they need the owner in a live session, yet they stay `ready`
+    because they are actionable by him; this is where they surface. Ordered
+    like the queue: effective priority, then oldest `created`, then filename.
+    Account-independent by construction, so gate.py prints it once."""
+    effective = _effective_priorities(root)
+    names = {rank: name for name, rank in PRIORITY_ORDER.items()
+             if name != "normal"}
+    found = []
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md":
+            continue
+        fm = _frontmatter(p)
+        if fm.get("status") != "ready" or _declared_mode(fm) != MODE_INTERACTIVE:
+            continue
+        rank = effective.get(p.stem, _own_priority(fm))
+        found.append(((rank, fm.get("created", "9999"), p.name),
+                      (p.name, names[rank], _unmet_prerequisites(root, fm))))
+    return [t for _, t in sorted(found, key=lambda x: x[0])]
 
 
 def orphaned(root, projects):
@@ -720,6 +773,7 @@ def misconfigured(root, projects):
       done, so the edit would otherwise be silently ignored.
     - `workdir:` other than `main`.
     - `uses:` naming no optional dir of the task's project.
+    - `mode:` other than `autonomous` or `interactive`.
 
     One task can be reported for several of these; each line names its key, so
     fixing the file needs no guessing. Account-independent by construction, so
@@ -753,6 +807,8 @@ def misconfigured(root, projects):
                               (proj or {}).get("optional_dirs", [])) or "none"
             out.append((p.name, f"uses={fm['uses']} (optional dirs of the "
                                 f"project: {known})"))
+        if _declared_mode(fm) is None:
+            out.append((p.name, f"mode={fm['mode']}"))
     # An archived file is done by definition, so editing its status reopens
     # nothing: surface the edit instead of silently ignoring it.
     for p in sorted((Path(root) / "tasks" / ARCHIVE_DIR).glob("*.md")):

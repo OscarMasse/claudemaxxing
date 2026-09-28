@@ -15,6 +15,11 @@ Procedure:
    `## Runs` for anything that needs the owner's judgment (work to validate,
    questions, tasks completed).
 4. Rewrite {{DIGEST_FILE}} in place with exactly these sections, in this order:
+   - `## Today` - every `interactive` line of the gate.py status output, one
+     bullet each with its priority and any `unmet` prerequisites, in the order
+     printed. These tasks are never launched in the background: they are what
+     the owner should do first today, in a live session. Omit the section when
+     there are none.
    - `## To validate` - work finished by background runs awaiting the owner's approval,
      drawn from the `## Runs` journal bullets.
    - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each.

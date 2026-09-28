@@ -669,6 +669,8 @@ def misconfigured(root, projects):
     - `delivery:` breaching the project's local-only floor.
     - a leftover `local_only:` key, which `delivery:` replaced.
     - `due:` that is not an ISO date.
+    - a file in tasks/archive/ whose status is not `done`: archived means
+      done, so the edit would otherwise be silently ignored.
 
     One task can be reported for several of these; each line names its key, so
     fixing the file needs no guessing. Account-independent by construction, so
@@ -694,6 +696,14 @@ def misconfigured(root, projects):
                                 "remove the key)"))
         if not _declared_due(fm)[0]:
             out.append((p.name, f"due={fm['due']} (expected YYYY-MM-DD)"))
+    # An archived file is done by definition, so editing its status reopens
+    # nothing: surface the edit instead of silently ignoring it.
+    for p in sorted((Path(root) / "tasks" / ARCHIVE_DIR).glob("*.md")):
+        status = _frontmatter(p).get("status")
+        if status != "done":
+            out.append((f"{ARCHIVE_DIR}/{p.name}",
+                        f"status={status} in {ARCHIVE_DIR}/ (move it back to "
+                        "tasks/ to reopen it)"))
     return out
 
 

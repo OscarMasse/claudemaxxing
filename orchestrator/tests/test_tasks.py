@@ -871,7 +871,6 @@ class TestArchive(unittest.TestCase):
         self.assertEqual(tasks.duties(self.root, PROJECTS, "personal"), [])
         self.assertEqual(tasks.fillers(self.root, PROJECTS, "personal"), [])
         self.assertEqual(tasks.orphaned(self.root, PROJECTS), [])
-        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
         self.assertEqual(tasks.repair_stuck(self.root, time.time() + 10 * 3600,
                                             self.TTL, "2026-09-28"), [])
 
@@ -906,3 +905,24 @@ class TestArchive(unittest.TestCase):
         self.assertEqual(again["path"], launched)
         self.assertAlmostEqual(
             ledger.session_costs(state)[(again["path"], "sonnet")], 1.5)
+
+    def test_status_edit_inside_archive_is_reported(self):
+        (self.root / "tasks" / "archive").mkdir()
+        write_task(self.root, "archive/x.md", project="side-projects", status="ready")
+        write_task(self.root, "archive/y.md", project="side-projects", status="done")
+        self.assertEqual(
+            tasks.misconfigured(self.root, PROJECTS),
+            [("archive/x.md",
+              "status=ready in archive/ (move it back to tasks/ to reopen it)")])
+
+    def test_done_again_replaces_the_archived_copy(self):
+        (self.root / "tasks" / "archive").mkdir()
+        write_task(self.root, "archive/x.md", project="side-projects",
+                   status="done", title="first")
+        write_task(self.root, "x.md", project="side-projects",
+                   status="done", title="second")
+        self.age("x.md", 10 * 3600)
+        self.assertEqual(self.archive(), ["x.md"])
+        self.assertIn("title: second",
+                      (self.root / "tasks" / "archive" / "x.md").read_text())
+        self.assertEqual(list((self.root / "tasks").glob("*.md")), [])

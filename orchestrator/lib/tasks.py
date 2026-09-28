@@ -128,7 +128,13 @@ DELIVERY_VALUES = ("branch", "pr", "local")
 
 
 def _frontmatter(path):
-    text = path.read_text(errors="replace")
+    """The file's frontmatter keys, or {} when the file vanished since it was
+    listed: the gatekeeper's tick may archive it under a concurrent
+    `gate.py status` or manual run, which then just skips it."""
+    try:
+        text = path.read_text(errors="replace")
+    except FileNotFoundError:
+        return {}
     m = re.match(r"---\n(.*?)\n---", text, re.S)
     fm = {}
     if m:

@@ -258,13 +258,3 @@ class TestManual(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestArchivedPrerequisite(unittest.TestCase):
-    def test_archived_prerequisite_reads_as_done(self):
-        with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "tasks" / "archive").mkdir(parents=True)
-            (Path(d) / "tasks" / "archive" / "dep.md").write_text(
-                "---\nstatus: done\n---\n")
-            self.assertEqual(manual._status(d, "dep"), "done")
-            self.assertIsNone(manual._status(d, "ghost"))

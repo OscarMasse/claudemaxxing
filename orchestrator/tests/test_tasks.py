@@ -368,6 +368,26 @@ class TestPick(unittest.TestCase):
             tasks.misconfigured(self.root, PROJECTS),
             [("ghost.md", "workdir=checkout (only `main`, or no key for a worktree)")])
 
+    def test_uses_a_known_optional_dir_is_schedulable(self):
+        projects = dict(PROJECTS, **{"side-projects": dict(
+            PROJECTS["side-projects"], optional_dirs=["/x/pokemon-assets"])})
+        write_task(self.root, "sprites.md", project="side-projects",
+                   status="ready", uses="[pokemon-assets]")
+        self.assertTrue(tasks.pick(self.root, projects, "personal")["path"]
+                        .endswith("sprites.md"))
+        self.assertEqual(tasks.misconfigured(self.root, projects), [])
+
+    def test_uses_an_unknown_optional_dir_is_reported_not_scheduled(self):
+        projects = dict(PROJECTS, **{"side-projects": dict(
+            PROJECTS["side-projects"], optional_dirs=["/x/pokemon-assets"])})
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", uses="[pokemon-sprites]")
+        self.assertIsNone(tasks.pick(self.root, projects, "personal"))
+        self.assertEqual(
+            tasks.misconfigured(self.root, projects),
+            [("ghost.md", "uses=[pokemon-sprites] (optional dirs of the "
+                          "project: pokemon-assets)")])
+
     def test_only_ready_tasks_are_reported(self):
         # An inbox task without `delivery:` is not misconfigured, it is simply
         # not written yet; reporting it would make the list permanent noise.

@@ -239,6 +239,28 @@ class WorkspaceTest(unittest.TestCase):
         self.assertIn("status: blocked", task.read_text())
         self.assertIn("ghost.md", (self.backlog / "NEEDS-HUMAN.md").read_text())
 
+    def test_undeclared_optional_dir_stays_readonly_without_worktree(self):
+        assets = make_repo(self.root, "pokemon-assets")
+        self.assertEqual(workspace.split_optional(self.task, [str(assets)]),
+                         ([], [str(assets)]))
+        self.assertFalse((assets / ".agent-worktrees").exists())
+
+    def test_declared_optional_dir_is_used(self):
+        assets = make_repo(self.root, "pokemon-assets")
+        task = self.write_task("sprites.md", "uses: [pokemon-assets]\n")
+        self.assertEqual(workspace.split_optional(task, [str(assets)]),
+                         ([str(assets)], []))
+
+    def test_optional_cli_fails_closed_on_unknown_uses(self):
+        task = self.write_task("ghost.md", "uses: [nope]\n")
+        r = subprocess.run(
+            ["python3", str(Path(workspace.__file__)), "optional", str(task),
+             str(self.backlog), str(self.root / "pokemon-assets")],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("status: blocked", task.read_text())
+
     def test_project_workdir_main_keeps_every_main_checkout(self):
         self.assertEqual(workspace.session_dirs(self.task, self.backlog,
                                                 [str(self.repo)], "main"),

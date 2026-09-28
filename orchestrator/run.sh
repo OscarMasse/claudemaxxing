@@ -122,8 +122,33 @@ fi
 # The backlog root itself is always included.
 if [ -n "$PROJECT" ]; then
   DIRS="$(cfg project-dirs "$PROJECT")"
+  OPTIONAL_DIRS="$(cfg project-optional-dirs "$PROJECT")"
 else
   DIRS="$(cfg account-dirs "$ACCOUNT")"
+  OPTIONAL_DIRS="$(cfg account-optional-dirs "$ACCOUNT")"
+fi
+# Optional dirs (project key `optional_dirs`): the ones the task declares in
+# `uses:` join DIRS (and so get a worktree below); every other one, and all
+# of them for a session without a pre-selected task, is passed as its main
+# checkout, read-only through the deny rules lib/permissions.py adds for it.
+# Fail closed like the worktree step: an unreadable `uses:` launches nothing.
+READONLY_DIRS="$OPTIONAL_DIRS"
+if [ -n "$TASK_FILE" ] && [ -n "$PROJECT" ] && [ -n "$OPTIONAL_DIRS" ]; then
+  WS_ERR="$STATE/workspace.$SLOT.txt"
+  if ! OPT_SPLIT="$(python3 lib/workspace.py optional "$TASK_FILE" \
+      "$BACKLOG_ROOT" $OPTIONAL_DIRS 2> "$WS_ERR")"; then
+    echo "$(date '+%F %T') task=$(basename "$TASK_FILE") workspace failed, not launching: $(tr '\n' ' ' < "$WS_ERR")" >> "$STATE_ROOT/runs.log"
+    rm -f "$WS_ERR"
+    exit 1
+  fi
+  rm -f "$WS_ERR"
+  READONLY_DIRS=""
+  while IFS=$'\t' read -r kind d; do
+    case "$kind" in
+      use)      DIRS="${DIRS:+$DIRS }$d" ;;
+      readonly) READONLY_DIRS="${READONLY_DIRS:+$READONLY_DIRS }$d" ;;
+    esac
+  done <<< "$OPT_SPLIT"
 fi
 # A pre-selected task never gets a repo's main checkout: lib/workspace.py
 # swaps each repo dir for the task's own worktree (created or reused), unless
@@ -142,7 +167,7 @@ if [ -n "$TASK_FILE" ] && [ -n "$PROJECT" ] && [ "$MODE" = "orchestrate" ]; then
   DIRS="$(printf '%s' "$DIRS" | tr '\n' ' ')"; DIRS="${DIRS% }"
 fi
 ADD_DIRS=(--add-dir "$BACKLOG_ROOT")
-for d in $DIRS; do ADD_DIRS+=(--add-dir "$d"); done
+for d in $DIRS $READONLY_DIRS; do ADD_DIRS+=(--add-dir "$d"); done
 ACCOUNT_PROJECTS="$(cfg account-projects "$ACCOUNT" | tr '\n' ' ')"
 
 # The digest file this run journals into (or, for the digest session, the
@@ -175,9 +200,10 @@ esac
 # lib/permissions.py builds the rails as deny rules, one family per function
 # with its reason: pushes and mutating gh calls for every delivery but `pr`
 # (digest and auto modes carry no delivery and never publish either), force
-# pushes, filter-branch and credential reads for every session.
+# pushes, filter-branch and credential reads for every session, and writes
+# under each read-only optional dir.
 # Fail closed: a broken builder must not launch a session without its rails.
-if ! RULES="$(python3 lib/permissions.py "$DELIVERY")" || [ -z "$RULES" ]; then
+if ! RULES="$(python3 lib/permissions.py "$DELIVERY" $READONLY_DIRS)" || [ -z "$RULES" ]; then
   echo "$(date '+%F %T') permissions builder failed, not launching" >&2
   exit 1
 fi

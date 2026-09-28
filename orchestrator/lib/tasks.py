@@ -167,6 +167,21 @@ def task_workdir(path):
     return _declared_workdir(_frontmatter(Path(path)))
 
 
+def _declared_uses(fm, proj):
+    """Paths of the project's optional dirs the task declares with
+    `uses: [<basename>, ...]` ([] when the key is absent), or None when a
+    name matches no optional dir of the project: reported by misconfigured()
+    and never guessed, since dropping the name would run the task read-only
+    in the repo it was written to change."""
+    names = config.split_values(fm.get("uses", ""))
+    if not names:
+        return []
+    by_name = {Path(d).name: d for d in (proj or {}).get("optional_dirs", [])}
+    if any(n not in by_name for n in names):
+        return None
+    return [by_name[n] for n in names]
+
+
 def _declared_model(fm):
     """The task's declared model, or None when it names one the engine does
     not know.
@@ -452,6 +467,8 @@ def _ordered(root, projects, account, sched_class=None, today=None,
             continue  # unreadable deadline, reported by misconfigured()
         if _declared_workdir(fm) is None:
             continue  # unknown workdir, reported by misconfigured()
+        if _declared_uses(fm, proj) is None:
+            continue  # unknown optional dir, reported by misconfigured()
         entry = dated.get(p.stem)
         if proj["expedite"]:
             cls, deadline = CLASS_EXPEDITE, 0
@@ -702,6 +719,7 @@ def misconfigured(root, projects):
     - a file in tasks/archive/ whose status is not `done`: archived means
       done, so the edit would otherwise be silently ignored.
     - `workdir:` other than `main`.
+    - `uses:` naming no optional dir of the task's project.
 
     One task can be reported for several of these; each line names its key, so
     fixing the file needs no guessing. Account-independent by construction, so
@@ -730,6 +748,11 @@ def misconfigured(root, projects):
         if _declared_workdir(fm) is None:
             out.append((p.name, f"workdir={fm['workdir']} (only `main`, or "
                                 "no key for a worktree)"))
+        if _declared_uses(fm, proj) is None:
+            known = ", ".join(Path(d).name for d in
+                              (proj or {}).get("optional_dirs", [])) or "none"
+            out.append((p.name, f"uses={fm['uses']} (optional dirs of the "
+                                f"project: {known})"))
     # An archived file is done by definition, so editing its status reopens
     # nothing: surface the edit instead of silently ignoring it.
     for p in sorted((Path(root) / "tasks" / ARCHIVE_DIR).glob("*.md")):

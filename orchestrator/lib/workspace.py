@@ -28,6 +28,14 @@ both are passed through unchanged. A task that must work in the main
 checkout itself (rankr seeds in its gitignored `scripts/`) declares
 `workdir: main`, validated in lib/tasks.py.
 
+Optional dirs
+-------------
+A project's `optional_dirs` (lib/config.py) are repos only some of its tasks
+touch, like rankr's ~1 GB pokemon-assets checkout. A task that declares one
+in `uses:` gets it like any other dir, worktree included; every other
+optional dir gets no worktree and reaches the session as its main checkout,
+read-only through deny rules (lib/permissions.py readonly_rules).
+
 Cleanup
 -------
 `reap` (called by gate.py next to the compose janitor) removes a task's
@@ -40,7 +48,11 @@ CLI (run.sh):
   python3 lib/workspace.py session-cwd
 prints (and creates) the directory sessions start in, see session_cwd().
   python3 lib/workspace.py dirs <task_file> <backlog_root> <project_workdir> <dir>...
-prints one session dir per line, in order. Exit 1, with the reason on
+prints one session dir per line, in order.
+  python3 lib/workspace.py optional <task_file> <backlog_root> <optional_dir>...
+prints `use<TAB><dir>` for each optional dir the task declares in `uses:`
+(run.sh adds it to the dirs above) and `readonly<TAB><dir>` for the others.
+Both subcommands exit 1, with the reason on
 stderr, when a worktree cannot be prepared: the task is set `blocked` with
 the reason (and a NEEDS-HUMAN line), and the launcher does not start the
 session rather than start it in a main checkout.
@@ -217,6 +229,19 @@ def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
     return out
 
 
+def split_optional(task_file, optional_dirs):
+    """`(used, readonly)`: the optional dirs the task declares in `uses:`,
+    and the rest. A `uses:` name matching none of them raises: the gate
+    refuses such a task (tasks.misconfigured), and a session that got here
+    anyway must not run read-only in the repo it was written to change."""
+    fm = tasks._frontmatter(Path(task_file))
+    used = tasks._declared_uses(fm, {"optional_dirs": list(optional_dirs)})
+    if used is None:
+        raise WorkspaceError(f"{task_file}: uses: {fm.get('uses')} names no "
+                             f"optional dir of the project")
+    return used, [d for d in optional_dirs if d not in used]
+
+
 def _worktrees(repo):
     """`(path, branch)` of the repo's worktrees; branch is None when detached."""
     r = _git(repo, "worktree", "list", "--porcelain")
@@ -332,14 +357,20 @@ def _main(argv):
         d.mkdir(parents=True, exist_ok=True)
         print(d)
         return 0
-    if len(argv) < 4 or argv[1] != "dirs":
+    if len(argv) < 4 or argv[1] not in ("dirs", "optional"):
         print(__doc__, file=sys.stderr)
         return 2
-    if len(argv) < 5:
-        return 0  # a project without dirs: nothing to swap
-    task_file, backlog_root, project_workdir, *dirs = argv[2:]
     try:
-        out = session_dirs(task_file, backlog_root, dirs, project_workdir)
+        if argv[1] == "optional":
+            task_file, backlog_root, *optional = argv[2:]
+            used, readonly = split_optional(task_file, optional)
+            out = ([f"use\t{d}" for d in used]
+                   + [f"readonly\t{d}" for d in readonly])
+        elif len(argv) < 5:
+            return 0  # a project without dirs: nothing to swap
+        else:
+            task_file, backlog_root, project_workdir, *dirs = argv[2:]
+            out = session_dirs(task_file, backlog_root, dirs, project_workdir)
     except (WorkspaceError, OSError, subprocess.TimeoutExpired) as e:
         print(f"workspace: {e}", file=sys.stderr)
         try:

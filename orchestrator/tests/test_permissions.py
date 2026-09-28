@@ -87,6 +87,26 @@ class TestDenyRules(unittest.TestCase):
             self.assertIn("Read(~/.config/backlog-agents/github-token)", rules)
             self.assertIn("Read(~/.ssh/**)", rules)
 
+    def test_readonly_dir_denies_writes_but_not_reads(self):
+        ro = "/Users/o/side-projects/pokemon-assets"
+        rules = permissions.deny_rules("pr", [ro])
+        for tool in ("Edit", "Write", "NotebookEdit"):
+            self.assertIn(f"{tool}({ro}/**)", rules)
+        for cmd in (f"git -C {ro} commit -m x", f"rtk git -C {ro} checkout -b y",
+                    f"git -C {ro} reset --hard", f"echo x > {ro}/a.txt",
+                    f"cat a >> {ro}/b", f"rm -rf {ro}/sprites",
+                    f"cp a.png {ro}/a.png", f"sed -i s/a/b/ {ro}/f"):
+            self.assertTrue(denied(rules, cmd), cmd)
+        for cmd in (f"git -C {ro} log --oneline", f"git -C {ro} status",
+                    f"cat {ro}/a.txt", f"ls {ro}"):
+            self.assertFalse(denied(rules, cmd), cmd)
+        self.assertNotIn(f"Edit({ro}/**)", permissions.deny_rules("pr"))
+
+    def test_cli_takes_readonly_dirs_after_the_delivery(self):
+        out = subprocess.run([sys.executable, "lib/permissions.py", "local", "/r/o"],
+                             cwd=ORCH, capture_output=True, text=True, check=True)
+        self.assertIn("Write(/r/o/**)", out.stdout.splitlines())
+
     def test_cli_prints_one_rule_per_line(self):
         out = subprocess.run([sys.executable, "lib/permissions.py", "local"],
                              cwd=ORCH, capture_output=True, text=True, check=True)

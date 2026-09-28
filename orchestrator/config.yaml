@@ -158,6 +158,13 @@ accounts:
 #   account            required, the account this project's tasks run on
 #   dirs               directories handed to the session via --add-dir,
 #                      flow-style list [a, b], ~ expands to $HOME
+#   optional_dirs      optional, same syntax as dirs: repos only some tasks
+#                      touch (a large assets checkout). A task lists the ones
+#                      it writes to by basename in `uses: [name, ...]` and
+#                      gets a worktree of each; the others reach the session
+#                      as their main checkout, read-only through deny rules.
+#                      A `uses:` name matching none of them is reported as
+#                      misconfigured and the task is not scheduled.
 #   rank               optional integer, LOWER is preferred (default 100);
 #                      only breaks ties between tasks of equal priority, it
 #                      never lets a `low` task pass a `high` one

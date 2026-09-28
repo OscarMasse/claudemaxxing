@@ -70,6 +70,8 @@ CLI (used by run.sh so shell scripts never parse the config themselves):
   python3 lib/config.py <config.yaml> account-dirs <name>
   python3 lib/config.py <config.yaml> account-projects <name>
   python3 lib/config.py <config.yaml> project-dirs <name>
+  python3 lib/config.py <config.yaml> project-optional-dirs <name>
+  python3 lib/config.py <config.yaml> account-optional-dirs <name>
   python3 lib/config.py <config.yaml> project-account <name>
   python3 lib/config.py <config.yaml> project-workdir <name>  # worktree|main
   python3 lib/config.py <config.yaml> digest-file      # today/tomorrow's digest
@@ -295,8 +297,14 @@ def accounts(cfg):
 # Every key a project entry may carry. Anything else is refused rather than
 # ignored: a misspelled `class: expedit` or a leftover `priority: 5` would
 # otherwise change the launch order silently.
-PROJECT_KEYS = ("name", "account", "dirs", "rank", "class",
+PROJECT_KEYS = ("name", "account", "dirs", "optional_dirs", "rank", "class",
                 "local_only_default", "workdir")
+# `optional_dirs` are repos a task of the project only sometimes needs (rankr's
+# ~1 GB pokemon-assets checkout): a task names the ones it writes to with
+# `uses: [<basename>, ...]` and gets a worktree of each (lib/workspace.py);
+# every other optional dir is handed to the session read-only, as its main
+# checkout under deny rules (lib/permissions.py), so no task pays for a
+# worktree it never uses.
 # `workdir: main` exempts a whole project from per-task worktrees
 # (lib/workspace.py): for a repo that is a notes store, not code (~/Personal),
 # where every task commits in place. Absent = a worktree per task.
@@ -354,6 +362,8 @@ def projects(cfg):
             "name": p["name"],
             "account": p["account"],
             "dirs": [os.path.expanduser(d) for d in split_values(p.get("dirs", ""))],
+            "optional_dirs": [os.path.expanduser(d) for d in
+                              split_values(p.get("optional_dirs", ""))],
             "rank": rank,
             "expedite": cls == "expedite",
             "local_only_default": bool(p.get("local_only_default", False)),
@@ -416,21 +426,27 @@ def _dispatch(argv):
             if p["account"] == argv[3]:
                 print(p["name"])
         return 0
-    if cmd == "account-dirs":
+    if cmd in ("account-dirs", "account-optional-dirs"):
+        key = "dirs" if cmd == "account-dirs" else "optional_dirs"
         seen = []
         for p in projects(cfg).values():
             if p["account"] == argv[3]:
-                for d in p["dirs"]:
+                for d in p[key]:
                     if d not in seen:
                         seen.append(d)
+        if key == "optional_dirs":
+            # A dir another project of the account writes to stays writable.
+            writable = {d for p in projects(cfg).values()
+                        if p["account"] == argv[3] for d in p["dirs"]}
+            seen = [d for d in seen if d not in writable]
         print(" ".join(seen))
         return 0
-    if cmd == "project-dirs":
+    if cmd in ("project-dirs", "project-optional-dirs"):
         p = projects(cfg).get(argv[3])
         if p is None:
             print(f"config: unknown project {argv[3]!r}", file=sys.stderr)
             return 2
-        print(" ".join(p["dirs"]))
+        print(" ".join(p["dirs" if cmd == "project-dirs" else "optional_dirs"]))
         return 0
     if cmd == "project-local-only":
         p = projects(cfg).get(argv[3])

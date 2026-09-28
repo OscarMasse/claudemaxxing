@@ -143,14 +143,29 @@ def _exclude_worktrees(repo):
         exclude.write_text(f"{text}{sep}{line}\n")
 
 
-def prepare(repo, slug):
-    """Path of the task's worktree in `repo`, created or reused."""
+def prepare(repo, slug, declared_branch=None):
+    """Path of the task's worktree in `repo`, created or reused.
+
+    `declared_branch` is the task's `branch:` key: work started before this
+    module existed lives on a branch of its own name, often in a worktree of
+    its own name. When that branch exists in `repo`, its worktree is reused
+    wherever it is, or the branch is attached at the standard path."""
     repo = Path(repo).resolve()
     path = repo / WORKTREES_DIRNAME / slug
     branch = BRANCH_PREFIX + slug
     _exclude_worktrees(repo)
     # A worktree deleted by hand stays registered and blocks `worktree add`.
     _git(repo, "worktree", "prune")
+    if declared_branch and _has_ref(repo, f"refs/heads/{declared_branch}"):
+        for wt, b in _worktrees(repo):
+            if b == declared_branch:
+                if wt.resolve() == repo:
+                    raise WorkspaceError(
+                        f"{repo}: branch {declared_branch} is checked out in "
+                        f"the main checkout; switch the main checkout away "
+                        f"from it first")
+                return wt
+        branch = declared_branch
     if path.exists():
         if repo_toplevel(path):
             return path
@@ -158,15 +173,18 @@ def prepare(repo, slug):
     # A branch left without its worktree (removed by hand, or by the janitor
     # before a reopened review) is re-attached as is, never rebuilt.
     if _has_ref(repo, f"refs/heads/{branch}"):
-        r = _git(repo, "worktree", "add", str(path), branch)
+        r = _git(repo, "worktree", "add", str(path), branch, timeout=900)
     else:
         base = _fetch_base(repo)
         if base is None:
             raise WorkspaceError(f"{repo}: no default branch to branch from "
                                  f"(tried origin/HEAD, {', '.join(BASES)})")
+        # Generous: a large repo's checkout can take minutes on a busy disk.
         r = _git(repo, "worktree", "add", "--no-track", "-b", branch,
-                 str(path), base)
+                 str(path), base, timeout=900)
     if r.returncode != 0:
+        # A half-made worktree would pass as reusable on the next slice.
+        _git(repo, "worktree", "remove", "--force", str(path))
         raise WorkspaceError(f"{repo}: git worktree add failed: "
                              f"{r.stderr.strip()}")
     return path
@@ -182,6 +200,7 @@ def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
     if project_workdir == tasks.WORKDIR_MAIN:
         workdir = tasks.WORKDIR_MAIN
     slug = Path(task_file).stem
+    declared_branch = tasks._frontmatter(Path(task_file)).get("branch")
     backlog = Path(backlog_root).resolve()
     out = []
     for d in dirs:
@@ -189,7 +208,7 @@ def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
                 or not repo_toplevel(d)):
             out.append(str(d))
         else:
-            out.append(str(prepare(d, slug)))
+            out.append(str(prepare(d, slug, declared_branch)))
     return out
 
 
@@ -308,9 +327,11 @@ def _main(argv):
         d.mkdir(parents=True, exist_ok=True)
         print(d)
         return 0
-    if len(argv) < 5 or argv[1] != "dirs":
+    if len(argv) < 4 or argv[1] != "dirs":
         print(__doc__, file=sys.stderr)
         return 2
+    if len(argv) < 5:
+        return 0  # a project without dirs: nothing to swap
     task_file, backlog_root, project_workdir, *dirs = argv[2:]
     try:
         out = session_dirs(task_file, backlog_root, dirs, project_workdir)

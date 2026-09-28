@@ -4,7 +4,8 @@ Selection is deterministic and happens in the gatekeeper (not in the session),
 because the task's declared model must be known before launching the session.
 Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
 priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
-effort (low|medium|high, default low), workdir (main, default a worktree),
+effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
+branch to resume in the task's worktree, lib/workspace.py),
 prerequisites (space-separated task basenames, `.md` suffix optional).
 
 Only tasks/*.md is ever scheduled. Done tasks move to tasks/archive/ (see

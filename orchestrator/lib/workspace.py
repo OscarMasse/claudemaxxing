@@ -37,14 +37,19 @@ is returned for the log, never deleted. Only worktrees this module creates
 are candidates: `.agent-worktrees/<slug>` on `agent/<slug>`.
 
 CLI (run.sh):
-  python3 lib/workspace.py dirs <task_file> <backlog_root> <dir>...
+  python3 lib/workspace.py session-cwd
+prints (and creates) the directory sessions start in, see session_cwd().
+  python3 lib/workspace.py dirs <task_file> <backlog_root> <project_workdir> <dir>...
 prints one session dir per line, in order. Exit 1, with the reason on
-stderr, when a worktree cannot be prepared: the launcher then does not start
-the session rather than start it in a main checkout.
+stderr, when a worktree cannot be prepared: the task is set `blocked` with
+the reason (and a NEEDS-HUMAN line), and the launcher does not start the
+session rather than start it in a main checkout.
 """
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,7 +57,24 @@ from lib import tasks  # noqa: E402
 
 WORKTREES_DIRNAME = ".agent-worktrees"  # also what lib/janitor.py matches
 BRANCH_PREFIX = "agent/"
-BASES = ("origin/main", "main")
+# Tried in order when origin/HEAD is not set: pokemon-assets' default branch
+# is `master`, and a repo without a remote only has its local branch.
+BASES = ("origin/main", "origin/master", "main", "master")
+
+
+def session_cwd():
+    """The directory every headless session starts in: outside any repo, so
+    a bare `git checkout` that forgot its `-C` fails instead of switching a
+    main checkout (sessions used to start in the engine's own checkout).
+    gate.py excludes its transcripts from the owner's activity."""
+    return Path(os.environ.get("ORCH_SESSION_CWD")
+                or "~/.local/state/claudemaxxing/session").expanduser()
+
+
+def transcripts_dirname(path):
+    """Claude Code's projects/ subdir name for a cwd: every character that is
+    not alphanumeric becomes a dash."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
 class WorkspaceError(RuntimeError):
@@ -62,7 +84,8 @@ class WorkspaceError(RuntimeError):
 def _git(repo, *args, timeout=60):
     # Headless: a fetch that needs credentials it lacks must fail, not wait
     # for a terminal prompt that never comes.
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0",
+               GIT_SSH_COMMAND="ssh -o BatchMode=yes")
     return subprocess.run(["git", "-C", str(repo), *args], env=env,
                           capture_output=True, text=True, timeout=timeout)
 
@@ -81,6 +104,25 @@ def repo_toplevel(d):
 def _has_ref(repo, ref):
     return _git(repo, "rev-parse", "--verify", "--quiet",
                 f"{ref}^{{commit}}").returncode == 0
+
+
+def _fetch_base(repo):
+    """Fetch the remote's default branch (best effort, offline is fine) and
+    return the ref to branch from and to judge merges against: origin/HEAD's
+    target, else the first of BASES that exists, else None."""
+    r = _git(repo, "symbolic-ref", "--quiet", "--short",
+             "refs/remotes/origin/HEAD")
+    head = r.stdout.strip() if r.returncode == 0 else ""
+    candidates = ([head] if head else []) + list(BASES)
+    remote = next((b for b in candidates
+                   if b.startswith("origin/") and _has_ref(repo, b)), None)
+    if remote:
+        try:
+            _git(repo, "fetch", "--quiet", "origin",
+                 remote[len("origin/"):], timeout=120)
+        except subprocess.TimeoutExpired:
+            pass  # offline: the last known remote state will do
+    return next((b for b in candidates if _has_ref(repo, b)), None)
 
 
 def _exclude_worktrees(repo):
@@ -107,6 +149,8 @@ def prepare(repo, slug):
     path = repo / WORKTREES_DIRNAME / slug
     branch = BRANCH_PREFIX + slug
     _exclude_worktrees(repo)
+    # A worktree deleted by hand stays registered and blocks `worktree add`.
+    _git(repo, "worktree", "prune")
     if path.exists():
         if repo_toplevel(path):
             return path
@@ -116,13 +160,10 @@ def prepare(repo, slug):
     if _has_ref(repo, f"refs/heads/{branch}"):
         r = _git(repo, "worktree", "add", str(path), branch)
     else:
-        try:
-            _git(repo, "fetch", "--quiet", "origin", "main", timeout=120)
-        except subprocess.TimeoutExpired:
-            pass  # offline: branch from the last known origin/main
-        base = next((b for b in BASES if _has_ref(repo, b)), None)
+        base = _fetch_base(repo)
         if base is None:
-            raise WorkspaceError(f"{repo}: no origin/main or main to branch from")
+            raise WorkspaceError(f"{repo}: no default branch to branch from "
+                                 f"(tried origin/HEAD, {', '.join(BASES)})")
         r = _git(repo, "worktree", "add", "--no-track", "-b", branch,
                  str(path), base)
     if r.returncode != 0:
@@ -131,12 +172,15 @@ def prepare(repo, slug):
     return path
 
 
-def session_dirs(task_file, backlog_root, dirs):
+def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
     """The dirs the session may write to: each repo dir replaced by the
-    task's worktree in it, unless the task declares `workdir: main`."""
+    task's worktree in it, unless the task or its project (a repo that is not
+    code, like ~/Personal) declares `workdir: main`."""
     workdir = tasks.task_workdir(task_file)
     if workdir is None:
         raise WorkspaceError(f"{task_file}: unknown workdir: value")
+    if project_workdir == tasks.WORKDIR_MAIN:
+        workdir = tasks.WORKDIR_MAIN
     slug = Path(task_file).stem
     backlog = Path(backlog_root).resolve()
     out = []
@@ -164,77 +208,121 @@ def _worktrees(repo):
     return out
 
 
-def _pr_state(repo, branch):
-    """MERGED, CLOSED, OPEN, or None when there is no PR or gh cannot tell."""
+def _pr(repo, branch):
+    """`(state, head_oid)` of the branch's PR (state MERGED, CLOSED or OPEN),
+    or `(None, None)` when there is none or gh cannot tell."""
     try:
-        r = subprocess.run(["gh", "pr", "view", branch, "--json", "state",
-                            "-q", ".state"], cwd=str(repo),
+        r = subprocess.run(["gh", "pr", "view", branch, "--json",
+                            "state,headRefOid", "-q",
+                            '.state + " " + .headRefOid'], cwd=str(repo),
                            capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        return None
-    if r.returncode != 0:
-        return None
-    return r.stdout.strip() or None
+        return None, None
+    parts = r.stdout.split()
+    if r.returncode != 0 or len(parts) != 2:
+        return None, None
+    return parts[0], parts[1]
 
 
-def _finished(repo, branch):
-    """"merged" when origin/main contains the branch or its PR was merged
-    (a squash merge leaves no ancestry, but the commits live on GitHub),
-    "closed" when its PR was closed unmerged, None while still in flight."""
-    if (_has_ref(repo, "origin/main") and _git(
-            repo, "merge-base", "--is-ancestor", branch,
-            "origin/main").returncode == 0):
+def _contains(repo, ancestor, ref):
+    """True when `ref` contains `ancestor`; False too when either is unknown."""
+    return _git(repo, "merge-base", "--is-ancestor", ancestor,
+                ref).returncode == 0
+
+
+def _finished(repo, branch, base):
+    """"merged" when the default branch contains the branch, or when its PR
+    was merged and the merged head contains every local commit (a squash
+    merge leaves no ancestry; a local commit made after the merge keeps the
+    task in flight). "closed" when its PR was closed unmerged. None while
+    still in flight."""
+    if base and _contains(repo, branch, base):
         return "merged"
-    return {"MERGED": "merged", "CLOSED": "closed"}.get(_pr_state(repo, branch))
+    state, head = _pr(repo, branch)
+    if state == "MERGED" and _contains(repo, branch, head):
+        return "merged"
+    return "closed" if state == "CLOSED" else None
+
+
+def _reap_one(repo, path, branch, base):
+    finished = _finished(repo, branch, base)
+    if finished is None:
+        return None
+    if _git(path, "status", "--porcelain").stdout.strip():
+        return "dirty"
+    if _git(repo, "worktree", "remove", str(path)).returncode != 0:
+        return "dirty"
+    # Only a merged branch is dropped, and everything on it is merged; a
+    # closed PR's branch is kept, so nothing committed is ever lost.
+    if finished == "merged":
+        _git(repo, "branch", "-D", branch)
+    return "removed"
 
 
 def reap(dirs):
     """Remove finished task worktrees in the repos among `dirs`: a list of
-    `(path, outcome)`, outcome one of "removed" or "dirty"."""
+    `(path, outcome)`, outcome one of "removed", "dirty" or "error"."""
     out = []
     for d in dirs:
         if not repo_toplevel(d):
             continue
         repo = Path(d).resolve()
         agent_dir = repo / WORKTREES_DIRNAME
+        _git(repo, "worktree", "prune")
         candidates = [(path, branch) for path, branch in _worktrees(repo)
                       if path.resolve().parent == agent_dir
                       and branch == BRANCH_PREFIX + path.name]
         if not candidates:
             continue
-        try:
-            _git(repo, "fetch", "--quiet", "origin", "main", timeout=120)
-        except subprocess.TimeoutExpired:
-            pass
+        base = _fetch_base(repo)
         for path, branch in candidates:
-            finished = _finished(repo, branch)
-            if finished is None:
-                continue
-            if _git(path, "status", "--porcelain").stdout.strip():
-                out.append((path, "dirty"))
-                continue
-            if _git(repo, "worktree", "remove", str(path)).returncode != 0:
-                out.append((path, "dirty"))
-                continue
-            # A merged branch is safe to drop; a closed PR's branch is kept,
-            # so nothing committed is ever lost.
-            if finished == "merged":
-                _git(repo, "branch", "-D", branch)
-            out.append((path, "removed"))
+            try:
+                outcome = _reap_one(repo, path, branch, base)
+            except subprocess.TimeoutExpired:
+                outcome = "error"
+            if outcome:
+                out.append((path, outcome))
     return out
 
 
+BLOCKED_NOTE = ("- {date}: the launcher could not prepare this task's worktree, "
+                "so no session ran: {error}. Fix the repo state (e.g. a branch "
+                "checked out in the main checkout), then set the task back to "
+                "`ready`.\n")
+
+
+def _block(task_file, backlog_root, error):
+    """Park the task the gatekeeper already claimed: left `in-progress`, it
+    would sit unreported until the stuck-task repair and then fail again."""
+    date = datetime.now().strftime("%F")
+    tasks.set_status(Path(task_file), "blocked",
+                     BLOCKED_NOTE.format(date=date, error=error))
+    with open(Path(backlog_root) / "NEEDS-HUMAN.md", "a") as f:
+        f.write(f"- [ ] {Path(task_file).name}: worktree could not be "
+                f"prepared ({error}) - fix the repo, then set it `ready`\n")
+
+
 def _main(argv):
-    if len(argv) < 4 or argv[1] != "dirs":
+    if len(argv) == 2 and argv[1] == "session-cwd":
+        d = session_cwd()
+        d.mkdir(parents=True, exist_ok=True)
+        print(d)
+        return 0
+    if len(argv) < 5 or argv[1] != "dirs":
         print(__doc__, file=sys.stderr)
         return 2
-    task_file, backlog_root, *dirs = argv[2:]
+    task_file, backlog_root, project_workdir, *dirs = argv[2:]
     try:
-        for d in session_dirs(task_file, backlog_root, dirs):
-            print(d)
+        out = session_dirs(task_file, backlog_root, dirs, project_workdir)
     except (WorkspaceError, OSError, subprocess.TimeoutExpired) as e:
         print(f"workspace: {e}", file=sys.stderr)
+        try:
+            _block(task_file, backlog_root, e)
+        except OSError as e2:
+            print(f"workspace: could not block the task: {e2}", file=sys.stderr)
         return 1
+    for d in out:
+        print(d)
     return 0
 
 

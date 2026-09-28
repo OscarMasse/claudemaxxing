@@ -124,8 +124,14 @@ class WorkspaceTest(unittest.TestCase):
         git(wt, "add", name)
         git(wt, "commit", "-q", "-m", name)
 
-    def reap(self, pr_state=None):
-        with mock.patch.object(workspace, "_pr_state", return_value=pr_state):
+    def reap(self, pr_state=None, head=None):
+        """Reap with gh answering `pr_state`, its merged head defaulting to
+        the task branch's current tip."""
+        if pr_state and head is None:
+            head = git(self.repo, "rev-parse", "--verify", "-q",
+                       "agent/rankr-fix") if (self.repo / ".agent-worktrees"
+                                                / "rankr-fix").exists() else "0" * 40
+        with mock.patch.object(workspace, "_pr", return_value=(pr_state, head)):
             return workspace.reap([str(self.repo), str(self.backlog)])
 
     def test_reap_keeps_an_unmerged_worktree(self):
@@ -157,6 +163,35 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(self.reap("MERGED"), [(wt, "dirty")])
         self.assertTrue((wt / "wip.txt").exists())
 
+    def test_reap_keeps_commits_made_after_a_squash_merged_pr(self):
+        wt = Path(self.dirs(self.repo)[0])
+        self.commit_in(wt, "a.txt")
+        merged_head = git(wt, "rev-parse", "HEAD")
+        self.commit_in(wt, "b.txt")  # follow-up slice, not pushed
+        self.assertEqual(self.reap("MERGED", merged_head), [])
+        self.assertTrue(wt.exists())
+
+    def test_default_branch_named_master(self):
+        repo = make_repo(self.root, "assets")
+        git(repo, "branch", "-q", "-m", "main", "master")
+        subprocess.run(["git", "-C", str(self.root / "assets.git"), "branch",
+                        "-q", "-m", "main", "master"], check=True)
+        git(repo, "fetch", "-q", "--prune", "origin")
+        git(repo, "remote", "set-head", "origin", "master")
+        self.assertFalse(workspace._has_ref(repo, "origin/main"))
+        wt = Path(self.dirs(repo)[0])
+        self.assertEqual(git(wt, "rev-parse", "HEAD"),
+                         git(repo, "rev-parse", "origin/master"))
+
+    def test_worktree_deleted_by_hand_is_recreated(self):
+        import shutil
+        wt = Path(self.dirs(self.repo)[0])
+        self.commit_in(wt)
+        head = git(wt, "rev-parse", "HEAD")
+        shutil.rmtree(wt)
+        self.assertEqual(self.dirs(self.repo), [str(wt)])
+        self.assertEqual(git(wt, "rev-parse", "HEAD"), head)
+
     def test_reap_ignores_worktrees_it_did_not_create(self):
         other = self.repo / ".agent-worktrees" / "rankr-topic"
         git(self.repo, "worktree", "add", "-q", "-b", "someone-else",
@@ -168,11 +203,20 @@ class WorkspaceTest(unittest.TestCase):
         task = self.write_task("ghost.md", "workdir: checkout\n")
         r = subprocess.run(
             ["python3", str(Path(workspace.__file__)), "dirs", str(task),
-             str(self.backlog), str(self.repo)],
+             str(self.backlog), "worktree", str(self.repo)],
             capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertEqual(r.stdout, "")
         self.assertIn("workdir", r.stderr)
+        # The claimed task is parked where the owner sees it, not left
+        # in-progress for the stuck-task repair to relaunch into the wall.
+        self.assertIn("status: blocked", task.read_text())
+        self.assertIn("ghost.md", (self.backlog / "NEEDS-HUMAN.md").read_text())
+
+    def test_project_workdir_main_keeps_every_main_checkout(self):
+        self.assertEqual(workspace.session_dirs(self.task, self.backlog,
+                                                [str(self.repo)], "main"),
+                         [str(self.repo)])
 
 
 if __name__ == "__main__":

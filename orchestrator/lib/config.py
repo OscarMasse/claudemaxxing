@@ -71,6 +71,7 @@ CLI (used by run.sh so shell scripts never parse the config themselves):
   python3 lib/config.py <config.yaml> account-projects <name>
   python3 lib/config.py <config.yaml> project-dirs <name>
   python3 lib/config.py <config.yaml> project-account <name>
+  python3 lib/config.py <config.yaml> project-workdir <name>  # worktree|main
   python3 lib/config.py <config.yaml> digest-file      # today/tomorrow's digest
                                                        # path per digest_time
                                                        # (ORCH_NOW overrides
@@ -295,7 +296,11 @@ def accounts(cfg):
 # ignored: a misspelled `class: expedit` or a leftover `priority: 5` would
 # otherwise change the launch order silently.
 PROJECT_KEYS = ("name", "account", "dirs", "rank", "class",
-                "local_only_default")
+                "local_only_default", "workdir")
+# `workdir: main` exempts a whole project from per-task worktrees
+# (lib/workspace.py): for a repo that is a notes store, not code (~/Personal),
+# where every task commits in place. Absent = a worktree per task.
+PROJECT_WORKDIRS = ("worktree", "main")
 PROJECT_CLASSES = ("standard", "expedite")
 # The project `priority` was a hard first sort key: every task of a
 # better-ranked project, even a `low` one, launched before any task of the
@@ -337,6 +342,10 @@ def projects(cfg):
         if cls not in PROJECT_CLASSES:
             raise ValueError(f"config: project {p['name']!r} has unknown class "
                              f"{cls!r} (expected one of {', '.join(PROJECT_CLASSES)})")
+        workdir = str(p.get("workdir", "worktree"))
+        if workdir not in PROJECT_WORKDIRS:
+            raise ValueError(f"config: project {p['name']!r} has unknown workdir "
+                             f"{workdir!r} (expected one of {', '.join(PROJECT_WORKDIRS)})")
         rank = p.get("rank", 100)
         if not isinstance(rank, int) or isinstance(rank, bool):
             raise ValueError(f"config: project {p['name']!r} rank {rank!r} "
@@ -348,6 +357,7 @@ def projects(cfg):
             "rank": rank,
             "expedite": cls == "expedite",
             "local_only_default": bool(p.get("local_only_default", False)),
+            "workdir": workdir,
         }
     return out
 
@@ -428,6 +438,13 @@ def _dispatch(argv):
             print(f"config: unknown project {argv[3]!r}", file=sys.stderr)
             return 2
         print(_fmt(p["local_only_default"]))
+        return 0
+    if cmd == "project-workdir":
+        p = projects(cfg).get(argv[3])
+        if p is None:
+            print(f"config: unknown project {argv[3]!r}", file=sys.stderr)
+            return 2
+        print(p["workdir"])
         return 0
     if cmd == "project-account":
         p = projects(cfg).get(argv[3])

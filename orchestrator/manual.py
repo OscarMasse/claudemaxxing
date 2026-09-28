@@ -108,7 +108,7 @@ def _coming(root, unmet, listed):
 
 
 def _status(root, name):
-    path = tasks.task_path(root, name)
+    path = Path(root) / "tasks" / f"{name}.md"
     return tasks._frontmatter(path).get("status") if path.is_file() else None
 
 

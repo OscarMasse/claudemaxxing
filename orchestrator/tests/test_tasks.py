@@ -292,6 +292,61 @@ class TestPick(unittest.TestCase):
                    priority="high")
         self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
 
+    def test_interactive_task_is_never_picked(self):
+        write_task(self.root, "live.md", project="side-projects", status="ready",
+                   priority="high", mode="interactive")
+        write_task(self.root, "bg.md", project="side-projects", status="ready",
+                   priority="low")
+        self.assertTrue(self.pick()["path"].endswith("bg.md"))
+        self.assertEqual([t["path"] for t in tasks.launch_order(
+            self.root, PROJECTS, "personal", count=5)],
+            [str(self.root / "tasks" / "bg.md")])
+
+    def test_mode_defaults_to_autonomous(self):
+        write_task(self.root, "a.md", project="side-projects", status="ready")
+        write_task(self.root, "b.md", project="side-projects", status="ready",
+                   mode="autonomous", created="2026-09-01")
+        self.assertEqual(len(tasks.pick_multi(self.root, PROJECTS, "personal", 5)), 2)
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
+        self.assertEqual(tasks.interactive(self.root, PROJECTS), [])
+
+    def test_unknown_mode_is_misconfigured_and_not_picked(self):
+        write_task(self.root, "m.md", project="side-projects", status="ready",
+                   mode="manual")
+        self.assertIsNone(self.pick())
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
+                         [("m.md", "mode=manual")])
+        self.assertEqual(tasks.interactive(self.root, PROJECTS), [])
+
+    def test_resolve_refuses_an_interactive_task(self):
+        write_task(self.root, "live.md", project="side-projects", status="ready",
+                   mode="interactive", prerequisites="ghost")
+        self.assertEqual(
+            tasks.resolve(self.root, PROJECTS, "personal", "live"),
+            (None, [], "mode=interactive (run it in an interactive session)"))
+
+    def test_interactive_lists_ready_ones_in_queue_order_with_unmet(self):
+        write_task(self.root, "dep.md", project="side-projects", status="ready")
+        write_task(self.root, "late.md", project="side-projects", status="ready",
+                   mode="interactive", priority="low", created="2026-09-02")
+        write_task(self.root, "gated.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="high",
+                   prerequisites="dep")
+        write_task(self.root, "early.md", project="side-projects", status="ready",
+                   mode="interactive", priority="low", created="2026-09-01")
+        write_task(self.root, "idle.md", project="side-projects", status="inbox",
+                   mode="interactive")
+        self.assertEqual(tasks.interactive(self.root, PROJECTS), [
+            ("gated.md", "high", ["dep"]),
+            ("early.md", "low", []),
+            ("late.md", "low", []),
+        ])
+
+    def test_blocked_excludes_interactive_tasks(self):
+        write_task(self.root, "live.md", project="side-projects", status="ready",
+                   mode="interactive", prerequisites="ghost")
+        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+
     def test_orphaned_reports_unknown_project(self):
         write_task(self.root, "ghost.md", project="typo", status="ready")
         write_task(self.root, "ok.md", project="side-projects", status="ready")

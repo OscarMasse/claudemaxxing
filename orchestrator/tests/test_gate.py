@@ -657,6 +657,15 @@ class TestGate(unittest.TestCase):
         r = run_gate(self.root, self.env, arg="status")
         self.assertIn("orphaned task=t2.md project=typo", r.stdout)
 
+    def test_status_shows_interactive_task(self):
+        self.write_task("t3.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ndelivery: branch\n"
+                        "mode: interactive\nprerequisites: dep other\n---\n")
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("interactive task=t3.md priority=high unmet=dep,other",
+                      r.stdout)
+        self.assertNotIn("blocked task=t3.md", r.stdout)
+
     def test_notifications_marked_once(self):
         (self.root / "NEEDS-HUMAN.md").write_text(
             "# Needs human\n\n- [ ] task-x: which color?\n")

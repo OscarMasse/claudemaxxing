@@ -7,6 +7,9 @@ priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low),
 prerequisites (space-separated task basenames, `.md` suffix optional).
 
+Only tasks/*.md is ever scheduled. Done tasks move to tasks/archive/ (see
+`archive_done`); lookups by name resolve both places (see `task_path`).
+
 Eligibility: `status: ready`, and the task's `project:` must exist in the
 config's project registry AND belong to the account currently being scheduled.
 A task without a `project:` key routes to the project named "default" when one
@@ -190,18 +193,37 @@ def _prereq_names(fm):
     return [n[:-3] if n.endswith(".md") else n for n in names]
 
 
+ARCHIVE_DIR = "archive"
+
+
+def task_path(root, name):
+    """The file of task `name`: tasks/<name>.md, else tasks/archive/<name>.md
+    when only the archived copy exists. A live file always wins, so a task
+    copied back out of the archive to be reopened is the one read. When
+    neither exists this is the live path, for callers to report as missing."""
+    live = Path(root) / "tasks" / f"{name}.md"
+    archived = Path(root) / "tasks" / ARCHIVE_DIR / f"{name}.md"
+    return archived if not live.exists() and archived.exists() else live
+
+
+def _is_done(root, name):
+    """Whether task `name` is finished. A file in tasks/archive/ is done by
+    definition, whatever its frontmatter says: only `archive_done` puts it
+    there. A task that exists nowhere is not done (fail closed)."""
+    path = task_path(root, name)
+    if path.parent.name == ARCHIVE_DIR:
+        return True
+    return path.exists() and _frontmatter(path).get("status") == "done"
+
+
 def _unmet_prerequisites(root, fm):
-    """Names of this task's declared prerequisites that are not `status: done`.
-    Resolution: basename -> tasks/<name>.md. A prerequisite file that does not
-    exist counts as unmet (fail closed), it never raises.
+    """Names of this task's declared prerequisites that are not done.
+    Resolution: basename -> tasks/<name>.md, else tasks/archive/<name>.md
+    (see `task_path`). A prerequisite file that does not exist counts as unmet
+    (fail closed), it never raises.
     Only the prerequisite's own status is read here, not its prerequisites in
     turn: no recursion happens, so a prerequisite cycle cannot loop."""
-    unmet = []
-    for name in _prereq_names(fm):
-        path = Path(root) / "tasks" / f"{name}.md"
-        if not path.exists() or _frontmatter(path).get("status") != "done":
-            unmet.append(name)
-    return unmet
+    return [name for name in _prereq_names(fm) if not _is_done(root, name)]
 
 
 def _own_priority(fm):
@@ -438,7 +460,7 @@ def resolve(root, projects, account, ref):
     stands. Naming a task bypasses the ORDER, never the eligibility rules: a
     task the gatekeeper would refuse is refused here too, and said so."""
     name = task_name(ref)
-    path = Path(root) / "tasks" / f"{name}.md"
+    path = task_path(root, name)
     if not path.is_file():
         return None, [], "no such task"
     fm = _frontmatter(path)
@@ -798,3 +820,36 @@ def launch_order(root, projects, account, count,
             due.append(t)
         out += _take(due, count - len(out), slots)
     return _pad_parallel(out, queue, count, slots)
+
+
+def archive_done(root, now, ttl_s):
+    """Move every `done` task from tasks/ to tasks/archive/: list of filenames.
+
+    This is the one archiving step, run by the gatekeeper on every tick, so a
+    task set `done` by a session or by hand leaves the live backlog without
+    anyone having to remember a `mv`. The scheduler and the sessions keep
+    globbing tasks/*.md only; lookups by name go through `task_path`, which
+    also resolves the archive.
+
+    A file modified less than `ttl_s` ago is left alone, as in `repair_stuck`:
+    the session that just set it `done` may still be writing its notes or
+    committing it, and moving the file under it would make a later append
+    recreate a frontmatter-less stub at the old path. At the lock TTL no
+    working session can still hold the file.
+
+    An archived copy of the same name is replaced: the live file is the one a
+    reopened task was worked from, so it is the newer record."""
+    archive = Path(root) / "tasks" / ARCHIVE_DIR
+    moved = []
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md" or _frontmatter(p).get("status") != "done":
+            continue
+        try:
+            if now - p.stat().st_mtime < ttl_s:
+                continue
+            archive.mkdir(exist_ok=True)
+            p.replace(archive / p.name)
+        except OSError:
+            continue
+        moved.append(p.name)
+    return moved

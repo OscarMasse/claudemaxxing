@@ -502,6 +502,10 @@ def tick(p):
     # turn yet, and the whole point of refusing is to be noticed.
     for task_name, problem in tasks.misconfigured(p["root"], projs):
         log(p, f"unschedulable task={task_name}: {problem}")
+    # Done tasks leave the live backlog here, the one archiving step: sessions
+    # and the owner only ever set `done`, never move files themselves.
+    for task_name in tasks.archive_done(p["root"], time.time(), LOCK_TTL_S):
+        log(p, f"archived task={task_name} to tasks/{tasks.ARCHIVE_DIR}/")
     # Before any account is scheduled, so a task freed here is eligible in the
     # very same tick rather than waiting 30 minutes for the next one.
     for task_name, hours in tasks.repair_stuck(p["root"], time.time(), LOCK_TTL_S,

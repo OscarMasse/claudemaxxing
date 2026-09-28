@@ -337,10 +337,37 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "idle.md", project="side-projects", status="inbox",
                    mode="interactive")
         self.assertEqual(tasks.interactive(self.root, PROJECTS), [
-            ("gated.md", "high", ["dep"]),
-            ("early.md", "low", []),
-            ("late.md", "low", []),
+            ("gated.md", "high", ["dep"], None),
+            ("early.md", "low", [], None),
+            ("late.md", "low", [], None),
         ])
+
+    def test_interactive_puts_due_soon_first_earliest_deadline_first(self):
+        write_task(self.root, "urgent.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="high")
+        write_task(self.root, "tomorrow.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="low",
+                   due="2026-09-29")
+        write_task(self.root, "today.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="medium",
+                   due="2026-09-28")
+        write_task(self.root, "far.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="low",
+                   due="2026-12-01")
+        order = [t[0] for t in tasks.interactive(self.root, PROJECTS,
+                                                 today=date(2026, 9, 28))]
+        self.assertEqual(order, ["today.md", "tomorrow.md", "urgent.md",
+                                 "far.md"])
+
+    def test_interactive_overdue_comes_first_and_reports_its_due(self):
+        write_task(self.root, "urgent.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="high")
+        write_task(self.root, "late.md", project="work", status="ready",
+                   delivery="local", mode="interactive", priority="low",
+                   due="2026-09-20")
+        self.assertEqual(
+            tasks.interactive(self.root, PROJECTS, today=date(2026, 9, 28))[0],
+            ("late.md", "low", [], date(2026, 9, 20)))
 
     def test_blocked_excludes_interactive_tasks(self):
         write_task(self.root, "live.md", project="side-projects", status="ready",

@@ -14,8 +14,9 @@ enumerates its known spellings:
   `gh -R owner/repo pr comment`);
 - flags placed after the positional arguments (`git push origin b --force`).
 
-Usage: python3 lib/permissions.py <delivery>   (one rule per line; an empty
-delivery means the deliveryless digest/auto modes)
+Usage: python3 lib/permissions.py <delivery> [<readonly_dir>...]
+(one rule per line; an empty delivery means the deliveryless digest/auto
+modes; each readonly dir gets readonly_rules)
 """
 import sys
 
@@ -98,14 +99,54 @@ def credential_rules():
     return rules
 
 
-def deny_rules(delivery):
+# Mutating git subcommands denied under a read-only dir. Reads (`log`, `show`,
+# `diff`, `status`, `grep`, `ls-files`) stay allowed: reading the repo is why
+# it is handed to the session at all.
+GIT_MUTATING = (
+    "add", "am", "apply", "branch", "checkout", "cherry-pick", "clean",
+    "commit", "fetch", "gc", "merge", "mv", "pull", "rebase", "reset",
+    "restore", "revert", "rm", "stash", "switch", "tag", "worktree",
+)
+# Shell commands that write to their path arguments.
+SHELL_WRITERS = ("rm", "mv", "cp", "tee", "touch", "mkdir", "rmdir", "ln",
+                 "sed -i", "chmod", "truncate")
+
+
+def readonly_rules(path):
+    """Writes under an optional dir the task did not declare in `uses:`
+    (lib/workspace.py): the session reads its main checkout, where the owner
+    works, so it must not change it.
+
+    The file tools are denied outright on `<path>/**`. Bash is a best effort,
+    as for every family here: mutating git subcommands through `git -C
+    <path>`, redirections into the path, and the usual writing commands with
+    the path among their arguments. Accepted gaps: a command that reaches the
+    dir without spelling its absolute path (`cd <path> && git commit`, a
+    relative or `~` path, a variable), a writer not listed (a script, `python
+    -c`, `dd`), and `git -C <path>/sub`. The worktree path and the backlog
+    root stay writable, since they do not start with `<path>/`, but a sibling
+    whose name extends the path (`<path>-old`) is caught by the redirect and
+    writer forms: accepted, a false refusal costs less than a missed write."""
+    path = str(path).rstrip("/")
+    rules = [f"{tool}({path}/**)" for tool in ("Edit", "Write", "NotebookEdit")]
+    cmds = [f"git -C {path} {sub}*" for sub in GIT_MUTATING]
+    cmds += [f"*>*{path}*"]
+    cmds += [f"{w} *{path}*" for w in SHELL_WRITERS]
+    return rules + [f"Bash({c})" for c in _with_rtk(cmds)]
+
+
+def deny_rules(delivery, readonly_dirs=()):
     rules = []
     if delivery != "pr":
         rules += push_rules() + gh_write_rules()
     rules += irreversible_rules()
     bash = [f"Bash({c})" for c in rules]
-    return bash + credential_rules()
+    out = bash + credential_rules()
+    for d in readonly_dirs:
+        out += readonly_rules(d)
+    return out
 
 
 if __name__ == "__main__":
-    print("\n".join(deny_rules(sys.argv[1] if len(sys.argv) > 1 else "")))
+    print("\n".join(deny_rules(sys.argv[1] if len(sys.argv) > 1 else "",
+                                sys.argv[2:])))

@@ -97,6 +97,40 @@ class RunShTest(unittest.TestCase):
                            capture_output=True, text=True).stdout.strip(),
             "agent/t")
 
+    def optional_assets(self):
+        from tests.test_workspace import make_repo
+        root = self.root.resolve()
+        repo, assets = make_repo(root, "rankr"), make_repo(root, "pokemon-assets")
+        cfg = Path(self.env["ORCH_CONFIG"])
+        cfg.write_text(cfg.read_text().replace(
+            f"dirs: {self.root}/projects",
+            f"dirs: {repo}\n    optional_dirs: [{assets}]"))
+        return assets
+
+    def disallowed(self):
+        args = (self.root / "args.txt").read_text().splitlines()
+        rest = args[args.index("--disallowedTools") + 1:]
+        end = next((i for i, a in enumerate(rest) if a.startswith("--")), len(rest))
+        return rest[:end]
+
+    def test_undeclared_optional_dir_is_readonly_main_checkout(self):
+        assets = self.optional_assets()
+        self.run_session(40, "ready")
+        self.assertIn(str(assets), self.add_dirs())
+        self.assertFalse((assets / ".agent-worktrees").exists())
+        self.assertIn(f"Write({assets}/**)", self.disallowed())
+        self.assertIn(f"Bash(git -C {assets} commit*)", self.disallowed())
+
+    def test_declared_optional_dir_gets_a_worktree_and_no_deny(self):
+        assets = self.optional_assets()
+        self.task.write_text(self.task.read_text().replace(
+            "delivery: local", "delivery: local\nuses: [pokemon-assets]"))
+        self.run_session(40, "ready")
+        wt = assets / ".agent-worktrees" / "t"
+        self.assertIn(str(wt), self.add_dirs())
+        self.assertNotIn(str(assets), self.add_dirs())
+        self.assertFalse(any(str(assets) in r for r in self.disallowed()))
+
     def test_session_is_not_launched_without_its_workspace(self):
         self.task.write_text(self.task.read_text().replace(
             "delivery: local", "delivery: local\nworkdir: checkout"))

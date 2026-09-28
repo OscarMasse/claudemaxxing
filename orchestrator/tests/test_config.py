@@ -113,6 +113,13 @@ class TestSections(unittest.TestCase):
             "accounts:\n  - name: a\n"
             "projects:\n  - name: p\n    account: a\n" + extra))
 
+    def test_project_optional_dirs_default_empty_and_expand(self):
+        self.assertEqual(config.projects(self._project_cfg(""))["p"]["optional_dirs"], [])
+        projs = config.projects(self._project_cfg(
+            "    optional_dirs: [~/side-projects/pokemon-assets]\n"))
+        self.assertEqual(projs["p"]["optional_dirs"],
+                         [os.path.expanduser("~/side-projects/pokemon-assets")])
+
     def test_project_expedite_class(self):
         projs = config.projects(self._project_cfg("    class: expedite\n"))
         self.assertIs(projs["p"]["expedite"], True)

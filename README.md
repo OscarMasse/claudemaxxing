@@ -95,7 +95,10 @@ A single session: `orchestrator/run.sh <minutes> [--account <name>]`.
 Dry run: `dry_run: true` in the config, then watch `state/gatekeeper.log` for a night.
 Rehearse a whole night in seconds, in a throwaway backlog with a stubbed `claude` and zero tokens: `orchestrator/e2e-sandbox.sh`.
 
-To run the engine from this checkout against a separate backlog, set `BACKLOG_ROOT` when installing (`BACKLOG_ROOT=~/backlog orchestrator/install.sh`) and put your real config at `$BACKLOG_ROOT/config.yaml`; it lives outside this repo and is never committed.
+Install against your backlog with `BACKLOG_ROOT=~/backlog orchestrator/install.sh` and put your real config at `$BACKLOG_ROOT/config.yaml`; it lives outside this repo and is never committed.
+The install records that root in `~/.config/claudemaxxing/backlog-root`, so an interactive shell (`gate.py status`, `manual.sh`) resolves the same backlog as the scheduled jobs without exporting anything.
+The root resolves from `ORCH_ROOT`, then `BACKLOG_ROOT`, then that file; with none of them every entry point exits with an error instead of silently reading the repo's example data, which only `ORCH_EXAMPLE=1` selects (tests, experiments).
+Human-facing output (`gate.py status`, manual dry runs and starts) prints `backlog=<path>` on its first line.
 
 Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sleep has no software override); lid open on AC power plus `sudo pmset -c sleep 0` is the working setup.
 

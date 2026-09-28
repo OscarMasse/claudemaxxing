@@ -307,7 +307,12 @@ def pick_account(cfg, wanted):
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    p = gate.paths()
+    try:
+        p = gate.paths()
+    except config.BacklogRootError as e:
+        print(f"manual: {e}", file=sys.stderr)
+        return 2
+    print(f"backlog={p['root']}")
     cfg = config.load(p["config"])
     projs = config.projects(cfg)
     try:
@@ -336,8 +341,8 @@ def main(argv=None):
         missing = [tasks.task_name(r) for r in plan.refs
                    if tasks.resolve(p["root"], projs, acct["name"], r)[2] == "no such task"]
         if missing:
-            print(f"manual: no such task in {p['root'] / 'tasks'}: {', '.join(missing)}"
-                  f" (is BACKLOG_ROOT set?)", file=sys.stderr)
+            print(f"manual: no such task in {p['root'] / 'tasks'}: {', '.join(missing)}",
+                  file=sys.stderr)
             return 2
     if args.check:
         return 0

@@ -245,8 +245,7 @@ def recent_changes(derived, now):
 
 def _root():
     """The backlog root, resolved exactly as gate.py resolves it."""
-    root = os.environ.get("ORCH_ROOT")
-    return Path(root) if root else config.backlog_root()
+    return config.backlog_root()
 
 
 def _account(name):
@@ -259,7 +258,12 @@ def _account(name):
 
 def _main(argv):
     cmd, account = argv[1], argv[2]
-    state_dir = _root() / "orchestrator" / "state" / account
+    try:
+        state_dir = _root() / "orchestrator" / "state" / account
+    except config.BacklogRootError:
+        if cmd == "record":
+            return 0  # a status line must survive, and there is nowhere to log
+        raise
     if cmd == "record":
         # Called from a status line: never fail loudly, never print. The last
         # error is kept next to the history, and `gate.py status` shows it.

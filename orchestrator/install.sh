@@ -14,4 +14,11 @@ if [ ! -x "platform/$PLATFORM/install.sh" ]; then
   echo "no platform adapter for $PLATFORM, see platform/README.md" >&2
   exit 1
 fi
+# Record the backlog root so interactive shells (gate.py status, manual.sh)
+# resolve the same root as the scheduled jobs without BACKLOG_ROOT exported.
+# BACKLOG_ROOT wins; a reinstall without it keeps the recorded root.
+BACKLOG_ROOT="${BACKLOG_ROOT:-$(python3 lib/config.py backlog-root)}"
+BACKLOG_ROOT="$(cd "$BACKLOG_ROOT" && pwd)"
+export BACKLOG_ROOT
+echo "backlog=$BACKLOG_ROOT recorded in $(python3 lib/config.py record-root "$BACKLOG_ROOT")"
 exec "platform/$PLATFORM/install.sh"

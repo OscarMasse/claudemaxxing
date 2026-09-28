@@ -9,7 +9,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
+# Resolved by lib/config.py (env, then the file install.sh records); exits
+# non-zero with a message naming both when neither says where the backlog is.
+BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2
+export BACKLOG_ROOT
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
 mkdir -p "$STATE_ROOT"
 

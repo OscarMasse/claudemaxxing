@@ -46,17 +46,23 @@ legacy task files keep working unchanged.
 
 Resolution (the single place that decides which config file is live):
   1. `ORCH_CONFIG` env var, when set (explicit override, tests and one-offs).
-  2. `$BACKLOG_ROOT/config.yaml`, when it exists (the operator's real config,
+  2. `<backlog root>/config.yaml`, when it exists (the operator's real config,
      living outside the public repo so it can never be committed here).
-  3. The repo's own `orchestrator/config.yaml` (the documented example/default).
+  3. The repo's own `orchestrator/config.yaml` (the documented example), ONLY
+     when ORCH_EXAMPLE=1 asks for it (tests, e2e sandbox).
 `.yaml` is the preferred spelling and wins when both exist; `.yml` is still
 accepted at every step so an existing install keeps working without a rename.
-The backlog root itself is the `BACKLOG_ROOT` env var when set, else the repo
-root (the historical layout where the checkout doubles as the backlog root).
+The backlog root itself is, in order: the ORCH_ROOT env var, the BACKLOG_ROOT
+env var, the path recorded by install.sh in ROOT_FILE, and the repo root only
+under ORCH_EXAMPLE=1. With none of them, every entry point fails loudly
+(BacklogRootError) instead of silently reading the example data: on
+2026-09-26 and 2026-09-27 that silent fallback printed fake accounts as real
+alarms and made a manual launch drop every task as "no such task".
 
 CLI (used by run.sh so shell scripts never parse the config themselves):
   python3 lib/config.py resolve            # print the resolved config path
   python3 lib/config.py backlog-root       # print the resolved backlog root
+  python3 lib/config.py record-root <path> # write <path> to ROOT_FILE (install)
   python3 lib/config.py <config.yaml> get <key> [default]
   python3 lib/config.py <config.yaml> accounts
   python3 lib/config.py <config.yaml> first-account
@@ -84,11 +90,40 @@ def repo_root():
     return Path(__file__).resolve().parents[2]
 
 
+class BacklogRootError(RuntimeError):
+    """Neither the env nor the recorded file says where the backlog lives."""
+
+
+def root_file():
+    """The user-level file install.sh records the backlog root in, so an
+    interactive shell resolves the same root as the scheduled jobs."""
+    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(base) / "claudemaxxing" / "backlog-root"
+
+
+def example_requested():
+    """ORCH_EXAMPLE=1: the only way to get the repo's example data."""
+    return os.environ.get("ORCH_EXAMPLE") == "1"
+
+
 def backlog_root():
     """Where tasks/, digests/, NEEDS-HUMAN.md and orchestrator/state/ live:
-    the BACKLOG_ROOT env var when set, else the repo root."""
-    env = os.environ.get("BACKLOG_ROOT")
-    return Path(env).expanduser() if env else repo_root()
+    ORCH_ROOT, then BACKLOG_ROOT, then root_file(), then the repo root under
+    ORCH_EXAMPLE=1. Raises BacklogRootError when none applies."""
+    for var in ("ORCH_ROOT", "BACKLOG_ROOT"):
+        env = os.environ.get(var)
+        if env:
+            return Path(env).expanduser()
+    recorded = root_file()
+    if recorded.is_file():
+        text = recorded.read_text().strip()
+        if text:
+            return Path(text).expanduser()
+    if example_requested():
+        return repo_root()
+    raise BacklogRootError(
+        f"backlog root unknown: set BACKLOG_ROOT, or run install.sh to record "
+        f"it in {recorded} (ORCH_EXAMPLE=1 uses the repo's example data)")
 
 
 CONFIG_NAMES = ("config.yaml", "config.yml")
@@ -108,8 +143,9 @@ def _first_existing(directory):
 def resolve_path(root=None):
     """The live config file, in resolution order: ORCH_CONFIG env override,
     then <backlog root>/config.yaml (or .yml) when it exists, then the repo's
-    example orchestrator/config.yaml. `root` overrides the env-derived backlog
-    root (gate.py passes its ORCH_ROOT-aware root through here)."""
+    example orchestrator/config.yaml under ORCH_EXAMPLE=1 only. `root`
+    overrides backlog_root(). Raises BacklogRootError when the root has no
+    config and the example was not asked for."""
     explicit = os.environ.get("ORCH_CONFIG")
     if explicit:
         return Path(explicit).expanduser()
@@ -117,6 +153,10 @@ def resolve_path(root=None):
     found = _first_existing(root)
     if found is not None:
         return found
+    if not example_requested():
+        raise BacklogRootError(
+            f"no config.yaml in backlog root {root} (set BACKLOG_ROOT to the "
+            f"real backlog, or ORCH_EXAMPLE=1 for the repo's example config)")
     example = repo_root() / "orchestrator"
     return _first_existing(example) or example / CONFIG_NAMES[0]
 
@@ -319,6 +359,20 @@ def _fmt(v):
 
 
 def _main(argv):
+    try:
+        return _dispatch(argv)
+    except BacklogRootError as e:
+        print(f"config: {e}", file=sys.stderr)
+        return 2
+
+
+def _dispatch(argv):
+    if argv[1] == "record-root":
+        target = root_file()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(Path(argv[2]).expanduser().resolve()) + "\n")
+        print(target)
+        return 0
     if argv[1] == "resolve":
         print(resolve_path())
         return 0

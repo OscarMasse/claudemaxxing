@@ -14,10 +14,12 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 ORCH_DIR="$(pwd)"
-# The backlog root (tasks/, digests/, NEEDS-HUMAN.md, orchestrator/state/)
-# defaults to the repo root; export it so gate.py and lib/config.py resolve
-# the same config and state paths (config resolution lives in lib/config.py).
-export BACKLOG_ROOT="${BACKLOG_ROOT:-$(cd .. && pwd)}"
+# The backlog root (tasks/, digests/, NEEDS-HUMAN.md, orchestrator/state/) is
+# resolved by lib/config.py (env, then the file install.sh records) and
+# exported so gate.py resolves the same config and state paths. It exits
+# non-zero with a message naming both when neither says where the backlog is.
+BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2
+export BACKLOG_ROOT
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
 # launchd hands down a bare PATH (/usr/bin:/bin:...), so node and the homebrew
 # tools are missing and anything the session shells out to that needs them (a
@@ -52,7 +54,7 @@ if [ "$MODE" = "digest" ]; then SLICE_MIN=15; TASK_FILE=""; PROJECT=""; DELIVERY
 # All config access goes through lib/config.py (accounts inherit flat keys).
 # The live config file is resolved once, in the single place that owns the
 # order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yaml, then the repo default.
-CONFIG_FILE="$(python3 lib/config.py resolve)"
+CONFIG_FILE="$(python3 lib/config.py resolve)" || exit 2
 cfg() { python3 lib/config.py "$CONFIG_FILE" "$@"; }
 if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi
 

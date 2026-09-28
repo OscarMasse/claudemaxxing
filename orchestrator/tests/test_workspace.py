@@ -192,6 +192,25 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(self.dirs(self.repo), [str(wt)])
         self.assertEqual(git(wt, "rev-parse", "HEAD"), head)
 
+    def test_declared_branch_reuses_its_existing_worktree(self):
+        old = self.repo / ".agent-worktrees" / "rankr-old-name"
+        git(self.repo, "worktree", "add", "-q", "-b", "legacy-branch",
+            str(old), "origin/main")
+        task = self.write_task("rankr-fix.md", "branch: legacy-branch\n")
+        self.assertEqual(self.dirs(self.repo, task=task), [str(old)])
+
+    def test_declared_branch_without_worktree_is_attached_at_the_task_path(self):
+        git(self.repo, "branch", "legacy-branch", "origin/main")
+        task = self.write_task("rankr-fix.md", "branch: legacy-branch\n")
+        wt = Path(self.dirs(self.repo, task=task)[0])
+        self.assertEqual(wt, self.repo / ".agent-worktrees" / "rankr-fix")
+        self.assertEqual(git(wt, "branch", "--show-current"), "legacy-branch")
+
+    def test_declared_branch_in_the_main_checkout_is_refused(self):
+        task = self.write_task("rankr-fix.md", "branch: owner-feature\n")
+        with self.assertRaises(workspace.WorkspaceError):
+            self.dirs(self.repo, task=task)
+
     def test_reap_ignores_worktrees_it_did_not_create(self):
         other = self.repo / ".agent-worktrees" / "rankr-topic"
         git(self.repo, "worktree", "add", "-q", "-b", "someone-else",

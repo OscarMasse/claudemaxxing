@@ -25,7 +25,10 @@ the owner and to other concurrent sessions: never run `git checkout`, `git switc
 edit files there. Only a task declaring `workdir: main` works in the main checkout;
 it gets no worktree. If you picked the task yourself, create the worktree the same
 way (`git -C <repo> worktree add -b agent/<task> <repo>/.agent-worktrees/<task>
-origin/main`, or reuse it) before touching code. If `git status --short` in the
+origin/main`, or reuse it) before touching code. If the task's earlier work lives
+on a branch of another name, the task's `branch: <name>` frontmatter key makes the
+launcher reuse that branch and its worktree: add the key if it is missing, and
+switch to that worktree for this slice only if the branch is not in a main checkout. If `git status --short` in the
 directory you are about to branch or reset shows changes you did not make, stop:
 they are someone else's work.
 

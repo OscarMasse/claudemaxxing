@@ -206,6 +206,13 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(wt, self.repo / ".agent-worktrees" / "rankr-fix")
         self.assertEqual(git(wt, "branch", "--show-current"), "legacy-branch")
 
+    def test_declared_branch_only_on_the_remote_is_fetched_into_the_worktree(self):
+        git(self.repo, "push", "-q", "origin", "origin/main:refs/heads/pr-branch")
+        git(self.repo, "fetch", "-q", "origin")
+        task = self.write_task("rankr-fix.md", "branch: pr-branch\n")
+        wt = Path(self.dirs(self.repo, task=task)[0])
+        self.assertEqual(git(wt, "branch", "--show-current"), "pr-branch")
+
     def test_declared_branch_in_the_main_checkout_is_refused(self):
         task = self.write_task("rankr-fix.md", "branch: owner-feature\n")
         with self.assertRaises(workspace.WorkspaceError):

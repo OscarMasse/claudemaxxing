@@ -156,6 +156,11 @@ def prepare(repo, slug, declared_branch=None):
     _exclude_worktrees(repo)
     # A worktree deleted by hand stays registered and blocks `worktree add`.
     _git(repo, "worktree", "prune")
+    if (declared_branch and not _has_ref(repo, f"refs/heads/{declared_branch}")
+            and _has_ref(repo, f"origin/{declared_branch}")):
+        # Pushed from another checkout (a PR branch): take it from the remote.
+        _git(repo, "branch", "--no-track", declared_branch,
+             f"origin/{declared_branch}")
     if declared_branch and _has_ref(repo, f"refs/heads/{declared_branch}"):
         for wt, b in _worktrees(repo):
             if b == declared_branch:

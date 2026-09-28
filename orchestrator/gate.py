@@ -97,10 +97,10 @@ def idle_for_account(acct):
         return float(raw)
     # Claude Code stores transcripts under <config dir>/projects/<path-encoded-cwd>.
     # The headless sessions' project dir is excluded: they must not count as
-    # the owner's activity. run.sh cds into this directory before launching
-    # them, so that is their cwd - not the backlog root, where the owner's own
-    # interactive sessions run and must keep counting.
-    exclude = str(Path(__file__).resolve().parent).replace("/", "-")
+    # the owner's activity. run.sh starts them in workspace.session_cwd(), a
+    # directory outside every repo - not the backlog root, where the owner's
+    # own interactive sessions run and must keep counting.
+    exclude = workspace.transcripts_dirname(workspace.session_cwd())
     return activity.idle_minutes(Path(acct["claude_config_dir"]) / "projects",
                                  exclude, time.time())
 

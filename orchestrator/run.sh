@@ -129,11 +129,16 @@ fi
 # swaps each repo dir for the task's own worktree (created or reused), unless
 # the task declares `workdir: main`. Fail closed: a session that cannot get its
 # worktree is not launched, rather than launched in a shared checkout.
+# On failure it has already set the claimed task `blocked` with the reason.
 if [ -n "$TASK_FILE" ] && [ -n "$PROJECT" ] && [ "$MODE" = "orchestrate" ]; then
-  if ! DIRS="$(python3 lib/workspace.py dirs "$TASK_FILE" "$BACKLOG_ROOT" $DIRS 2>&1)"; then
-    echo "$(date '+%F %T') task=$(basename "$TASK_FILE") workspace failed, not launching: ${DIRS//$'\n'/ }" >> "$STATE_ROOT/runs.log"
+  WS_ERR="$STATE/workspace.$SLOT.txt"
+  if ! DIRS="$(python3 lib/workspace.py dirs "$TASK_FILE" "$BACKLOG_ROOT" \
+      "$(cfg project-workdir "$PROJECT")" $DIRS 2> "$WS_ERR")"; then
+    echo "$(date '+%F %T') task=$(basename "$TASK_FILE") workspace failed, not launching: $(tr '\n' ' ' < "$WS_ERR")" >> "$STATE_ROOT/runs.log"
+    rm -f "$WS_ERR"
     exit 1
   fi
+  rm -f "$WS_ERR"
   DIRS="$(printf '%s' "$DIRS" | tr '\n' ' ')"; DIRS="${DIRS% }"
 fi
 ADD_DIRS=(--add-dir "$BACKLOG_ROOT")
@@ -212,7 +217,7 @@ START="$(date '+%F %T')"
 # owner's problem, not a reason to lose the slice.
 PLATFORM="${ORCH_PLATFORM:-}"
 if [ -z "$PLATFORM" ] && [ "$(uname -s)" = "Darwin" ]; then PLATFORM=macos; fi
-KEEP_AWAKE="platform/${PLATFORM:-none}/keep-awake.sh"
+KEEP_AWAKE="$ORCH_DIR/platform/${PLATFORM:-none}/keep-awake.sh"
 if [ ! -x "$KEEP_AWAKE" ]; then KEEP_AWAKE=""; fi
 
 # The prompt goes through stdin: --add-dir is variadic and would swallow a
@@ -224,14 +229,21 @@ OUT_JSON="$STATE/result.$SLOT.json"
 # ("You've hit your session limit - resets 4:20am") was therefore unusable.
 ERR_FILE="$STATE/err.$SLOT.txt"
 : > "$ERR_FILE"
-printf '%s' "$PROMPT" | ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
-  python3 lib/with_timeout.py "$TIMEOUT_S" -- \
+# The session starts outside every repo (lib/workspace.py session_cwd): its
+# cwd is writable whatever --add-dir says, and used to be the engine's own
+# main checkout.
+if ! SESSION_CWD="$(python3 lib/workspace.py session-cwd)"; then
+  echo "$(date '+%F %T') session cwd failed, not launching" >&2
+  exit 1
+fi
+printf '%s' "$PROMPT" | ( cd "$SESSION_CWD" && ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
+  python3 "$ORCH_DIR/lib/with_timeout.py" "$TIMEOUT_S" -- \
   "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
   --settings "$ORCH_DIR/session-settings.json" \
   ${PERM_ARGS[@]+"${PERM_ARGS[@]}"} \
-  "${ADD_DIRS[@]}" \
+  "${ADD_DIRS[@]}" ) \
   > "$OUT_JSON" 2> "$ERR_FILE"
 CODE=$?
 cat "$ERR_FILE" >> "$STATE_ROOT/runs.out"

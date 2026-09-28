@@ -30,6 +30,7 @@ CFG = (
 FAKE_CLAUDE = """#!/bin/bash
 cat > "$FAKE_PROMPT_OUT"
 printf '%s\\n' "$@" > "$FAKE_ARGS_OUT"
+pwd -P > "$FAKE_ARGS_OUT.cwd"
 printf '{"total_cost_usd": 0.5, "duration_ms": %s, "result": "ok"}' "$FAKE_DURATION_MS"
 """
 
@@ -88,6 +89,9 @@ class RunShTest(unittest.TestCase):
         self.assertIn(str(wt), self.add_dirs())
         self.assertNotIn(str(repo), self.add_dirs())
         self.assertIn(str(wt), (self.root / "prompt.txt").read_text())
+        # Started outside every repo, not in the engine's own checkout.
+        cwd = (self.root / "args.txt.cwd").read_text().strip()
+        self.assertEqual(cwd, str((self.root / ".local/state/claudemaxxing/session").resolve()))
         self.assertEqual(
             subprocess.run(["git", "-C", str(wt), "branch", "--show-current"],
                            capture_output=True, text=True).stdout.strip(),

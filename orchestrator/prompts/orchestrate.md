@@ -111,6 +111,10 @@ Procedure:
 7. When the slice is nearly over (or the task's budget is spent): write a precise resume
    point in the task's `## Notes` (what is done, what is next, exact commands/files),
    set `status: ready` back if more work remains (or `done` if verification passed).
+   If the next step cannot start before a given time (a stack only up after 06:00,
+   a review due in the morning), also set `not_before: YYYY-MM-DDTHH:MM` (local
+   time; a date alone means midnight) in the frontmatter: the gatekeeper will not
+   relaunch the task before then. Never use `blocked` for a mere wait.
 8. Verification is mandatory before `done`, in two stages:
    a. Run exactly what the task's `verification` field says and record the result
       in `## Notes`.

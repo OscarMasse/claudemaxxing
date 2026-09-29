@@ -379,7 +379,7 @@ def tick_account(p, acct, projs):
                                         period_keys=keys,
                                         model_slots=model_slots,
                                         exclude=ladder,
-                                        today=now.date())
+                                        today=now.date(), now=now)
         # What a session costs is a property of the work, not of the slice it
         # was allotted: sessions do not fill their slice (measured median
         # utilisation here: 3%), so both the measured figure and the cold-start

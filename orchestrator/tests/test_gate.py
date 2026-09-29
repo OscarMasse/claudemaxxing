@@ -724,6 +724,15 @@ class TestGateJanitor(unittest.TestCase):
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("janitor compose down project=proj-a ok=True", log)
 
+    def test_optional_dirs_are_swept_too(self):
+        # A task that `uses:` an optional dir gets a worktree there, so its
+        # stacks and worktrees are the janitor's as well.
+        proj = self.root / "proj"
+        self.write_cfg(BASE_CFG + PERSONAL + PROJECTS.replace(
+            "    dirs: ~/projects\n", f"    optional_dirs: {proj}\n"))
+        run_gate(self.root, self.env)
+        self.assertEqual(self.downs(), "compose -p proj-a down --remove-orphans\n")
+
     def test_running_session_protects_stacks(self):
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)

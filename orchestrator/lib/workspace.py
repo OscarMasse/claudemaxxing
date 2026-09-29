@@ -300,7 +300,7 @@ def _reap_one(repo, path, branch, base):
     if _git(path, "status", "--porcelain").stdout.strip():
         return "dirty"
     if _git(repo, "worktree", "remove", str(path)).returncode != 0:
-        return "dirty"
+        return "error"
     # Only a merged branch is dropped, and everything on it is merged; a
     # closed PR's branch is kept, so nothing committed is ever lost.
     if finished == "merged":

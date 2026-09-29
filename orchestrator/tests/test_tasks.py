@@ -1080,12 +1080,13 @@ class TestNotBefore(unittest.TestCase):
         self.assertEqual(self.launched(datetime(2026, 9, 29, 23, 59)), [])
         self.assertEqual(self.launched(datetime(2026, 9, 30, 0, 0)), ["t.md"])
 
-    def test_aware_clock_compares_its_own_wall_clock(self):
+    def test_aware_clock_is_converted_to_local_time(self):
         self.task("2026-09-29T06:00")
-        tz = timezone(timedelta(hours=2))
-        self.assertEqual(self.launched(datetime(2026, 9, 29, 5, 0, tzinfo=tz)), [])
-        self.assertEqual(self.launched(datetime(2026, 9, 29, 6, 0, tzinfo=tz)),
-                         ["t.md"])
+        local = datetime(2026, 9, 29, 6, 0).astimezone()
+        # Same instant expressed in another zone: still the local 06:00.
+        other = local.astimezone(timezone(timedelta(hours=-7)))
+        self.assertEqual(self.launched(other - timedelta(minutes=1)), [])
+        self.assertEqual(self.launched(other), ["t.md"])
 
     def test_quoted_value_is_read(self):
         self.task('"2026-09-29T06:00"')

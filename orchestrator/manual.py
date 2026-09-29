@@ -79,7 +79,7 @@ class Plan:
                 f"budget={budget}")
 
 
-def _explicit_candidates(p, acct, projs, plan):
+def _explicit_candidates(p, acct, projs, plan, now=None):
     """The listed tasks launchable now, in list order. Drops (and reports)
     a task that can never launch as it stands; keeps one waiting on
     prerequisites that are still coming: listed later, or in progress.
@@ -88,7 +88,7 @@ def _explicit_candidates(p, acct, projs, plan):
     listed = {tasks.task_name(r) for r in plan.refs}
     cands, dropped = [], []
     for ref in list(plan.refs):
-        t, unmet, reason = tasks.resolve(root, projs, name, ref)
+        t, unmet, reason = tasks.resolve(root, projs, name, ref, now=now)
         if t is not None:
             cands.append(t)
             continue
@@ -126,7 +126,7 @@ def select(p, acct, projs, plan, now):
     model_slots.setdefault("fable", max(
         plan.fable_slots - gate.running_models(state).count("fable"), 0))
     if plan.mode == "tasks":
-        cands, dropped = _explicit_candidates(p, acct, projs, plan)
+        cands, dropped = _explicit_candidates(p, acct, projs, plan, now)
         for task_name, why in dropped:
             gate.log(p, f"account={name} manual dropped task={task_name}: {why}")
         cands = tasks.launchable(cands, free, model_slots)
@@ -232,7 +232,7 @@ def dry_run(p, acct, projs, plan, now):
         rows = []
         listed = {tasks.task_name(r) for r in plan.refs}
         for ref in plan.refs:
-            t, unmet, reason = tasks.resolve(p["root"], projs, name, ref)
+            t, unmet, reason = tasks.resolve(p["root"], projs, name, ref, now=now)
             if t is None:
                 if unmet and _coming(p["root"], unmet, listed):
                     why = f"launches once done: {' '.join(unmet)}"

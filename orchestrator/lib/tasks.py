@@ -377,10 +377,13 @@ def _declared_not_before(fm):
 
 def _deferred(fm, now):
     """True while the task's `not_before:` time is still in the future.
-    `now` may be timezone-aware (the gatekeeper's clock): its own wall clock
-    is what `not_before:` is compared with, since the key is local time."""
+    `now` may be timezone-aware (the gatekeeper's clock, in the account's
+    reset zone): it is converted to the machine's local time first, since
+    the key is local time."""
     when = _declared_not_before(fm)[1]
-    return when is not None and now.replace(tzinfo=None) < when
+    if now.tzinfo is not None:
+        now = now.astimezone().replace(tzinfo=None)
+    return when is not None and now < when
 
 
 def _nights(name, est_runs):

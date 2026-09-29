@@ -11,7 +11,7 @@
 # the duty period being consumed so a second tick the same night does not
 # repeat it, and the estimate-vs-actual line the planner learns from.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 SANDBOX="${1:-$(mktemp -d "${TMPDIR:-/tmp}/orch-e2e.XXXXXX")}"
 NIGHT="2026-09-08T02:30:00+02:00"  # Tuesday, 4 nights before the Thursday reset
 

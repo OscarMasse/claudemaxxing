@@ -1,7 +1,7 @@
 #!/bin/bash
 # launchd entrypoint: one tick = one decision per account, maybe several runs.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 # Backlog root: env (set by the launchd plist), else the file install.sh
 # records, resolved by lib/config.py (which exits non-zero, naming both, when
@@ -16,7 +16,6 @@ DECISION="$(python3 gate.py tick 2>> "$STATE_ROOT/gatekeeper.log")" || exit 0
 # accounts in the same tick). Format:
 #   RUN <account> <slice> <task> <model> <effort> <project> <est_usd>
 #       <delivery>
-LAUNCHED=0
 while IFS= read -r line; do
   case "$line" in
     RUN\ *)
@@ -24,7 +23,6 @@ while IFS= read -r line; do
       # Word splitting of REST is intentional:
       # "<slice> <task> <model> <effort> <project> <est_usd> <delivery>".
       ./run.sh --account "$ACCOUNT" $REST &
-      LAUNCHED=1
       ;;
   esac
 done <<< "$DECISION"

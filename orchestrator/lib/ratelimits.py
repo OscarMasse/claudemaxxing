@@ -40,7 +40,6 @@ readings; the first usable real reading supersedes the seed.
 """
 import fcntl
 import json
-import os
 import statistics
 import sys
 from datetime import date, datetime, timedelta, timezone

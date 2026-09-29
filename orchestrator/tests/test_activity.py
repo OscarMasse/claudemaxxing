@@ -1,4 +1,8 @@
-import json, os, tempfile, time, unittest
+import json
+import os
+import tempfile
+import time
+import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from lib import activity
@@ -22,7 +26,8 @@ class TestActivity(unittest.TestCase):
             projects = Path(root)
             mine = projects / "-Users-alex-work-api"
             orch = projects / "-Users-alex-backlog"
-            mine.mkdir(); orch.mkdir()
+            mine.mkdir()
+            orch.mkdir()
             now = time.time()
             write_transcript(mine / "s1.jsonl", [now - 7200, now - 3600])
             write_transcript(orch / "s2.jsonl", [now - 60])  # fresh, but excluded
@@ -94,7 +99,8 @@ class TestActivity(unittest.TestCase):
             projects = Path(root)
             a = projects / "-Users-alex-projects-app"
             b = projects / "-Users-alex-notes"
-            a.mkdir(); b.mkdir()
+            a.mkdir()
+            b.mkdir()
             now = time.time()
             write_transcript(a / "s1.jsonl", [now - 7200])
             write_transcript(b / "s2.jsonl", [now - 600])

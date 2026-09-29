@@ -662,10 +662,13 @@ class TestGate(unittest.TestCase):
         # the janitor refused to delete must reach the owner through it.
         p = {"state": self.root / "orchestrator" / "state"}
         p["state"].mkdir(parents=True, exist_ok=True)
-        gate.record_dirty_worktrees(p, ["/r/.agent-worktrees/a b", "/r/.agent-worktrees/c"])
+        gate.record_dirty_worktrees(p, [("/r/.agent-worktrees/a b", "dirty"),
+                                        ("/r/.agent-worktrees/c", "error")])
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("dirty_worktree path=/r/.agent-worktrees/a b ", r.stdout)
-        self.assertIn("dirty_worktree path=/r/.agent-worktrees/c ", r.stdout)
+        self.assertIn("dirty_worktree path=/r/.agent-worktrees/a b "
+                      "(finished, kept: uncommitted changes)", r.stdout)
+        self.assertIn("dirty_worktree path=/r/.agent-worktrees/c "
+                      "(finished, kept: git worktree remove failed", r.stdout)
         gate.record_dirty_worktrees(p, [])
         r = run_gate(self.root, self.env, arg="status")
         self.assertNotIn("dirty_worktree", r.stdout)

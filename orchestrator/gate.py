@@ -524,7 +524,9 @@ def tick(p):
     # Also before scheduling: sessions launched by this tick must start from a
     # machine with no abandoned stacks on it.
     if janitor_due(p, cfg):
-        dirs = sorted({d for proj in projs.values() for d in proj["dirs"]})
+        # Optional dirs too: a task that `uses:` one gets a worktree there.
+        dirs = sorted({d for proj in projs.values()
+                       for d in proj["dirs"] + proj["optional_dirs"]})
         for name, ok in janitor.sweep(dirs):
             log(p, f"janitor compose down project={name} ok={ok}")
         try:

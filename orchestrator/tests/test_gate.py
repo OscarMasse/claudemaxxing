@@ -657,6 +657,19 @@ class TestGate(unittest.TestCase):
         r = run_gate(self.root, self.env, arg="status")
         self.assertIn("orphaned task=t2.md project=typo", r.stdout)
 
+    def test_status_shows_worktrees_the_janitor_kept_dirty(self):
+        # The digest reads `status`, not gatekeeper.log: a finished worktree
+        # the janitor refused to delete must reach the owner through it.
+        p = {"state": self.root / "orchestrator" / "state"}
+        p["state"].mkdir(parents=True, exist_ok=True)
+        gate.record_dirty_worktrees(p, ["/r/.agent-worktrees/a b", "/r/.agent-worktrees/c"])
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("dirty_worktree path=/r/.agent-worktrees/a b ", r.stdout)
+        self.assertIn("dirty_worktree path=/r/.agent-worktrees/c ", r.stdout)
+        gate.record_dirty_worktrees(p, [])
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertNotIn("dirty_worktree", r.stdout)
+
     def test_status_shows_interactive_task(self):
         self.write_task("t3.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ndelivery: branch\n"

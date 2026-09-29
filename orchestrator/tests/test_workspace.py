@@ -115,8 +115,8 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(self.dirs(plain, self.root), [str(plain), str(self.root)])
 
     def test_backlog_root_is_never_swapped(self):
-        git(self.backlog, "commit", "-q", "--allow-empty", "-m", "x",
-            "--author", "t <t@t>")
+        git(self.backlog, "-c", "user.name=t", "-c", "user.email=t@t",
+            "commit", "-q", "--allow-empty", "-m", "x")
         self.assertEqual(self.dirs(self.backlog), [str(self.backlog)])
 
     def commit_in(self, wt, name="f.txt"):

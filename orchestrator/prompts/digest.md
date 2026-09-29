@@ -23,7 +23,10 @@ Procedure:
      there are none.
    - `## To validate` - work finished by background runs awaiting the owner's approval,
      drawn from the `## Runs` journal bullets.
-   - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each.
+   - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each,
+     then every `dirty_worktree` line of the gate.py status output: a finished
+     task's worktree the janitor kept because it holds uncommitted changes, for
+     the owner to commit or discard (give its path).
    - `## Stalled tasks` - every `stalled` and `detector_blocked` line of the
      gate.py status output, one bullet each with its reason and run count
      (`detector_blocked` lists only tasks still `blocked`).

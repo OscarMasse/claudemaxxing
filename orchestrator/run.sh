@@ -12,7 +12,7 @@
 # Without a task_file the session picks the task itself (sonnet only), among
 # the projects of this account.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 ORCH_DIR="$(pwd)"
 # The backlog root (tasks/, digests/, NEEDS-HUMAN.md, orchestrator/state/) is
 # resolved by lib/config.py (env, then the file install.sh records) and
@@ -91,7 +91,8 @@ trap 'rm -f "$LOCK"' EXIT INT TERM
 
 # The account's Claude profile drives the invocation AND where usage /
 # activity detection read, so each subscription is fully self-contained.
-export CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
+CLAUDE_CONFIG_DIR="$(cfg account "$ACCOUNT" claude_config_dir)"
+export CLAUDE_CONFIG_DIR
 # Background sessions run on the subscription only: a base URL or API key
 # inherited from the launching shell would silently bill a per-token account
 # instead. Nothing sets them today; this keeps it that way.
@@ -113,7 +114,8 @@ MAX_USD="$(cfg account "$ACCOUNT" max_session_usd 15)"
 AGENT_GH_TOKEN_FILE="$HOME/.config/backlog-agents/github-token"
 if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" != "true" ] \
    && [ -f "$AGENT_GH_TOKEN_FILE" ]; then
-  export GH_TOKEN="$(cat "$AGENT_GH_TOKEN_FILE")"
+  GH_TOKEN="$(cat "$AGENT_GH_TOKEN_FILE")"
+  export GH_TOKEN
   export GIT_ASKPASS="$HOME/.config/backlog-agents/git-askpass.sh"
 fi
 

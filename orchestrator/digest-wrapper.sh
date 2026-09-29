@@ -5,7 +5,7 @@
 # gatekeeper loop is not running (launchd "pended spawn" limbo, crash),
 # kickstart it through the platform hook.
 set -u
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.
 BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2

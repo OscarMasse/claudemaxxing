@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The engine is stdlib-only; 3.9 is the oldest interpreter it targets
+      # (see pyproject.toml), the macOS system python being the floor.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install ruff
+        run: python3 -m pip install ruff
+
+      # shellcheck is preinstalled on ubuntu runners.
+      - name: Run the checks
+        run: ./check.sh

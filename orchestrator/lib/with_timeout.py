@@ -4,7 +4,10 @@
 Usage: with_timeout.py <seconds> -- <cmd> [args...]
 Exits with the command's code, or 124 on timeout (GNU timeout convention).
 """
-import os, signal, subprocess, sys
+import os
+import signal
+import subprocess
+import sys
 
 
 def main():

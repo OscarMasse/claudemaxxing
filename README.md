@@ -110,6 +110,13 @@ Human-facing output (`gate.py status`, manual dry runs and starts) prints `backl
 
 Note: a closed MacBook lid cannot stay awake for the night regime (clamshell sleep has no software override); lid open on AC power plus `sudo pmset -c sleep 0` is the working setup.
 
+## Checks
+
+`./check.sh` runs every gate: the config and settings files parse, `ruff check`, `shellcheck` on every `*.sh`, and the unit tests.
+CI runs exactly this script on every pull request and on `main` (`.github/workflows/ci.yml`), so a local pass means a CI pass.
+It needs `python3`; `ruff` and `shellcheck` come from your PATH, else are fetched with `uvx`.
+A change is done only once CI is green on its pull request.
+
 ## Design details
 
 **Scheduling regimes, per account.**

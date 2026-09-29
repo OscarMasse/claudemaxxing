@@ -14,7 +14,7 @@ when it ran on raw token counts; only the unit changed.
 import math
 
 from collections import namedtuple
-from datetime import datetime, time, timedelta
+from datetime import time, timedelta
 from zoneinfo import ZoneInfo
 
 # No `model` field: the model a session runs is the one its task declares

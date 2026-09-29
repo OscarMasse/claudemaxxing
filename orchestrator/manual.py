@@ -136,7 +136,7 @@ def select(p, acct, projs, plan, now):
                                    done=gate.duties_served(state),
                                    period_keys=gate.period_keys(acct, now),
                                    model_slots=model_slots,
-                                   today=now.date())
+                                   today=now.date(), now=now)
     measured = ledger.session_costs(state)
     default_cost = float(acct.get("est_session_usd", 2.85))
     picked = []
@@ -248,7 +248,7 @@ def dry_run(p, acct, projs, plan, now):
         rows = tasks.launch_order(p["root"], projs, name, count=depth,
                                   done=gate.duties_served(state),
                                   period_keys=gate.period_keys(acct, now),
-                                  model_slots={}, today=now.date())
+                                  model_slots={}, today=now.date(), now=now)
     cum, budget = 0.0, plan.budget_left
     for t in rows:
         est = measured.get((t["path"], t["model"]), default_cost)

@@ -7,6 +7,8 @@ priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
 branch to resume in the task's worktree, lib/workspace.py),
 prerequisites (space-separated task basenames, `.md` suffix optional),
+not_before (YYYY-MM-DD or YYYY-MM-DDTHH:MM, local time: the task is not
+eligible before then; a date alone means local midnight),
 mode (autonomous|interactive, default autonomous: an interactive task needs the
 owner in a live session, is never launched and is listed by `interactive`).
 
@@ -120,7 +122,7 @@ declared `priority:` in the file is never rewritten. See `_effective_priorities`
 """
 import math
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from lib import config
@@ -352,6 +354,35 @@ def _declared_due(fm):
         return False, None
 
 
+def _declared_not_before(fm):
+    """(ok, datetime or None): the task's `not_before:` resume time, a naive
+    local wall-clock datetime. `YYYY-MM-DD` means local midnight of that day,
+    `YYYY-MM-DDTHH:MM` that minute. `ok` is False when the key is present but
+    unreadable, which makes the task unschedulable and reported by
+    misconfigured(), never guessed."""
+    raw = fm.get("not_before")
+    if raw is None:
+        return True, None
+    raw = raw.strip("'\"")
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+            return True, datetime.combine(date.fromisoformat(raw),
+                                          datetime.min.time())
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}", raw):
+            return True, datetime.fromisoformat(raw)
+    except ValueError:
+        pass
+    return False, None
+
+
+def _deferred(fm, now):
+    """True while the task's `not_before:` time is still in the future.
+    `now` may be timezone-aware (the gatekeeper's clock): its own wall clock
+    is what `not_before:` is compared with, since the key is local time."""
+    when = _declared_not_before(fm)[1]
+    return when is not None and now.replace(tzinfo=None) < when
+
+
 def _nights(name, est_runs):
     """Nights one task needs: ceil(estimated runs), at least one."""
     return max(1, math.ceil((est_runs or {}).get(name, 1)))
@@ -445,7 +476,7 @@ CLASS_EXPEDITE, CLASS_DUE_SOON, CLASS_STANDARD = 0, 1, 2
 
 
 def _ordered(root, projects, account, sched_class=None, today=None,
-             est_runs=None):
+             est_runs=None, now=None):
     """Eligible tasks for `account` in launch order.
 
     `sched_class` selects which scheduling class to return: None for the
@@ -455,8 +486,11 @@ def _ordered(root, projects, account, sched_class=None, today=None,
 
     `today` (a date, default the real one) decides which deadlines are due
     soon, and `est_runs` ({task basename: runs}) how many nights each task
-    needs; see the module docstring for the order itself."""
-    today = today or date.today()
+    needs; see the module docstring for the order itself. `now` (a datetime,
+    default the real local time) decides whether a `not_before:` time has
+    passed."""
+    now = now or datetime.now()
+    today = today or now.date()
     effective = _effective_priorities(root)
     dated = _deadlines(_all_frontmatter(root), est_runs)
     found = []
@@ -479,6 +513,10 @@ def _ordered(root, projects, account, sched_class=None, today=None,
             continue  # unknown model name, reported by misconfigured()
         if _unmet_prerequisites(root, fm):
             continue  # a hard prerequisite is not done yet
+        if not _declared_not_before(fm)[0]:
+            continue  # unreadable resume time, reported by misconfigured()
+        if _deferred(fm, now):
+            continue  # its resume time has not come yet
         if _sched_class(fm) != sched_class:
             continue  # a different scheduling class handles this one
         delivery = _declared_delivery(fm)
@@ -522,7 +560,7 @@ def task_name(ref):
     return name[:-3] if name.endswith(".md") else name
 
 
-def resolve(root, projects, account, ref):
+def resolve(root, projects, account, ref, now=None):
     """One task named by the owner, for a manual launch: (task, unmet, reason).
 
     `task` is the same assignment `_ordered` builds, whatever the task's
@@ -552,8 +590,11 @@ def resolve(root, projects, account, ref):
     unmet = _unmet_prerequisites(root, fm)
     if unmet:
         return None, unmet, None
+    now = now or datetime.now()
+    if _deferred(fm, now):
+        return None, [], f"not_before={fm['not_before']} (not yet)"
     for cls in (None, "duty", "filler"):
-        for t in _ordered(root, projects, account, sched_class=cls):
+        for t in _ordered(root, projects, account, sched_class=cls, now=now):
             if Path(t["path"]).stem == name:
                 return t, [], None
     return None, [], "not eligible"
@@ -783,6 +824,7 @@ def misconfigured(root, projects):
     - `delivery:` breaching the project's local-only floor.
     - a leftover `local_only:` key, which `delivery:` replaced.
     - `due:` that is not an ISO date.
+    - `not_before:` that is neither YYYY-MM-DD nor YYYY-MM-DDTHH:MM.
     - a file in tasks/archive/ whose status is not `done`: archived means
       done, so the edit would otherwise be silently ignored.
     - `workdir:` other than `main`.
@@ -813,6 +855,9 @@ def misconfigured(root, projects):
                                 "remove the key)"))
         if not _declared_due(fm)[0]:
             out.append((p.name, f"due={fm['due']} (expected YYYY-MM-DD)"))
+        if not _declared_not_before(fm)[0]:
+            out.append((p.name, f"not_before={fm['not_before']} (expected "
+                                "YYYY-MM-DD or YYYY-MM-DDTHH:MM, local time)"))
         if _declared_workdir(fm) is None:
             out.append((p.name, f"workdir={fm['workdir']} (only `main`, or "
                                 "no key for a worktree)"))
@@ -834,10 +879,10 @@ def misconfigured(root, projects):
     return out
 
 
-def pick(root, projects, account, today=None, est_runs=None):
+def pick(root, projects, account, today=None, est_runs=None, now=None):
     """Best task for the account: {"path", "model", "effort", "project",
     "delivery", "local_only", "parallel"} or None."""
-    picked = pick_multi(root, projects, account, 1, today, est_runs)
+    picked = pick_multi(root, projects, account, 1, today, est_runs, now)
     return picked[0] if picked else None
 
 
@@ -904,17 +949,19 @@ def _pad_parallel(out, queue, count, slots):
     return out
 
 
-def pick_multi(root, projects, account, count, today=None, est_runs=None):
+def pick_multi(root, projects, account, count, today=None, est_runs=None,
+               now=None):
     """Up to `count` session assignments from the ordinary priority queue:
     distinct tasks first, then parallel shards."""
-    queue = _ordered(root, projects, account, today=today, est_runs=est_runs)
+    queue = _ordered(root, projects, account, today=today, est_runs=est_runs,
+                     now=now)
     slots = _ModelSlots(None)
     return _pad_parallel(queue[:count], queue, count, slots)
 
 
 def launch_order(root, projects, account, count,
                  done=None, period_keys=None, model_slots=None,
-                 today=None, est_runs=None, exclude=()):
+                 today=None, est_runs=None, exclude=(), now=None):
     """Up to `count` session assignments for one tick, in launch order.
 
     The three scheduling classes are served in a fixed order that encodes their
@@ -935,7 +982,8 @@ def launch_order(root, projects, account, count,
 
     `exclude` holds queue task basenames the caller will not launch this tick
     (stalls.ladder_blocked); the next ones in the queue take their slots.
-    `today` and `est_runs` order the queue's deadlines, see `_ordered`.
+    `today` and `est_runs` order the queue's deadlines, and `now` defers
+    tasks whose `not_before:` has not passed, see `_ordered`.
 
     Each assignment carries `sched` ("duty", "filler" or None) so the caller can
     apply the budget rule that matches the class."""
@@ -944,7 +992,8 @@ def launch_order(root, projects, account, count,
     slots = _ModelSlots(model_slots)
     out = _take(duties_due(root, projects, account, done or {}, period_keys or {}),
                 count, slots)
-    queue = [t for t in _ordered(root, projects, account, today=today, est_runs=est_runs)
+    queue = [t for t in _ordered(root, projects, account, today=today,
+                                 est_runs=est_runs, now=now)
              if Path(t["path"]).name not in exclude]
     out += _take(queue, count - len(out), slots)
     if len(out) < count:

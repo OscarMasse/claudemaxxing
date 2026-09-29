@@ -2,7 +2,7 @@ import os
 import tempfile
 import time
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from lib import tasks
 
@@ -1042,3 +1042,74 @@ class TestArchive(unittest.TestCase):
         self.assertIn("title: second",
                       (self.root / "tasks" / "archive" / "x.md").read_text())
         self.assertEqual(list((self.root / "tasks").glob("*.md")), [])
+
+
+class TestNotBefore(unittest.TestCase):
+    """`not_before:` defers a ready task until its local resume time."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def task(self, not_before):
+        write_task(self.root, "t.md", project="side-projects", status="ready",
+                   not_before=not_before)
+
+    def launched(self, now):
+        return [Path(t["path"]).name for t in
+                tasks.launch_order(self.root, PROJECTS, "personal", 3, now=now)]
+
+    def test_future_time_is_not_launched(self):
+        self.task("2026-09-29T06:00")
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 2, 42)), [])
+        self.assertIsNone(tasks.pick(self.root, PROJECTS, "personal",
+                                     now=datetime(2026, 9, 29, 5, 59)))
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
+
+    def test_eligible_once_time_has_passed(self):
+        self.task("2026-09-29T06:00")
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 6, 0)), ["t.md"])
+        self.assertEqual(self.launched(datetime(2026, 9, 30, 1, 0)), ["t.md"])
+
+    def test_date_only_means_local_midnight(self):
+        self.task("2026-09-30")
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 23, 59)), [])
+        self.assertEqual(self.launched(datetime(2026, 9, 30, 0, 0)), ["t.md"])
+
+    def test_aware_clock_compares_its_own_wall_clock(self):
+        self.task("2026-09-29T06:00")
+        tz = timezone(timedelta(hours=2))
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 5, 0, tzinfo=tz)), [])
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 6, 0, tzinfo=tz)),
+                         ["t.md"])
+
+    def test_quoted_value_is_read(self):
+        self.task('"2026-09-29T06:00"')
+        self.assertEqual(self.launched(datetime(2026, 9, 29, 5, 0)), [])
+        self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
+
+    def test_unparseable_value_is_reported_never_guessed(self):
+        for bad in ("tomorrow", "2026-09-29 6h", "2026-13-01", "06:00",
+                    "2026-09-29T06:00:00+02:00"):
+            with self.subTest(bad=bad):
+                self.task(bad)
+                self.assertEqual(self.launched(datetime(2030, 1, 1)), [])
+                problems = tasks.misconfigured(self.root, PROJECTS)
+                self.assertEqual(len(problems), 1)
+                self.assertEqual(problems[0][0], "t.md")
+                self.assertTrue(problems[0][1].startswith(f"not_before={bad}"))
+
+    def test_resolve_refuses_a_deferred_task(self):
+        self.task("2026-09-29T06:00")
+        t, unmet, reason = tasks.resolve(self.root, PROJECTS, "personal", "t",
+                                         now=datetime(2026, 9, 29, 3, 0))
+        self.assertIsNone(t)
+        self.assertEqual(unmet, [])
+        self.assertIn("not_before", reason)
+        t, _, _ = tasks.resolve(self.root, PROJECTS, "personal", "t",
+                                now=datetime(2026, 9, 29, 7, 0))
+        self.assertIsNotNone(t)

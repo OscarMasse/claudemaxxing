@@ -25,8 +25,8 @@ Procedure:
      drawn from the `## Runs` journal bullets.
    - `## Questions` - every unchecked item from NEEDS-HUMAN.md, one bullet each,
      then every `dirty_worktree` line of the gate.py status output: a finished
-     task's worktree the janitor kept because it holds uncommitted changes, for
-     the owner to commit or discard (give its path).
+     task's worktree the janitor kept (uncommitted changes, or its removal
+     failed), for the owner to resolve (give its path and the reason).
    - `## Stalled tasks` - every `stalled` and `detector_blocked` line of the
      gate.py status output, one bullet each with its reason and run count
      (`detector_blocked` lists only tasks still `blocked`).

@@ -42,7 +42,9 @@ from lib import (activity, config, controller, janitor, ledger, quota,  # noqa: 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
 PRESENT_MIN = 10  # idle threshold under which the owner counts as "at the PC"
-DIRTY_WORKTREES = "dirty-worktrees"  # janitor: finished task worktrees kept dirty
+DIRTY_WORKTREES = "dirty-worktrees"  # janitor: finished task worktrees it kept
+KEPT_REASONS = {"dirty": "uncommitted changes",
+                "error": "git worktree remove failed, see gatekeeper.log"}
 
 
 def platform_name():
@@ -536,10 +538,11 @@ def tick(p):
         else:
             for path, outcome in reaped:
                 log(p, f"janitor worktree {outcome} path={path}")
-            # A finished but dirty worktree is never deleted; the owner decides.
-            # Kept until the next sweep so `status` (hence the digest) shows it.
-            record_dirty_worktrees(p, [path for path, outcome in reaped
-                                       if outcome == "dirty"])
+            # A finished worktree the janitor kept (dirty, or its removal
+            # failed) is the owner's call. Kept until the next sweep so
+            # `status` (hence the digest) shows it.
+            record_dirty_worktrees(p, [(path, outcome) for path, outcome in reaped
+                                       if outcome in KEPT_REASONS])
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))
@@ -567,17 +570,19 @@ def caps_lines(derived, now):
 
 
 def record_dirty_worktrees(p, paths):
-    """Replace the janitor's list of finished task worktrees it kept dirty."""
+    """Replace the janitor's list of `(path, outcome)` finished task
+    worktrees it kept."""
     f = p["state"] / DIRTY_WORKTREES
     if paths:
-        f.write_text("".join(f"{path}\n" for path in paths))
+        f.write_text("".join(f"{outcome} {path}\n" for path, outcome in paths))
     else:
         f.unlink(missing_ok=True)
 
 
 def dirty_worktrees(p):
     f = p["state"] / DIRTY_WORKTREES
-    return f.read_text().splitlines() if f.is_file() else []
+    lines = f.read_text().splitlines() if f.is_file() else []
+    return [tuple(reversed(line.split(" ", 1))) for line in lines if " " in line]
 
 
 def status(p):
@@ -658,8 +663,8 @@ def status(p):
     for h in stalls.active_blocks(p["root"], p["state"]):
         print(f"detector_blocked task={h['task']} at={h['ts']} "
               f"reason={h['reason']} runs={h['runs']} ({h['detail']})")
-    for path in dirty_worktrees(p):
-        print(f"dirty_worktree path={path} (finished, kept: uncommitted changes)")
+    for path, outcome in dirty_worktrees(p):
+        print(f"dirty_worktree path={path} (finished, kept: {KEPT_REASONS[outcome]})")
     # Printed once, after the accounts: these tasks belong to none of them.
     for task_name, project in tasks.orphaned(p["root"], projs):
         print(f"orphaned task={task_name} project={project}")

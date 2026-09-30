@@ -1,6 +1,7 @@
 # claudemaxxing
 
-**Your Claude Max quota expires every week whether you use it or not. claudemaxxing spends the leftover on your own backlog while you sleep.**
+**Your Claude Max quota expires every week whether you use it or not.**
+**claudemaxxing spends the leftover on your own backlog while you sleep.**
 
 You write task specs in Markdown.
 Headless Claude Code sessions work them at night, inside a budget that never touches your daytime quota.
@@ -21,13 +22,15 @@ In the morning you read a digest and review pull requests.
 - rankr-gardener (nightly duty): reviewed, opened #131, filed two follow-ups.
 ```
 
-*A real morning digest, lightly trimmed. Each line is a decision the owner takes in a minute, not a log to read.*
+*Example: a real morning digest from the author's backlog, trimmed.*
+*Each line is a decision the owner takes in a minute, not a log to read.*
 
 - **Nights are budget-safe.**
   The engine reads your real consumption from Claude Code's own transcripts and keeps a reserve for your heaviest day.
   Sessions only get the surplus.
 - **Mornings are yours.**
   No session opens a quota window that would cross the morning guard, and any interactive activity on the account blocks night launches.
+  The one exception is the last night before the weekly reset, when the surplus would expire anyway.
 - **Every task ends where it says.**
   `delivery: pr | branch | local` is a contract, enforced by deny rules on `git push` and `gh`, not by the prompt.
 - **One kill switch.**
@@ -57,12 +60,15 @@ The backlog is a plain directory: `tasks/*.md`, `config.yaml`, and the digests a
 ```bash
 export BACKLOG_ROOT=~/backlog
 mkdir -p "$BACKLOG_ROOT/tasks"
-cp orchestrator/config.yaml "$BACKLOG_ROOT/config.yaml"          # edit: your accounts and projects
+cp orchestrator/config.yaml "$BACKLOG_ROOT/config.yaml"          # edit: claude_bin, accounts (profile dir, reset day), projects
 cp examples/tasks/research-static-site-generators.md "$BACKLOG_ROOT/tasks/"
-python3 orchestrator/lib/ratelimits.py seed personal 850 58 114 2026-09-24T23:10:00+02:00   # one hand reading of /usage
+python3 orchestrator/lib/ratelimits.py seed personal 850 58 114 2026-09-24T23:10:00+02:00   # weekly cap, 5h cap, heavy-day usage, all USD
 orchestrator/manual.sh --tasks research-static-site-generators --dry-run
 ```
 
+The seed gives the budget its first caps: your weekly and 5-hour limits and a heavy day's usage, in USD at API list price.
+Any plausible figures do to start; the status line hook described in the full setup replaces them with measured ones after your first day.
+The account name must match an `accounts` entry of your config.
 The dry run prints the plan and launches nothing.
 When it looks right, register the nightly loop and the 07:37 digest job:
 
@@ -83,9 +89,9 @@ Full setup, including the status line hook that keeps the quota caps calibrated,
 ```
 
 1. **Capture.**
-   A task is one Markdown file with frontmatter: project, priority, `delivery`, a `verification` command, a token budget.
+   A task is one Markdown file with frontmatter: project, priority, `delivery`, a `verification` method, a token budget.
 2. **Spec.**
-   A task becomes `ready` only once its definition of done is checkable.
+   You set a task `ready` once its definition of done is checkable.
    Spec quality is the bottleneck, not execution.
 3. **Night.**
    Each tick, the gatekeeper measures what the week has consumed, computes tonight's share of the surplus, and launches as many fifty-minute sessions as it pays for.
@@ -103,6 +109,8 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
 
 ## Safety and limits
 
+- **The last night runs open bar.**
+  Before the weekly reset, unspent quota is lost, so that night ignores the budget, the morning guard and the activity lock and launches until the account's limit is hit.
 - **macOS only, for now.**
   Scheduling goes through launchd and `pmset`.
   The OS seam is five scripts, documented in [orchestrator/platform/README.md](orchestrator/platform/README.md); a Linux port would swap in systemd timers.
@@ -118,10 +126,11 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
   A `pr` task may push its branch and open a pull request.
   A `branch` task commits locally.
   A `local` task leaves nothing outside the machine.
-  Force pushes, `git filter-branch` and credential reads are denied to every session, and no session ever pushes to `main`.
+  Force pushes, `git filter-branch` and credential reads are denied to every session.
+  Pushing to `main` is forbidden by the prompt only: protect `main` with branch protection or a pre-push hook.
 - **Where an agent may write.**
   Only its own worktree under `<repo>/.agent-worktrees/<task>`.
-  The main checkout, and your uncommitted work in it, is never touched.
+  The main checkout, and your uncommitted work in it, is never touched, unless a task or project explicitly declares `workdir: main`.
 - **What it cannot see.**
   Usage from other devices or from claude.ai is invisible to the transcript scan, so the caps are recalibrated from the status line's rate-limit readings rather than trusted once.
 

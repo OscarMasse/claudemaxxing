@@ -37,13 +37,13 @@ The number is the one the ADR will take.
 | 0006 | Tick from a KeepAlive loop instead of launchd StartInterval; the daily digest job doubles as watchdog | 2026-08 | `README.md:222-224`, `orchestrator/platform/README.md:9,12`, notes | yes |
 | 0007 | Fresh context for every slice, resumed from notes in the task file, not from `claude -p --resume` | 2026-08 | `orchestrator/prompts/orchestrate.md:111`, notes | yes |
 | 0008 | Keep a local custom scheduler rather than Claude Code's native scheduling | 2026-08 | `README.md:5,51`, notes | yes |
-| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10`, notes | missing |
+| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10`, notes | yes (answered 2026-09-30, superseded: config moves to TOML) |
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial |
 | 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-27 | `02ec85e`, `README.md:107-110`, notes | yes |
 | 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial |
 | 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08, before any config read 2026-09-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial |
 | 0067 | Every tick logs its decision and the reason, one line per account or slot | 2026-08 | `README.md:28-30,104`, `3d0739e`, notes | partial |
-| 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-4` | missing |
+| 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-4` | yes (answered 2026-09-30) |
 
 ### Quota, budget and cost
 
@@ -91,7 +91,7 @@ The number is the one the ADR will take.
 | 0035 | Recurring work as duties (nightly or weekly, no daily) and fillers (at most once per night) | 2026-09-07, filler once per night 2026-09-25 | `7924fe2`, `1a01555`, `ee49082`, `ee5b0a0`, `README.md:196-200` | yes |
 | 0036 | Work that needs no reasoning runs as a plain scheduled job, not as a session | 2026-09-07 | `7924fe2`, `README.md:201` | partial |
 | 0037 | Defer a ready task with `not_before` rather than blocking it | 2026-09-29 | `be5db55`, `bfe0148`, `README.md:57`, notes | yes |
-| 0038 | `mode: interactive` tasks are never launched and are listed first for the owner | 2026-09-28 | `a22fae3`, `13424b0`, `README.md:59-62`, notes | partial |
+| 0038 | `mode: interactive` tasks are never launched and are listed first for the owner | 2026-09-28 | `a22fae3`, `13424b0`, `README.md:59-62`, notes | yes (answered 2026-09-30) |
 | 0039 | Done tasks archive themselves once idle for the lock TTL; lookups by name resolve the archive | 2026-09-28 | `2c12e4f`, `acfabe5`, `e0d8a94`, `README.md:58` | partial |
 | 0040 | The gatekeeper claims a task at launch instead of leaving the claim to the session | 2026-09-12 | `902654e`, `README.md:205` | yes |
 | 0041 | Reset stale `in-progress` tasks to `ready`, keeping their notes | 2026-09-08 | `b90f4fe`, `README.md:67` | yes |

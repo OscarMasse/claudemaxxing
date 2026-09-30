@@ -7,7 +7,7 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 
 | No. | Title | Status |
 |---|---|---|
-| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | proposed |
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
 
 ## Inventory
 
@@ -139,13 +139,41 @@ The number is the one the ADR will take.
 | 0061 | CI runs exactly the local `check.sh`; a change is done only once CI is green | 2026-09-28 | `39cb0f6`, `README.md:114-119`, `check.sh`, notes | partial |
 | 0062 | Config compatibility: flow-style lists and `config.yaml` preferred; older spellings and the legacy flat config still parse | <= 2026-09-04, spellings 2026-09-06 | `07d8e6e`, `README.md:82`, `orchestrator/config.yaml:17-22` | partial |
 
-## Open questions
+## Which rows get an ADR
 
-Questions for the owner: every `missing` row, plus the `partial` rows whose central reason is not recorded.
+Sixty-eight rows for an engine of a few thousand lines is a decision log, not sixty-eight ADRs.
+The table above IS the log and stays complete.
+An ADR file is written only for the decisions that shape the system and that a reader could reasonably contest; every other row is `log only`, its line in the table being its whole record.
 
-- **0009.** Why standard-library Python only, and a hand-rolled YAML subset rather than a YAML library? Was it to avoid a virtualenv under launchd, to keep installation to a clone, or something else?
-- **0068.** Why do unattended sessions bypass permission prompts, with deny rules as the only enforced limits, rather than running on an explicit allow list (`--allowedTools`)?
-- **0038.** What made interactive work a task mode of its own, rather than a `blocked` task or a task left out of the backlog?
+Selected for an ADR (the backfill may argue for adding or dropping one, in its PR):
+
+- 0001 record decisions; 0008 a local scheduler rather than the CLI's native scheduling
+- 0007 fresh context per slice, resumed from notes
+- 0009 standard-library only, and the config format
+- 0013 pacing with a decaying P90 reserve; 0016 budgets in USD
+- 0038 `mode: interactive`
+- 0068 bypass permissions with deny rules, and the delivery rails they enforce
+- one worktree per session; GitHub stacks for stacked work
+
+Each ADR written must carry the strongest argument against the decision and a "Would we decide the same today?" line.
+When the answer is no, the ADR points to the follow-up that supersedes it.
+
+## Open questions, answered by the owner (2026-09-30)
+
+- **0009.** Install is `git clone`, run is launchd: a virtualenv or a `pip install` is one more thing that breaks unattended (minimal PATH, interpreter upgrades) with nobody there to see it, so the standard library is the only parser allowed.
+  The hand-rolled YAML subset followed from that constraint, and it is the part that does not hold up: the file is not YAML, and every new need reopens the parser.
+  Challenged during this review; decision superseded: the config moves to TOML read by `tomllib` (standard library since 3.11).
+  Rejected on the way: a YAML library (dependency), JSON (no comments), TOON (a prompt format, not a config format).
+  The ADR records the original decision as superseded once the migration lands.
+- **0068.** There was never an allow list.
+  `--permission-mode bypassPermissions` is in the first runner (2026-08) as a stated judgment call: a headless session has nobody to answer a prompt, and the first unanswered prompt freezes the slice until the lock TTL.
+  An allow list would have to predict every tool and command of a development task and every omission becomes a blocking prompt, so in practice it ends up allowing everything.
+  Autonomy was first enforced by the task frontmatter and the prompt rules alone.
+  Experience corrected that: the rails that must hold (push by delivery, PR merge, the account boundary) moved to deny rules in 2026-09, evaluated by the harness before the model has a say, at no token cost.
+  Trust comes from isolation (a worktree per session, a scoped token, one account) rather than from prompts.
+- **0038.** Most of the owner's highest-priority work cannot run unattended (reviews, arbitration, conversations).
+  `blocked` means "waiting for an answer" and pollutes the questions list; a task kept out of the backlog leaves the only prioritised view there is.
+  `interactive` keeps the task in the backlog with its priority and deadline, the gatekeeper never launches it, and the digest opens the owner's day with it.
 
 ## Documentation drift found while building the inventory
 

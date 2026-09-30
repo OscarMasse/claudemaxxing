@@ -558,6 +558,8 @@ def _ordered(root, projects, account, sched_class=None, today=None,
     today = today or now.date()
     effective = _effective_priorities(root)
     dated = _deadlines(_all_frontmatter(root), est_runs)
+    busy_stacks = {_declared_stack(f) for f in _all_frontmatter(root).values()
+                   if f.get("status") == "in-progress"} - {None}
     found = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -576,6 +578,8 @@ def _ordered(root, projects, account, sched_class=None, today=None,
         model = _declared_model(fm)
         if model is None:
             continue  # unknown model name, reported by misconfigured()
+        if _declared_stack(fm) in busy_stacks:
+            continue  # one layer of a stack at a time
         if _unmet_prerequisites(root, fm):
             continue  # a hard prerequisite is not done yet
         if not _declared_not_before(fm)[0]:

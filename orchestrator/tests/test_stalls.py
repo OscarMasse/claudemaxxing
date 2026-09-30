@@ -134,7 +134,8 @@ class StallTest(Base):
                          "storming")
 
     def ledger(self, task, ts, slice_min, used_min):
-        with open(self.state / "costs.jsonl", "a") as f:
+        (self.state / "max").mkdir(exist_ok=True)
+        with open(self.state / "max" / "costs.jsonl", "a") as f:
             f.write(json.dumps({"ts": ts.isoformat(), "mode": "orchestrate",
                                 "task": f"/x/tasks/{task}", "slice_min": slice_min,
                                 "duration_ms": used_min * 60000}) + "\n")
@@ -143,18 +144,18 @@ class StallTest(Base):
         t = datetime(2026, 9, 27, 3, 0)
         self.ledger("a.md", t, 33, 8)      # used a quarter: early exit
         self.ledger("b.md", t, 33, 20)     # used most of it: working
-        self.assertEqual(stalls.ladder_blocked(self.state, t, 23), {"a.md"})
+        self.assertEqual(stalls.ladder_blocked(self.state / "max", t, 23), {"a.md"})
         # A session killed at its hard limit has no duration: not an early exit.
-        with open(self.state / "costs.jsonl", "a") as f:
+        with open(self.state / "max" / "costs.jsonl", "a") as f:
             f.write(json.dumps({"ts": t.isoformat(), "mode": "orchestrate",
                                 "task": "/x/tasks/c.md", "slice_min": 33,
                                 "exit": 124}) + "\n")
-        self.assertEqual(stalls.ladder_blocked(self.state, t, 23), {"a.md"})
+        self.assertEqual(stalls.ladder_blocked(self.state / "max", t, 23), {"a.md"})
         # A slice at least as long as the last one is always allowed.
-        self.assertEqual(stalls.ladder_blocked(self.state, t, 33), set())
+        self.assertEqual(stalls.ladder_blocked(self.state / "max", t, 33), set())
         # Last night's sessions do not count.
         self.assertEqual(
-            stalls.ladder_blocked(self.state, t + timedelta(days=1), 23), set())
+            stalls.ladder_blocked(self.state / "max", t + timedelta(days=1), 23), set())
 
     def test_same_nonzero_exit_is_storming(self):
         path = self.task()
@@ -235,12 +236,12 @@ class GlobalStormTest(Base):
         self.assertIsNone(self.trip())
         self.assertFalse((self.root / "NEEDS-HUMAN.md").exists())
 
-    def test_ledger_read_at_both_levels(self):
+    def test_ledger_read_from_account_paths_only(self):
         self.ledger([0])
         with open(self.state / "costs.jsonl", "w") as f:
             f.write(json.dumps({"ts": "2026-09-01T00:00:00", "mode": "orchestrate",
                                 "exit": 0}) + "\n")
-        self.assertEqual(len(stalls.ledger_rows(self.state)), 2)
+        self.assertEqual(len(stalls.ledger_rows(self.state)), 1)
 
     def test_duplicate_rows_count_once(self):
         self.ledger([1] * 3)

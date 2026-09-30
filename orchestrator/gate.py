@@ -653,6 +653,10 @@ def status(p):
             ratio = f"{a['ratio']:.2f}" if a["ratio"] is not None else "none"
             print(f"estimate task={task} runs={a['runs']} est_usd={a['est_usd']:.2f} "
                   f"actual_usd={a['actual_usd']:.2f} ratio={ratio}")
+        missing, total = ledger.no_cost_share(p["state"] / name)
+        if total:
+            print(f"ledger_coverage account={name} recent_rows={total} "
+                  f"no_cost={missing} share={missing / total:.0%}")
         costs = ledger.stats(p["state"] / name)
         for task, s in sorted(costs.items()):
             print(f"cost task={task} runs={s['runs']} usd={s['cost_usd']:.2f} "

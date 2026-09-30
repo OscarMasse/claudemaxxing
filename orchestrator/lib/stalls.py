@@ -10,7 +10,7 @@ Inputs, all under the backlog's orchestrator/state/:
   runs.log                 run.sh's one line per session (`mode=... task=... exit=N`)
   launches.jsonl           one row per queue-task launch: the task file's hash
                            just before the claim (written by record_launch)
-  costs.jsonl, <acct>/costs.jsonl
+  <acct>/costs.jsonl
                            the ledger (cost and duration per session)
   detector.json            per task, when the detector last blocked it, so a
                            task the owner unblocks starts from a clean count
@@ -90,22 +90,27 @@ def orchestrate_runs(state_root):
     return out
 
 
-def ledger_rows(state_root):
-    """Ledger rows from state/costs.jsonl AND every state/<account>/costs.jsonl
-    (rows exist at both levels), sorted by timestamp."""
-    root = Path(state_root)
+def _read_ledger(path):
     rows = []
-    for path in [root / "costs.jsonl", *sorted(root.glob("*/costs.jsonl"))]:
-        if not path.exists():
+    if not path.exists():
+        return rows
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
             continue
-        for line in path.read_text(errors="replace").splitlines():
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(row, dict) and row.get("ts"):
-                rows.append(row)
-    # The same session can be recorded at both levels: count it once.
+        if isinstance(row, dict) and row.get("ts"):
+            rows.append(row)
+    return rows
+
+
+def ledger_rows(state_root, account_dir=False):
+    """Ledger rows sorted by timestamp. `state_root` is the state directory
+    (every state/<account>/costs.jsonl, the only ledger path), or with
+    `account_dir=True` one account's own directory."""
+    root = Path(state_root)
+    paths = [root / "costs.jsonl"] if account_dir else sorted(root.glob("*/costs.jsonl"))
+    rows = [r for path in paths for r in _read_ledger(path)]
     unique = {(r["ts"], r.get("mode"), r.get("task")): r for r in rows}
     return sorted(unique.values(), key=lambda r: r["ts"])
 
@@ -253,7 +258,7 @@ def ladder_blocked(state_root, now, slice_min):
     still advances it."""
     night = _night(now, now.tzinfo)
     last = {}
-    for row in ledger_rows(state_root):
+    for row in ledger_rows(state_root, account_dir=True):
         if row.get("mode") != "orchestrate" or row.get("task") in (None, "auto"):
             continue
         ts = _parse_ts(row["ts"])

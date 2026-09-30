@@ -55,6 +55,24 @@ class TestLedger(unittest.TestCase):
             self.assertEqual(entry["task"], "tasks/a.md")
             self.assertAlmostEqual(entry["cost_usd"], 0.42)
 
+    def test_parse_failure_row_has_reason_and_exit(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "result.json"
+            bad.write_text("not json")
+            state = Path(d) / "state" / "work"
+            ledger.record(state, bad, "orchestrate", "a.md", "sonnet", "low",
+                          15, 3, "work")
+            ledger.record(state, Path(d) / "missing.json", "orchestrate", "a.md",
+                          "sonnet", "low", 15, 4, "work")
+            rows = [json.loads(l) for l in (state / "costs.jsonl").read_text().splitlines()]
+            self.assertEqual([r["reason"] for r in rows], ["invalid_json", "unreadable"])
+            self.assertEqual([r["exit"] for r in rows], [3, 4])
+            for r in rows:
+                self.assertIn("parse_error", r)
+                for k in ledger.REQUIRED_KEYS:
+                    self.assertIn(k, r)
+            self.assertEqual(ledger.no_cost_share(state), (2, 2))
+
     def test_ledgers_are_isolated_per_state_dir(self):
         with tempfile.TemporaryDirectory() as d:
             result = Path(d) / "result.json"

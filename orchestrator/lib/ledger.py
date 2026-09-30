@@ -200,19 +200,6 @@ def session_costs(state_dir, window=RATE_WINDOW):
     return {k: max(runs) for k, runs in recent.items()}
 
 
-if __name__ == "__main__":
-    if len(sys.argv) >= 11 and sys.argv[1] == "record":
-        print(record(*sys.argv[2:12]))
-    elif len(sys.argv) == 3 and sys.argv[1] == "fields":
-        cost, minutes = result_fields(sys.argv[2])
-        print(f"{cost} {minutes}")
-    else:
-        print("usage: ledger.py record <state_dir> <json> <mode> <task> <model> "
-              "<effort> <slice> <exit> <account> [est_usd]\n"
-              "       ledger.py fields <result.json>", file=sys.stderr)
-        sys.exit(2)
-
-
 # The controlled vocabulary of `stopped=` in the agent lines of runs.log
 # (prompts/orchestrate.md step 9). There is no "killed": a session cut off by
 # run.sh's timeout never reaches step 9, so only the launcher line records it.
@@ -220,8 +207,8 @@ OUTCOMES = ("done", "resumed", "routine-pass", "blocked", "noop")
 
 # runs.log interleaves two formats. The agent writes `2026-09-30T02:26:23+02:00
 # task=... did=... stopped=<outcome>`; the launcher writes `2026-09-30 01:58:34
-# mode=... exit=0`. Only the agent's line carries a `T` date separator.
-_AGENT_LINE = re.compile(r"^\d{4}-\d\d-\d\dT\S* task=")
+# mode=... exit=0`. Only the agent's line has a `task=` right after the date.
+_AGENT_LINE = re.compile(r"^\d{4}-\d\d-\d\d\S* task=")
 
 
 def outcome_histogram(runs_log):
@@ -240,3 +227,17 @@ def outcome_histogram(runs_log):
         key = value if value in OUTCOMES else "unknown"
         hist[key] = hist.get(key, 0) + 1
     return hist
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 11 and sys.argv[1] == "record":
+        print(record(*sys.argv[2:12]))
+    elif len(sys.argv) == 3 and sys.argv[1] == "fields":
+        cost, minutes = result_fields(sys.argv[2])
+        print(f"{cost} {minutes}")
+    else:
+        print("usage: ledger.py record <state_dir> <json> <mode> <task> <model> "
+              "<effort> <slice> <exit> <account> [est_usd]\n"
+              "       ledger.py fields <result.json>", file=sys.stderr)
+        sys.exit(2)
+

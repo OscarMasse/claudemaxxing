@@ -146,14 +146,14 @@ Procedure:
    - `blocked` - a question for the owner was written and the task set `blocked`.
    - `noop` - you found nothing you could do and changed nothing.
    Put any nuance in `did=`. The file holds two logs: the launcher (run.sh)
-   also appends its own lines (`YYYY-MM-DD HH:MM:SS mode=... exit=N`, a space
-   after the date, no `stopped=`). Yours is the `T`-dated `task=` line; never
-   edit the launcher's. A session killed by the timeout never reaches this
+   also appends its own lines (`YYYY-MM-DD HH:MM:SS mode=... exit=N`, no
+   `task=` after the date, no `stopped=`). Yours is the line whose date is
+   followed by `task=`; never edit the launcher's. A session killed by the timeout never reaches this
    step, so the launcher line is the only record of it.
-   (this is the machine log, keep it as is). ALSO append ONE markdown bullet
+   ALSO append ONE markdown bullet
    under the `## Runs` section of {{DIGEST_FILE}} (create the file with a
    `# Digest <date>` header and a `## Runs` section if it does not exist yet):
-   task name, what you did, how you stopped (done / blocked / resumed later),
+   task name, what you did, how you stopped (the same outcome word),
    and what needs the human, if anything. The harness itself appends a
    mechanical cost/duration line to the same file right after you exit, so
    your bullet should cover substance, not numbers.

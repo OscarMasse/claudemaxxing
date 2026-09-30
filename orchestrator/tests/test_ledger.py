@@ -19,12 +19,13 @@ class TestOutcomeHistogram(unittest.TestCase):
             "2026-09-30T03:10:00+02:00 task=c.md did=z stopped=slice-end",
             "2026-09-30T03:11:00+02:00 task=d.md did=z stopped=done",
             "2026-09-30T03:12:00+02:00 task=e.md did=w",
+            "2026-09-03 task=tasks/f.md did=old stopped=slice end",
         ]
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "runs.log"
             path.write_text("\n".join(lines) + "\n")
             self.assertEqual(ledger.outcome_histogram(path),
-                             {"done": 2, "resumed": 1, "unknown": 2})
+                             {"done": 2, "resumed": 1, "unknown": 3})
             self.assertEqual(ledger.outcome_histogram(Path(d) / "none"), {})
 
 

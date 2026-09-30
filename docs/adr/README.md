@@ -18,10 +18,11 @@ The number is the one the ADR will take.
   A row that merges several steps of one decision gives the date of each step.
   A step is a commit or a note that changes what the decision says; a fix or a hardening that leaves it unchanged is not a step.
   An ADR carries a single date: when a row with several steps is written up, the ADR takes the date of the step it records as the decision, and its Context tells the other steps with their dates.
+  A month-only row takes the day its notes give, and a `<= 2026-09-04` row takes the release day, the earliest the public history can show.
   A decision taken before the initial public release (`568f33a`, 2026-09-04) is dated by month from the maintainer's notes, or `<= 2026-09-04` when it is already in that release and no source dates it earlier.
 - **Sources**: where the decision and its reasons can be read.
   `README.md:N` is a line of the top-level README at the commit that adds this inventory; a short SHA is a commit of this repository.
-  `notes` means part of the reasoning is only in the maintainer's design notes, outside this repository, and will be restated in the ADR.
+  `notes` means part of the reasoning, or the date, is only in the maintainer's design notes, outside this repository, and will be restated in the ADR.
 - **Rationale**: `yes` when the sources state why and what was rejected, `partial` when they state why but not the alternatives or the costs, `missing` when no source states why.
   Every `missing` row is a question for the owner, listed under [Open questions](#open-questions).
 
@@ -36,7 +37,7 @@ The number is the one the ADR will take.
 | 0006 | Tick from a KeepAlive loop instead of launchd StartInterval; the daily digest job doubles as watchdog | 2026-08 | `README.md:222-224`, `orchestrator/platform/README.md:9,12`, notes | yes |
 | 0007 | Fresh context for every slice, resumed from notes in the task file, not from `claude -p --resume` | 2026-08 | `orchestrator/prompts/orchestrate.md:111`, notes | yes |
 | 0008 | Keep a local custom scheduler rather than Claude Code's native scheduling | 2026-08 | `README.md:5,51`, notes | yes |
-| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10` | missing |
+| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10`, notes | missing |
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial |
 | 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-27 | `02ec85e`, `README.md:107-110`, notes | yes |
 | 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial |
@@ -49,7 +50,7 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0013 | Pace the week with a decaying reserve of one heavy (P90) day per remaining day | 2026-08 | `README.md:54,166`, notes | yes |
-| 0014 | Back-load each night's share of the weekly surplus; the last night absorbs the whole burn-down | 2026-09-07 | `7924fe2`, `00d9735`, `b90f4fe`, `README.md:179-183`, `orchestrator/config.yaml:93-101` | yes |
+| 0014 | Weight each night's share of the weekly surplus by a back-loading ratio, flat by default; the last night absorbs the whole burn-down | 2026-09-07, flat default 2026-09-08 | `7924fe2`, `00d9735`, `b90f4fe`, `README.md:179-183`, `orchestrator/config.yaml:93-101` | yes |
 | 0015 | Measure consumption from Claude Code's own transcripts instead of ccusage | 2026-09-09 | `0386c2c`, `README.md:169` | yes |
 | 0016 | Budget in USD at list price, not in tokens; token-era keys are refused, not converted | 2026-09-12 | `abdfdf3`, `0804eb5`, `892039b`, `aec5217`, `README.md:137-140` | yes |
 | 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them | 2026-09-25 | `28d672a`, `93a9d6e`, `README.md:141-164`, notes | yes |
@@ -78,7 +79,7 @@ The number is the one the ADR will take.
 |---|---|---|---|---|
 | 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | no night ceiling 2026-09-08, task's model 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes |
 | 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09, running count and pre-cut filter 2026-09-12 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes |
-| 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77` | yes |
+| 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-08, one machine ceiling 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77`, notes | yes |
 
 ### Queue and task lifecycle
 
@@ -94,7 +95,7 @@ The number is the one the ADR will take.
 | 0039 | Done tasks archive themselves once idle for the lock TTL; lookups by name resolve the archive | 2026-09-28 | `2c12e4f`, `acfabe5`, `e0d8a94`, `README.md:58` | partial |
 | 0040 | The gatekeeper claims a task at launch instead of leaving the claim to the session | 2026-09-12 | `902654e`, `README.md:205` | yes |
 | 0041 | Reset stale `in-progress` tasks to `ready`, keeping their notes | 2026-09-08 | `b90f4fe`, `README.md:67` | yes |
-| 0042 | No silent defaults: only an absent key gets a default; an unreadable value makes the task unschedulable and reported | 2026-09-06, general rule 2026-09-08 | `b90f4fe`, `4ca8cb2`, `0804eb5`, `README.md:66` | yes |
+| 0042 | No silent defaults: only an absent key gets a default; an unreadable value makes the task unschedulable and reported | orphaned tasks reported 2026-09-06, general rule 2026-09-08 | `b90f4fe`, `4ca8cb2`, `0804eb5`, `README.md:66` | yes |
 | 0043 | Block stalled or storming tasks, and pause the engine on a launch-failure storm | 2026-09-17 | `3efc395`, `1829642`, `3b00625`, `7fb2812`, notes | yes |
 | 0044 | Kill switch: a `PAUSED` file stops every launch | 2026-08 | `568f33a`, `README.md:65`, notes | partial |
 | 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-16 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes |

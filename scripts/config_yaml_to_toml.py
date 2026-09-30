@@ -91,6 +91,13 @@ def load_yaml_subset(path):
 
 # --- The rewrite -------------------------------------------------------------
 
+def _line_pair(stripped):
+    pair = _pair(stripped)
+    if pair is None or ":" not in stripped:
+        raise ValueError(f"line is not `key: value`: {stripped!r}")
+    return pair
+
+
 def _toml_value(key, raw):
     if key in LIST_KEYS:
         return "[" + ", ".join(json.dumps(v) for v in split_values(raw)) + "]"
@@ -115,7 +122,7 @@ def convert(text):
         indent = len(code) - len(code.lstrip())
         stripped = code.strip()
         if indent == 0:
-            key, raw = _pair(stripped)
+            key, raw = _line_pair(stripped)
             if raw:
                 if section is not None:
                     raise ValueError(
@@ -134,7 +141,7 @@ def convert(text):
             stripped = stripped[2:].strip()
             if not stripped:
                 continue
-        key, raw = _pair(stripped)
+        key, raw = _line_pair(stripped)
         out.append(f"{key} = {_toml_value(key, raw)}{tail}")
     return "\n".join(out) + "\n"
 

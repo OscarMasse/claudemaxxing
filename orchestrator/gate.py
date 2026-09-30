@@ -725,6 +725,12 @@ def plan(p):
             pool -= share
 
 
+def stacks_cmd(p):
+    from lib import stacks
+    lines = stacks.render(stacks.collect(p["root"]))
+    print("\n".join(lines) if lines else "no stacks")
+
+
 def main():
     try:
         p = paths()
@@ -738,6 +744,8 @@ def main():
         status(p)
     elif cmd == "plan":
         plan(p)
+    elif cmd == "stacks":
+        stacks_cmd(p)
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)
         sys.exit(2)

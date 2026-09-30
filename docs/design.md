@@ -1,7 +1,7 @@
 # Design notes
 
 The engine's design, the reasoning behind each rule, and the failure modes that shaped it.
-The [README](../README.md) is the short version; this file is the long one, and nothing here is needed to run a first night.
+The [README](../README.md) is the short version; this file is the long one, including the full install steps.
 It started life as the README itself and keeps the detail that made that README too long to land its point.
 
 The engine has run the author's own backlog nightly since August 2026.
@@ -61,7 +61,7 @@ Prior art: this is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) (Geoffre
   Any other `mode:` value makes the task unschedulable and reported.
 - **Declared delivery.** Every task states `delivery: branch|pr|local` and the session must honor it: `pr` means the task is not done until the branch is pushed and the PR is open with its URL recorded, `branch` means a local commit and no push, `local` means nothing leaves the machine. Leaving it to the session's judgement produced a night where four of five finished tasks sat in unpushed worktrees and one opened a PR, with nothing in the tasks distinguishing them.
 - **Rails as deny rules.** The delivery rails are enforced by the harness, not by the prompt: `orchestrator/lib/permissions.py` builds each session's `--disallowedTools` list, denying pushes and mutating `gh` calls to every session that is not `pr`, and force pushes, `git filter-branch` and credential reads to every session. A deny rule is a glob over the command string, so each family enumerates its spellings (`rtk` prefix, `git -C`, trailing flags); `git reset --hard` stays allowed on purpose, since it only discards work in a disposable worktree.
-- **Kill switch.** `touch orchestrator/PAUSED` stops all launches; deleting it resumes.
+- **Kill switch.** `touch orchestrator/PAUSED` under the backlog root stops all launches; deleting it resumes.
 - **No silent defaults.** A frontmatter value the engine interprets gets a default when the key is ABSENT, never when it is present and unreadable: an unknown `model:` or `project:`, or a missing `delivery:`, makes the task unschedulable and reported (`gate.py status`, every tick's log), because work done at the wrong model or in the wrong place costs more than work not done.
 - **Self-repair.** A session killed mid-task leaves it `in-progress`, which no scheduler ever picks again; the gatekeeper resets such a task to `ready` once no live session can account for it, keeping its last notes so the next session resumes rather than restarts.
 - **One worktree per task.** A session never works in a repo's main checkout, where the owner and other concurrent sessions keep their uncommitted work: before launching, `run.sh` asks `orchestrator/lib/workspace.py` for the session's directories, and every project dir that is a git repo comes back as `<repo>/.agent-worktrees/<task>` on branch `agent/<task>`, created from the remote's default branch or reused by the next slice (a task whose work predates this names its branch with `branch:`, and that branch's worktree is reused). Only that worktree is passed as `--add-dir`, and a session that cannot get its worktree is not launched. A task that must work in the main checkout declares `workdir: main` (any other value makes it unschedulable), and so does a project whose repo is a notes store rather than code (project key `workdir: main`).

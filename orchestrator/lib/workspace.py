@@ -3,7 +3,7 @@
 Why this exists
 ---------------
 On 2026-09-25 a session ran `git checkout -b <branch> origin/main` inside the
-rankr main checkout while another session had uncommitted work there. The
+webapp main checkout while another session had uncommitted work there. The
 switch carried the other session's dirty files into the new branch, and a
 `git stash` or `git reset --hard` at the wrong moment would have destroyed
 them. Leaving the choice of a worktree to each session's judgement is what
@@ -23,15 +23,15 @@ What is not a repo dir
 ----------------------
 Only a dir that is itself the top level of a git repo gets a worktree. The
 backlog root is written in place by design (task files, digests), and a
-parent dir holding several repos (`~/side-projects`) names no single repo, so
+parent dir holding several repos (`~/projects`) names no single repo, so
 both are passed through unchanged. A task that must work in the main
-checkout itself (rankr seeds in its gitignored `scripts/`) declares
+checkout itself (webapp seeds in its gitignored `scripts/`) declares
 `workdir: main`, validated in lib/tasks.py.
 
 Optional dirs
 -------------
 A project's `optional_dirs` (lib/config.py) are repos only some of its tasks
-touch, like rankr's ~1 GB pokemon-assets checkout. A task that declares one
+touch, like webapp's ~1 GB big-assets checkout. A task that declares one
 in `uses:` gets it like any other dir, worktree included; every other
 optional dir gets no worktree and reaches the session as its main checkout,
 read-only through deny rules (lib/permissions.py readonly_rules).
@@ -69,7 +69,7 @@ from lib import tasks  # noqa: E402
 
 WORKTREES_DIRNAME = ".agent-worktrees"  # also what lib/janitor.py matches
 BRANCH_PREFIX = "agent/"
-# Tried in order when origin/HEAD is not set: pokemon-assets' default branch
+# Tried in order when origin/HEAD is not set: big-assets' default branch
 # is `master`, and a repo without a remote only has its local branch.
 BASES = ("origin/main", "origin/master", "main", "master")
 
@@ -210,7 +210,7 @@ def prepare(repo, slug, declared_branch=None):
 def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
     """The dirs the session may write to: each repo dir replaced by the
     task's worktree in it, unless the task or its project (a repo that is not
-    code, like ~/Personal) declares `workdir: main`."""
+    code, like ~/notes) declares `workdir: main`."""
     workdir = tasks.task_workdir(task_file)
     if workdir is None:
         raise WorkspaceError(f"{task_file}: unknown workdir: value")

@@ -83,7 +83,7 @@ class RunShTest(unittest.TestCase):
         from tests.test_workspace import make_repo
         # Resolved: macOS temp dirs sit behind the /var -> /private/var link,
         # and the worktree path comes back resolved.
-        repo = make_repo(self.root.resolve(), "rankr")
+        repo = make_repo(self.root.resolve(), "webapp")
         cfg = Path(self.env["ORCH_CONFIG"])
         cfg.write_text(cfg.read_text().replace(
             f"dirs: {self.root}/projects", f"dirs: {repo}"))
@@ -103,7 +103,7 @@ class RunShTest(unittest.TestCase):
     def optional_assets(self):
         from tests.test_workspace import make_repo
         root = self.root.resolve()
-        repo, assets = make_repo(root, "rankr"), make_repo(root, "pokemon-assets")
+        repo, assets = make_repo(root, "webapp"), make_repo(root, "big-assets")
         cfg = Path(self.env["ORCH_CONFIG"])
         cfg.write_text(cfg.read_text().replace(
             f"dirs: {self.root}/projects",
@@ -127,7 +127,7 @@ class RunShTest(unittest.TestCase):
     def test_declared_optional_dir_gets_a_worktree_and_no_deny(self):
         assets = self.optional_assets()
         self.task.write_text(self.task.read_text().replace(
-            "delivery: local", "delivery: local\nuses: [pokemon-assets]"))
+            "delivery: local", "delivery: local\nuses: [big-assets]"))
         self.run_session(40, "ready")
         wt = assets / ".agent-worktrees" / "t"
         self.assertIn(str(wt), self.add_dirs())

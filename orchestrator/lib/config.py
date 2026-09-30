@@ -299,14 +299,14 @@ def accounts(cfg):
 # otherwise change the launch order silently.
 PROJECT_KEYS = ("name", "account", "dirs", "optional_dirs", "rank", "class",
                 "local_only_default", "workdir")
-# `optional_dirs` are repos a task of the project only sometimes needs (rankr's
-# ~1 GB pokemon-assets checkout): a task names the ones it writes to with
+# `optional_dirs` are repos a task of the project only sometimes needs (webapp's
+# ~1 GB big-assets checkout): a task names the ones it writes to with
 # `uses: [<basename>, ...]` and gets a worktree of each (lib/workspace.py);
 # every other optional dir is handed to the session read-only, as its main
 # checkout under deny rules (lib/permissions.py), so no task pays for a
 # worktree it never uses.
 # `workdir: main` exempts a whole project from per-task worktrees
-# (lib/workspace.py): for a repo that is a notes store, not code (~/Personal),
+# (lib/workspace.py): for a repo that is a notes store, not code (~/notes),
 # where every task commits in place. Absent = a worktree per task.
 PROJECT_WORKDIRS = ("worktree", "main")
 PROJECT_CLASSES = ("standard", "expedite")

@@ -88,7 +88,7 @@ class TestDenyRules(unittest.TestCase):
             self.assertIn("Read(~/.ssh/**)", rules)
 
     def test_readonly_dir_denies_writes_but_not_reads(self):
-        ro = "/Users/o/side-projects/pokemon-assets"
+        ro = "/Users/o/projects/big-assets"
         rules = permissions.deny_rules("pr", [ro])
         for tool in ("Edit", "Write", "NotebookEdit"):
             self.assertIn(f"{tool}({ro}/**)", rules)

@@ -32,6 +32,13 @@ switch to that worktree for this slice only if the branch is not in a main check
 directory you are about to branch or reset shows changes you did not make, stop:
 they are someone else's work.
 
+Stacks: a task with a `stack: <name>` key is one layer of a GitHub stack (`gh stack`,
+extension github/gh-stack). Start the slice with `gh stack sync` in the task's
+worktree so you build on what is actually merged, then add your layer on top of the
+stack's current head with `gh stack add` and publish it with `gh stack submit`.
+Never build on a lower layer that is not done; a failed lower layer holds yours.
+Only a `pr` session may submit.
+
 Procedure:
 1. List {{BACKLOG_ROOT}}/tasks/*.md and read their frontmatter. Eligible tasks:
    `status: ready` and a

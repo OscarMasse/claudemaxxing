@@ -1,25 +1,17 @@
 # Background orchestrator config, parsed by lib/config.py (zero dependencies).
 #
-# FORMAT: a small hand-rolled YAML subset. Exactly two shapes exist:
-#   key: value          # top-level scalar
-#   section:            # a top-level key with no value opens a list of flat mappings
-#     - key: value
-#       key: value
-# No deeper nesting, no quoting, no multi-line values. Multi-value fields
-# (like a project's `dirs`) use YAML flow style: [one, two]. The older
-# space-separated form still parses. Comments and blank lines are ignored.
+# FORMAT: TOML, read by Python's standard-library tomllib (no dependency).
+# Top-level `key = value` scalars come first; `[[accounts]]` and
+# `[[projects]]` each open one flat table (TOML array of tables), and every
+# key after such a header belongs to that table until the next header. Values
+# are strings (quoted, times too: "05:59"), integers, floats and booleans;
+# a project's `dirs` and `optional_dirs` are arrays of strings. Anything
+# else (a nested table, a missing [[accounts]]) is refused at load time.
 #
 # LAYERING: every top-level scalar acts as a shared default for all accounts;
 # an account's own keys override it. So write shared knobs (regime hours,
 # slices, rate estimates) once here, and per-subscription calibration inside
-# each `accounts` entry.
-#
-# BACKWARD COMPATIBILITY: if the `accounts` and `projects` sections are absent
-# (the legacy flat format), one account named "default" is synthesized from the
-# flat keys (profile ~/.claude) plus one project named "default" whose dirs
-# come from the legacy `extra_dirs` key. Tasks without a `project:` frontmatter
-# key route to the project named "default" when one exists, so old configs and
-# old task files keep working unchanged.
+# each `[[accounts]]` table.
 #
 # UNIT: every *_usd budget figure is USD at Anthropic list price, computed
 # locally from Claude Code's own transcript files with the per-family price
@@ -35,46 +27,46 @@
 # state/<account>/rate_limits.jsonl (see lib/ratelimits.py and the README).
 # Running out of a model's quota is still observed from the account's own
 # limit message (lib/quota.py), not predicted from the caps.
-dry_run: false
+dry_run = false
 # Notifications. A new unchecked question in NEEDS-HUMAN.md raises one user
 # notification, and clicking it opens that file with this command. `open` hands
 # the file to whatever application macOS has registered for it; set an editor
 # binary (zed, code, subl) to force one. Clickable notifications need
 # terminal-notifier on the PATH (`brew install terminal-notifier`); without it
 # the notification is still shown, just not clickable.
-notify_open_cmd: open
+notify_open_cmd = "open"
 # Night regime hours (local time).
-night_start: 02:00
-night_end: 06:00
-morning_guard: 08:30
+night_start = "02:00"
+night_end = "06:00"
+morning_guard = "08:30"
 # Minutes a background quota window may end past morning_guard. Without it, a
 # follow-on window ending two minutes past the guard chopped the rest of a
 # night into ever shorter slices (2026-09-27).
-guard_tolerance_min: 15
+guard_tolerance_min = 15
 # When the daily digest job runs (local time). Also the boundary a run's
 # journal entry uses to pick its digest day: strictly before this time, a
 # finishing run journals into TODAY's digest file; at or after, TOMORROW's
 # (today's digest has already been curated by then).
-digest_time: 07:37
+digest_time = "07:37"
 # Pre-reset burn-down starts this many hours before the reset. Also sets what
 # the last night can absorb (ceil(hours / 5) quota windows), which is what the
 # per-night plan hoards for it.
-prereset_burn_hours: 8
+prereset_burn_hours = 8
 # Activity lock threshold (minutes since the last interactive session write on
 # the account being scheduled; each account has its own idle clock). Night
 # regime only: the pre-reset burn-down ignores it.
-activity_idle_night_min: 40
+activity_idle_night_min = 40
 # Slice size (wall-clock minutes handed to the claude session).
-night_slice_min: 50
+night_slice_min = 50
 # Shortest slice worth a launch. Every session pays a fixed cold start (context,
 # dev stack) before doing anything, so near the end of a window the tick skips
 # instead of launching a slice shorter than this.
-min_slice_min: 20
+min_slice_min = 20
 # Session slots. The count is decided by the budget alone; this is a SAFETY
 # ceiling for the machine, not a pacing tool (8 max: run.sh allocates
 # RUNNING.1..8). Start conservative, read the `estimate` and `cost` lines of
 # `gate.py status`, then raise it.
-max_parallel_sessions: 4
+max_parallel_sessions = 4
 # Pacing ceiling on how many Fable sessions may run at the same time.
 # Unlike max_parallel_sessions this is not about machine safety: Fable has its
 # own, much tighter limit, and it is a token limit rather than a time limit.
@@ -83,7 +75,7 @@ max_parallel_sessions: 4
 # later) while it risks spending several slots relaunching into the same wall
 # and starving the cheaper models of slots. Applies to the pre-reset burn-down
 # too, which upgrades sessions to Fable and would hit that same wall.
-max_fable_slots: 1
+max_fable_slots = 1
 # Burn-down overrides of the two ceilings above (unset: same values). The
 # last night has no next-morning window to protect, and a model that hits its
 # wall is recorded and skipped (lib/quota.py), so both can run wider.
@@ -98,25 +90,25 @@ max_fable_slots: 1
 # r = 2 with 7 nights left the first night gets 1/127 of the pool - measured on
 # a real backlog that was less than one median session, so most nights of the
 # week could not fund a single session out of their own allocation.
-night_budget_ratio: 1.0
+night_budget_ratio = 1.0
 # Cold-start estimate of what one session costs, in USD, used until the ledger
 # has measured a real figure for a (task, model) pair. Per session, not per
 # minute: sessions do not fill their slice, so the slice length says nothing
 # about the cost. Calibrate from `gate.py status` (`cost task=...`) once a few
 # nights have run; a p75 of the measured distribution is a reasonable prior,
 # the mean is dragged by a long tail (2.85 is the p75 over 131 sessions).
-est_session_usd: 2.85
+est_session_usd = 2.85
 # Claude invocation defaults (an account may override claude_bin). Use an
 # absolute path if claude is not on the PATH that run.sh exports (launchd
 # hands down a bare one).
-claude_bin: /usr/local/bin/claude
-claude_model: sonnet
-claude_effort: low
+claude_bin = "/usr/local/bin/claude"
+claude_model = "sonnet"
+claude_effort = "low"
 # Hard per-session cost ceiling (--max-budget-usd, enforced by the CLI even on
 # a subscription). Runaway protection only, NOT a pacing tool: a budget kill is
 # a hard stop with no clean shutdown (no resume point written). Keep it ~5x the
 # observed max per-run cost from the ledger (example: median 0.60, max 3.00).
-max_session_usd: 15
+max_session_usd = 15
 
 # --- Accounts ---------------------------------------------------------------
 # One entry per Claude subscription. Each account is scheduled independently
@@ -134,18 +126,19 @@ max_session_usd: 15
 #   reset_weekday (0=Monday), reset_time, reset_tz
 #                     this subscription's weekly reset (check /usage:
 #                     "Resets <date> at <time>")
-accounts:
-  - name: personal
-    claude_config_dir: ~/.claude
-    reset_weekday: 4
-    reset_time: 05:59
-    reset_tz: Europe/Warsaw
-  - name: work
-    claude_config_dir: ~/.claude-work
-    claude_bin: /usr/local/bin/claude
-    reset_weekday: 0
-    reset_time: 09:00
-    reset_tz: Europe/Warsaw
+[[accounts]]
+name = "personal"
+claude_config_dir = "~/.claude"
+reset_weekday = 4
+reset_time = "05:59"
+reset_tz = "Europe/Warsaw"
+[[accounts]]
+name = "work"
+claude_config_dir = "~/.claude-work"
+claude_bin = "/usr/local/bin/claude"
+reset_weekday = 0
+reset_time = "09:00"
+reset_tz = "Europe/Warsaw"
 
 # --- Projects ---------------------------------------------------------------
 # A project routes tasks to an account and declares where its sessions may
@@ -157,7 +150,7 @@ accounts:
 #   name               required, referenced by task frontmatter
 #   account            required, the account this project's tasks run on
 #   dirs               directories handed to the session via --add-dir,
-#                      flow-style list [a, b], ~ expands to $HOME
+#                      array of strings ["a", "b"], ~ expands to $HOME
 #   optional_dirs      optional, same syntax as dirs: repos only some tasks
 #                      touch (a large assets checkout). A task lists the ones
 #                      it writes to by basename in `uses: [name, ...]` and
@@ -175,18 +168,20 @@ accounts:
 #                      FLOOR, not a default: every task here must declare
 #                      `delivery: local`, and one declaring `branch` or `pr`
 #                      is reported as misconfigured rather than downgraded.
-projects:
-  - name: side-projects
-    account: personal
-    dirs: [~/projects]
-    rank: 1
-  - name: life
-    account: personal
-    dirs: [~/personal]
-    rank: 2
-    local_only_default: true
-  - name: work
-    account: work
-    dirs: [~/work]
-    class: expedite
-    local_only_default: true
+[[projects]]
+name = "side-projects"
+account = "personal"
+dirs = ["~/projects"]
+rank = 1
+[[projects]]
+name = "life"
+account = "personal"
+dirs = ["~/personal"]
+rank = 2
+local_only_default = true
+[[projects]]
+name = "work"
+account = "work"
+dirs = ["~/work"]
+class = "expedite"
+local_only_default = true

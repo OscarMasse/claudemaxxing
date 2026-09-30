@@ -130,11 +130,21 @@ import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
-from lib import config
-
 PRIORITY_ORDER = {"high": 0, "medium": 1, "normal": 1, "low": 2}
 MODELS = ("sonnet", "opus", "fable")
 DELIVERY_VALUES = ("branch", "pr", "local")
+
+
+def split_values(raw):
+    """A multi-value frontmatter field (`uses:`, `prerequisites:`) as a list
+    of strings. Two spellings are accepted: flow style `[a, b]` (preferred)
+    and the legacy space-separated `a b`; flow style is detected by the
+    brackets, so a value containing spaces is only expressible with it."""
+    raw = str(raw).strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1]
+        return [v.strip() for v in inner.split(",") if v.strip()]
+    return raw.split()
 
 
 def _frontmatter(path):
@@ -200,7 +210,7 @@ def _declared_uses(fm, proj):
     name matches no optional dir of the project: reported by misconfigured()
     and never guessed, since dropping the name would run the task read-only
     in the repo it was written to change."""
-    names = config.split_values(fm.get("uses", ""))
+    names = split_values(fm.get("uses", ""))
     if not names:
         return []
     by_name = {Path(d).name: d for d in (proj or {}).get("optional_dirs", [])}
@@ -259,7 +269,7 @@ def _breaches_local_floor(delivery, proj):
 def _prereq_names(fm):
     """Declared prerequisite task basenames, `.md` suffix stripped if present.
     Accepts YAML flow style `[a, b]` and the legacy space-separated `a b`."""
-    names = config.split_values(fm.get("prerequisites", ""))
+    names = split_values(fm.get("prerequisites", ""))
     return [n[:-3] if n.endswith(".md") else n for n in names]
 
 

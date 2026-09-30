@@ -18,7 +18,7 @@ accounts can both launch sessions in the same tick.
 
 Env overrides (tests / manual runs):
   ORCH_ROOT (backlog root override, wins over BACKLOG_ROOT), BACKLOG_ROOT,
-  ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.yaml and
+  ORCH_CONFIG (explicit config file, wins over $BACKLOG_ROOT/config.toml and
   the repo default; see lib/config.resolve_path),
   ORCH_NOW (ISO), ORCH_IDLE_MIN, ORCH_IDLE_MIN_<ACCOUNT>,
   ORCH_USAGE_JSON, ORCH_USAGE_JSON_<ACCOUNT>, ORCH_NO_NOTIFY,
@@ -123,7 +123,7 @@ def notify_duty(p, idle, open_cmd=None):
     The hook is handed NEEDS-HUMAN.md so the notification can open it: the
     question is a checkbox to answer and tick, and a notification that cannot
     take the owner to it makes them hunt for the file. `open_cmd` is passed
-    through as ORCH_NOTIFY_OPEN (`notify_open_cmd` in config.yaml).
+    through as ORCH_NOTIFY_OPEN (`notify_open_cmd` in config.toml).
     """
     if idle is None or idle > PRESENT_MIN or not p["needs"].exists():
         return

@@ -20,8 +20,8 @@ python3 -c '
 import json, sys
 sys.path.insert(0, "orchestrator")
 from lib import config
-cfg = config.load("orchestrator/config.yaml")
-assert cfg, "orchestrator/config.yaml parsed to nothing"
+cfg = config.load("orchestrator/config.toml")
+assert cfg, "orchestrator/config.toml parsed to nothing"
 json.load(open("orchestrator/session-settings.json"))
 '
 

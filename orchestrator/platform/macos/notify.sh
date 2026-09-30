@@ -12,7 +12,7 @@
 # click is a downgrade; losing the alert would be a bug.
 #
 # The command used to open the file comes from ORCH_NOTIFY_OPEN (set by gate.py
-# from `notify_open_cmd` in config.yaml), defaulting to `open`, which hands the
+# from `notify_open_cmd` in config.toml), defaulting to `open`, which hands the
 # file to whatever application macOS has registered for it.
 set -u
 TITLE="${1:?usage: notify.sh <title> <message> [path]}"

@@ -8,7 +8,7 @@
 The engine's design decisions are recorded today in four places that each tell part of the story.
 The README's "Design details" and "FAQ" sections describe the current behaviour and some of its reasons.
 Commit bodies hold most of the reasoning and the measurements behind it (for example `0386c2c`, `2d6dd86`, `6c32f0c`).
-Comments in the example `orchestrator/config.yaml` explain individual knobs.
+Comments in the example `orchestrator/config.toml` explain individual knobs.
 The rest lives only in the maintainer's notes, outside this repository.
 
 None of these places records a decision as a unit: what was decided, what else was weighed and why it lost, and what the choice costs.

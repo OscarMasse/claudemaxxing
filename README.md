@@ -45,7 +45,7 @@ Runs entirely on your Mac: launchd, dependency-free Python, and the Claude Code 
 
 ## Quick start
 
-Requirements: macOS, Python 3.9+, the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
+Requirements: macOS, Python 3.11+ (for the standard-library `tomllib` that reads the config), the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
 Nothing to install on the Python side.
 
 Rehearse a whole night first, in a throwaway backlog with a stubbed `claude` and zero tokens:
@@ -56,12 +56,14 @@ orchestrator/e2e-sandbox.sh
 ```
 
 Then point the engine at a backlog of your own.
-The backlog is a plain directory: `tasks/*.md`, `config.yaml`, and the digests and state the engine writes there.
+The backlog is a plain directory: `tasks/*.md`, `config.toml`, and the digests and state the engine writes there.
+The config is plain TOML, read by the standard-library `tomllib`: shared top-level keys, then one `[[accounts]]` and one `[[projects]]` table per entry; the example's header documents every key.
+An older `config.yaml` is migrated once with `python3 scripts/config_yaml_to_toml.py "$BACKLOG_ROOT"`.
 
 ```bash
 export BACKLOG_ROOT=~/backlog
 mkdir -p "$BACKLOG_ROOT/tasks"
-cp orchestrator/config.yaml "$BACKLOG_ROOT/config.yaml"          # edit: claude_bin, accounts (profile dir, reset day), projects
+cp orchestrator/config.toml "$BACKLOG_ROOT/config.toml"          # edit: claude_bin, accounts (profile dir, reset day), projects
 cp examples/tasks/research-static-site-generators.md "$BACKLOG_ROOT/tasks/"
 python3 orchestrator/lib/ratelimits.py seed personal 850 58 114 2026-09-24T23:10:00+02:00   # weekly cap, 5h cap, heavy-day usage, all USD
 orchestrator/manual.sh --tasks research-static-site-generators --dry-run

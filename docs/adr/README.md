@@ -158,23 +158,6 @@ Selected for an ADR (the backfill may argue for adding or dropping one, in its P
 Each ADR written must carry the strongest argument against the decision and a "Would we decide the same today?" line.
 When the answer is no, the ADR points to the follow-up that supersedes it.
 
-## Open questions, answered by the owner (2026-09-30)
-
-- **0009.** Install is `git clone`, run is launchd: a virtualenv or a `pip install` is one more thing that breaks unattended (minimal PATH, interpreter upgrades) with nobody there to see it, so the standard library is the only parser allowed.
-  The hand-rolled YAML subset followed from that constraint, and it is the part that does not hold up: the file is not YAML, and every new need reopens the parser.
-  Challenged during this review; decision superseded: the config moves to TOML read by `tomllib` (standard library since 3.11).
-  Rejected on the way: a YAML library (dependency), JSON (no comments), TOON (a prompt format, not a config format).
-  The ADR records the original decision as superseded once the migration lands.
-- **0068.** There was never an allow list.
-  `--permission-mode bypassPermissions` is in the first runner (2026-08) as a stated judgment call: a headless session has nobody to answer a prompt, and the first unanswered prompt freezes the slice until the lock TTL.
-  An allow list would have to predict every tool and command of a development task and every omission becomes a blocking prompt, so in practice it ends up allowing everything.
-  Autonomy was first enforced by the task frontmatter and the prompt rules alone.
-  Experience corrected that: the rails that must hold (push by delivery, PR merge, the account boundary) moved to deny rules in 2026-09, evaluated by the harness before the model has a say, at no token cost.
-  Trust comes from isolation (a worktree per session, a scoped token, one account) rather than from prompts.
-- **0038.** Most of the owner's highest-priority work cannot run unattended (reviews, arbitration, conversations).
-  `blocked` means "waiting for an answer" and pollutes the questions list; a task kept out of the backlog leaves the only prioritised view there is.
-  `interactive` keeps the task in the backlog with its priority and deadline, the gatekeeper never launches it, and the digest opens the owner's day with it.
-
 ## Documentation drift found while building the inventory
 
 These texts contradict a decision above; the ADR, once written, is the reference they should follow.

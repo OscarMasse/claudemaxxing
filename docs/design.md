@@ -10,39 +10,33 @@ The failure modes were all infrastructure (launchd pended spawns, clamshell slee
 
 ## How it works
 
-```
-launchd (KeepAlive)                          launchd (07:37 daily)
-        |                                            |
-        v                                            v
-gatekeeper-loop.sh  --every 5 min-->   gatekeeper.sh   digest-wrapper.sh
-                                            |          (watchdog: kickstarts
-                                            v           the loop if dead)
-                                        gate.py tick         |
-                                            |                |
-              +-----------------------------+                |
-              |  per account: token usage read from that       |
-              |  profile's transcript activity, cost ledger, |
-              |  RUNNING locks; plus config.yaml, task        |
-              |  frontmatter, PAUSED                         |
-              |  prints, per account: SKIP <account> <why>   |
-              |  or RUN <account> <slice> <task> <model>     |
-              |  <effort> <project> (one line per slot)      |
-              +-----------------------------+                |
-                                            v                v
-                                run.sh --account <name> <slice> [task] ...
-                                            |
-                                            v
-                              headless `claude -p` session
-                              (account profile, project dirs,
-                               slice timeout, cost cap,
-                               task work + adversarial review)
-                                            |
-                                            v
-                              state/<account>/costs.jsonl (ledger)
-                              state/runs.log    (history)
-                              tasks/*.md        (status, notes)
-                              NEEDS-HUMAN.md    (questions)
-                              digests/<day>.md  (live run journal)
+```mermaid
+flowchart TD
+    keepalive[launchd KeepAlive] --> loop[gatekeeper-loop.sh]
+    loop -- every 5 min --> gk[gatekeeper.sh] --> tick[gate.py tick]
+    daily[launchd 07:37 daily] --> digest[digest-wrapper.sh<br/>watchdog: kickstarts the loop if dead]
+
+    subgraph inputs [read by the tick, per account]
+        usage[token usage from the profile's transcripts]
+        ledger[cost ledger]
+        locks[RUNNING locks]
+        cfg[config, task frontmatter, PAUSED]
+    end
+    inputs --> tick
+
+    tick -- "SKIP &lt;account&gt; &lt;why&gt;" --> skip([nothing launched])
+    tick -- "RUN &lt;account&gt; &lt;slice&gt; &lt;task&gt; &lt;model&gt; &lt;effort&gt;<br/>one line per slot" --> run[run.sh --account name slice task]
+    run --> session[headless claude -p session<br/>account profile, project worktree,<br/>slice timeout, cost cap,<br/>task work + adversarial review]
+
+    session --> out
+    subgraph out [written by the session]
+        costs[state/account/costs.jsonl - ledger]
+        runs[state/runs.log - history]
+        tfile[tasks/*.md - status, notes]
+        nh[NEEDS-HUMAN.md - questions]
+        dg[digests/day.md - live run journal]
+    end
+    out --> digest
 ```
 
 One constraint drives the whole design: background work shares a quota with a human who must never notice it.

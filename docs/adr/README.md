@@ -14,7 +14,8 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 Every decision below is a candidate ADR that has not been written yet.
 The number is the one the ADR will take.
 
-- **Date**: the day the decision was taken, from the commit that introduced it.
+- **Date**: the day the decision was actually taken: the commit that introduced it, or an earlier day when the maintainer's notes record the decision before it was committed.
+  A row that merges several steps of one decision gives the date of each step.
   A decision taken before the initial public release (`568f33a`, 2026-09-04) is dated by month from the maintainer's notes, or `<= 2026-09-04` when it is already in that release and no source dates it earlier.
 - **Sources**: where the decision and its reasons can be read.
   `README.md:N` is a line of the top-level README at the commit that adds this inventory; a short SHA is a commit of this repository.
@@ -49,9 +50,9 @@ The number is the one the ADR will take.
 | 0014 | Back-load each night's share of the weekly surplus; the last night absorbs the whole burn-down | 2026-09-07 | `7924fe2`, `00d9735`, `b90f4fe`, `README.md:179-183`, `orchestrator/config.yaml:93-101` | yes |
 | 0015 | Measure consumption from Claude Code's own transcripts instead of ccusage | 2026-09-09 | `0386c2c`, `README.md:169` | yes |
 | 0016 | Budget in USD at list price, not in tokens; token-era keys are refused, not converted | 2026-09-12 | `abdfdf3`, `0804eb5`, `892039b`, `aec5217`, `README.md:137-140` | yes |
-| 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them | 2026-09-26 | `28d672a`, `93a9d6e`, `README.md:141-164` | yes |
+| 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them | 2026-09-25 | `28d672a`, `93a9d6e`, `README.md:141-164`, notes | yes |
 | 0018 | Observe quota exhaustion per model family from the limit message instead of predicting it | 2026-09-09 | `0386c2c`, `README.md:171-175` | yes |
-| 0019 | Learn a session's cost per (task, model) as the max of its recent sessions, with a p75 cold-start prior | 2026-09-08 | `f638845`, `892039b`, `README.md:206-208`, `orchestrator/config.yaml:102-108` | yes |
+| 0019 | Learn a session's cost per (task, model) as the max of its recent sessions, with a p75 cold-start prior | 2026-09-08, max 2026-09-12 | `f638845`, `892039b`, `README.md:206-208`, `orchestrator/config.yaml:102-108` | yes |
 | 0020 | Append every session's result to a cost ledger that feeds the next decision and the digest | 2026-08 | `README.md:203-204`, notes | partial |
 | 0021 | A hard per-session cost ceiling (`--max-budget-usd`) as runaway protection, not as pacing | 2026-08 | `README.md:226-228`, `orchestrator/config.yaml:115-119`, notes | yes |
 
@@ -65,6 +66,7 @@ The number is the one the ADR will take.
 | 0025 | End of window: a guard tolerance and a minimum slice, and no relaunch ladder into shorter slices | 2026-09-27 | `ce9870d`, `ab6eebc`, `README.md:126-128`, `orchestrator/config.yaml:50-53,69-72`, notes | yes |
 | 0026 | The pre-reset burn-down runs with no budget, no reserve and no activity lock | 2026-09-11, lock dropped 2026-09-24 | `6c32f0c`, `6d08203`, `README.md:55,132-134` | yes |
 | 0027 | Detect owner activity from interactive transcript events, not from file mtimes | 2026-08 | `README.md:55,234-236`, `c2a633c`, notes | yes |
+| 0069 | Recent owner activity on an account blocks that account's night launches (activity lock) | 2026-08 | `README.md:55`, `orchestrator/config.yaml:63-66`, notes | partial |
 | 0028 | Give each session its absolute start and deadline, and tag early exits | 2026-09-27 | `ce9870d`, `README.md:129`, notes | yes |
 | 0063 | Work in time-boxed slices re-decided every tick, not one long run; a hard kill at the slice plus 10 minutes | 2026-08 | `README.md:33-39`, `orchestrator/run.sh:240,268`, `orchestrator/lib/with_timeout.py`, notes | partial |
 
@@ -73,7 +75,7 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes |
-| 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes |
+| 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09, running count and pre-cut filter 2026-09-12 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes |
 | 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77` | yes |
 
 ### Queue and task lifecycle
@@ -81,9 +83,9 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0032 | Order the queue by Kanban classes of service: task priority first, project rank only breaks ties | 2026-09-27 | `aa6ed38`, `README.md:185-191` | yes |
-| 0033 | Priority and deadlines propagate to prerequisites, with backward scheduling from the deadline | 2026-09-09 | `355b1a4`, `aa6ed38`, `e75bebd`, `README.md:192-194` | yes |
+| 0033 | Priority and deadlines propagate to prerequisites, with backward scheduling from the deadline | 2026-09-09, deadlines 2026-09-27 | `355b1a4`, `aa6ed38`, `e75bebd`, `README.md:192-194` | yes |
 | 0034 | Prerequisites are declared in frontmatter and enforced by the scheduler, not read from prose | <= 2026-09-04 | `README.md:56`, `orchestrator/prompts/orchestrate.md:88-97` | partial |
-| 0035 | Recurring work as duties (nightly or weekly, no daily) and fillers (at most once per night) | 2026-09-07 | `7924fe2`, `1a01555`, `ee49082`, `ee5b0a0`, `README.md:196-200` | yes |
+| 0035 | Recurring work as duties (nightly or weekly, no daily) and fillers (at most once per night) | 2026-09-07, filler once per night 2026-09-25 | `7924fe2`, `1a01555`, `ee49082`, `ee5b0a0`, `README.md:196-200` | yes |
 | 0036 | Work that needs no reasoning runs as a plain scheduled job, not as a session | 2026-09-07 | `7924fe2`, `README.md:201` | partial |
 | 0037 | Defer a ready task with `not_before` rather than blocking it | 2026-09-29 | `be5db55`, `bfe0148`, `README.md:57`, notes | yes |
 | 0038 | `mode: interactive` tasks are never launched and are listed first for the owner | 2026-09-28 | `a22fae3`, `13424b0`, `README.md:59-62`, notes | partial |
@@ -91,7 +93,7 @@ The number is the one the ADR will take.
 | 0040 | The gatekeeper claims a task at launch instead of leaving the claim to the session | 2026-09-12 | `902654e`, `README.md:205` | yes |
 | 0041 | Reset stale `in-progress` tasks to `ready`, keeping their notes | 2026-09-08 | `b90f4fe`, `README.md:67` | yes |
 | 0042 | No silent defaults: only an absent key gets a default; an unreadable value makes the task unschedulable and reported | 2026-09-08 | `b90f4fe`, `4ca8cb2`, `0804eb5`, `README.md:66` | yes |
-| 0043 | Block stalled or storming tasks, and pause the engine on a launch-failure storm | 2026-09-25 | `3efc395`, `1829642`, `3b00625`, `7fb2812`, notes | yes |
+| 0043 | Block stalled or storming tasks, and pause the engine on a launch-failure storm | 2026-09-17 | `3efc395`, `1829642`, `3b00625`, `7fb2812`, notes | yes |
 | 0044 | Kill switch: a `PAUSED` file stops every launch | 2026-08 | `568f33a`, `README.md:65`, notes | partial |
 | 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-25 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes |
 | 0064 | A `parallel: true` task may get several sessions at once, which shard its work; it is never claimed | 2026-08 | `README.md:205`, `902654e`, `3b00625`, notes | partial |
@@ -114,7 +116,7 @@ The number is the one the ADR will take.
 |---|---|---|---|---|
 | 0052 | One git worktree per task, never a repo's main checkout; sessions start outside every repo | 2026-09-28 | `193b8f0`, `6bcf946`, `9671680`, `f4cd445`, `README.md:68,70` | yes |
 | 0053 | Optional dirs are read-only unless a task declares them in `uses:` | 2026-09-28 | `fa258d4`, `README.md:69`, `orchestrator/config.yaml:161-167` | yes |
-| 0054 | Night janitors remove finished worktrees and abandoned compose stacks, only when nothing is running | 2026-09-24 | `b95a48a`, `193b8f0`, `6bcf946`, `README.md:70-71` | yes |
+| 0054 | Night janitors remove finished worktrees and abandoned compose stacks, only when nothing is running | 2026-09-24, worktrees 2026-09-28 | `b95a48a`, `193b8f0`, `6bcf946`, `README.md:70-71` | yes |
 | 0055 | Headless sessions run subagents and Bash in the foreground only | 2026-09-25 | `282404f`, `orchestrator/prompts/orchestrate.md:155-159` | yes |
 
 ### Verification and reporting
@@ -122,8 +124,8 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0056 | Mandatory verification, then an adversarial fresh-context review with a capped number of passes, before `done` | 2026-08 | `README.md:51,53`, `orchestrator/prompts/orchestrate.md:131-136`, notes | yes |
-| 0057 | A live digest: every run journals into the day's file, curated once each morning | 2026-08 | `README.md:72`, `orchestrator/prompts/digest.md`, `orchestrator/config.yaml:54-58` | partial |
-| 0058 | Questions for the owner go to `NEEDS-HUMAN.md`, with a clickable notification only while the owner is at the machine | 2026-08 | `0386c2c`, `README.md:96-98`, `orchestrator/platform/README.md:13` | partial |
+| 0057 | A live digest: every run journals into the day's file, curated once each morning | 2026-08, live journal <= 2026-09-04 | `README.md:72`, `orchestrator/prompts/digest.md`, `orchestrator/config.yaml:54-58`, `568f33a`, notes | partial |
+| 0058 | Questions for the owner go to `NEEDS-HUMAN.md`, with a clickable notification only while the owner is at the machine | 2026-08, clickable 2026-09-09 | `0386c2c`, `README.md:96-98`, `orchestrator/platform/README.md:13`, notes | partial |
 | 0059 | Manual launches skip every pacing rule and keep every safety rule | 2026-09-26 | `e36bc9d`, `README.md:100-102`, notes | yes |
 
 ### Tooling

@@ -30,7 +30,7 @@ In the morning you read a digest and review pull requests.
   The engine reads your real consumption from Claude Code's own transcripts and keeps a heavy day's worth in reserve for every day left before the reset.
   Sessions only get the surplus.
 - **Mornings are yours.**
-  No session opens a quota window that would run past the morning guard, and your own recent activity on the account blocks night launches.
+  No session opens a quota window that would run past the morning guard (plus a short tolerance), and your own recent activity on the account blocks night launches.
   The one exception is the burn-down before the weekly reset, when the surplus would expire anyway.
 - **Every task ends where it says.**
   `delivery: pr | branch | local` is a contract: only a `pr` session may push or call a mutating `gh`, and the harness denies both to the others.
@@ -112,7 +112,7 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
 
 - **The burn-down runs open bar.**
   Unspent quota is lost at the weekly reset, so the last hours before it (`prereset_burn_hours`, 8 by default, anchored to the reset time, day or night) ignore the budget, the morning guard and the activity lock.
-  Only the slot ceilings, the kill switch and the account's own limit stop it.
+  Only the slot ceilings, the per-session cost cap, the kill switch and the account's own limit stop it.
 - **macOS only, for now.**
   Scheduling goes through launchd and `pmset`.
   The OS seam is five scripts, documented in [orchestrator/platform/README.md](orchestrator/platform/README.md); a Linux port would swap in systemd timers.
@@ -120,7 +120,7 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
   Clamshell sleep has no software override.
   Lid open on AC power plus `sudo pmset -c sleep 0` is the working setup.
 - **Per-session cost cap.**
-  Every session runs with `--max-budget-usd` (`max_session_usd`, about five times the observed maximum), so a runaway session dies instead of draining the week.
+  Every session runs with `--max-budget-usd` (`max_session_usd`, which you set at about five times the observed maximum), so a runaway session dies instead of draining the week.
 - **Quota exhaustion is observed, not predicted.**
   The budget paces the week from local estimates.
   Hitting a model's limit is recorded per model, and that model is not offered again until the stated reset.

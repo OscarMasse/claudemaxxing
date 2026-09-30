@@ -22,7 +22,10 @@ The change landed in four commits the same day: measurement (`abdfdf3`), control
 
 - **Keep tokens and weight them per model.** Not recorded as a separate option; the maintainer's notes record that an earlier attempt to give Fable its own token cap had been judged impossible, and that the missing dimension turned out to be price.
 - **Convert token-era keys automatically.** Rejected: no factor turns a model-blind token count into dollars, since tokens weigh differently per model, "which is the whole point"; and the repo rule is to default a key when it is absent, never when it is present and unreadable (`0804eb5`).
-- **Strongest argument against.** (Own analysis.) List-price USD is not what the subscription meters: it is a flat fee with opaque limits, and the price weighting was calibrated from a handful of readings on one night; if the provider weighs cache reads, a new model or a promotion differently from list price, the engine paces confidently against the wrong unit, and every price change requires editing a hard-coded table. Refusing old configs also turns an upgrade into a night with no background work rather than a degraded one.
+- **Strongest argument against.** (Own analysis.) List-price USD is not what the subscription meters: it is a flat fee with opaque limits.
+  The price weighting was calibrated from a handful of readings on one night.
+  If the provider weighs cache reads, a new model or a promotion differently from list price, the engine paces confidently against the wrong unit, and every price change requires editing a hard-coded table.
+  Refusing old configs also turns an upgrade into a night with no background work rather than a degraded one.
 
 **Would we decide the same today?** Yes - the price weighting is the only one measured to reproduce the `/usage` bars, the caps are now derived from rate-limit readings in the same unit, which absorbs calibration drift (inventory row 0017), and the wall itself is observed rather than predicted (inventory row 0018), so the unit only has to pace, not to be exact.
 

@@ -14,10 +14,11 @@ The decision was taken in `a22fae3` (2026-09-28); later the same day `13424b0` o
 ## Decision
 
 A task may declare `mode: interactive`; the default is `mode: autonomous` (`a22fae3`, `docs/design.md:52`).
-The engine never launches an interactive task, not even by name through `manual.py`, yet the task stays `ready` in the backlog with its priority and deadline (`docs/design.md:53`, `orchestrator/lib/tasks.py:663-675`).
+The engine never launches an interactive task, not even by name through `manual.py`, yet the task stays `ready` in the backlog with its priority and deadline (`docs/design.md:53`).
+Two checks enforce it: the queue skips interactive tasks (`orchestrator/lib/tasks.py:509-511`), and `resolve`, which `manual.py` uses to launch a task by name, refuses them (`orchestrator/lib/tasks.py:587-588`).
 `gate.py status` prints one `interactive task=...` line per such task (`orchestrator/gate.py:678-681`), and the digest opens with a `## Today` section listing them, as what the owner should do first in a live session (`a22fae3`, `orchestrator/prompts/digest.md`).
 Tasks due within a day, or overdue, come first, earliest deadline first; the rest follow by priority (`13424b0`, `orchestrator/lib/tasks.py:670-674`).
-Any other `mode:` value makes the task unschedulable and reported, never guessed (`orchestrator/lib/tasks.py:173-180`).
+Any other `mode:` value makes the task unschedulable and reported, never guessed (`orchestrator/lib/tasks.py:173-184`).
 
 ## Alternatives considered
 
@@ -26,7 +27,7 @@ Any other `mode:` value makes the task unschedulable and reported, never guessed
 - **Strongest argument against.** (Own analysis.) The engine is a background scheduler, and this turns it into the owner's personal to-do list: it now orders and presents work it will never do, a second scope that grows the digest and the ordering rules.
   A task whose mode is misjudged at writing time either parks work the engine could have done or sits unnoticed if the owner skips the `## Today` section.
 
-**Would we decide the same today?** Yes - the backlog stays the single prioritised view, the questions list stays clean, and the gatekeeper's rule is a one-line exclusion that cannot launch owner work by mistake.
+**Would we decide the same today?** Yes - the backlog stays the single prioritised view, the questions list stays clean, and the gatekeeper's rule is two checks (queue and by-name) that cannot launch owner work by mistake.
 
 ## Consequences
 
@@ -41,5 +42,5 @@ Any other `mode:` value makes the task unschedulable and reported, never guessed
 - Commit `a22fae3` (introduces `mode: interactive`, the status line and the digest `## Today` section).
 - Commit `13424b0` (deadline-first ordering, `due=` on the line).
 - `docs/design.md:52-54` ("Interactive tasks"; this passage was in the top-level README at the time).
-- `orchestrator/lib/tasks.py:168-180`, `orchestrator/lib/tasks.py:663-700`, `orchestrator/gate.py:677-681`, `orchestrator/prompts/digest.md`.
+- `orchestrator/lib/tasks.py:168-184`, `orchestrator/lib/tasks.py:509-511`, `orchestrator/lib/tasks.py:587-588`, `orchestrator/lib/tasks.py:663-699`, `orchestrator/gate.py:677-681`, `orchestrator/prompts/digest.md`.
 - Maintainer's notes (why neither `blocked` nor keeping the task out of the backlog works).

@@ -33,7 +33,7 @@ The number is the one its ADR takes, when it has one.
   `notes` means part of the reasoning, or the date, is only in the maintainer's design notes, outside this repository, and will be restated in the ADR.
 - **ADR**: the ADR that records the decision, or `log only` when the row is the decision's whole record (see [Which rows get an ADR](#which-rows-get-an-adr)).
 - **Rationale**: `yes` when the sources state why and what was rejected, `partial` when they state why but not the alternatives or the costs, `missing` when no source states why.
-  Every `missing` row is a question for the owner, listed under [Open questions](#open-questions).
+  No row is `missing` today; a new one would be a question for the owner.
 
 ### Architecture and scheduling core
 
@@ -46,19 +46,19 @@ The number is the one its ADR takes, when it has one.
 | 0006 | Tick from a KeepAlive loop instead of launchd StartInterval; the daily digest job doubles as watchdog | 2026-08 | `README.md:222-224`, `orchestrator/platform/README.md:9,12`, notes | yes | log only |
 | 0007 | Fresh context for every slice, resumed from notes in the task file, not from `claude -p --resume` | 2026-08 | `orchestrator/prompts/orchestrate.md:111`, notes | yes | [0007](0007-resume-each-slice-from-task-notes-in-a-fresh-context.md) |
 | 0008 | Keep a local custom scheduler rather than Claude Code's native scheduling | 2026-08 | `README.md:5,51`, notes | yes | [0008](0008-keep-a-local-scheduler-rather-than-native-scheduling.md) |
-| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10`, notes | yes (answered 2026-09-30, superseded: config moves to TOML) | [0009](0009-use-standard-library-python-only.md) |
+| 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10`, notes | yes (answered 2026-09-30, config format to be superseded by TOML, PR #36) | [0009](0009-use-standard-library-python-only.md) |
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial | log only |
 | 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-27 | `02ec85e`, `README.md:107-110`, notes | yes | log only |
 | 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial | log only |
 | 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08, before any config read 2026-09-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial | log only |
 | 0067 | Every tick logs its decision and the reason, one line per account or slot | 2026-08 | `README.md:28-30,104`, `3d0739e`, notes | partial | log only |
-| 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-4` | yes (answered 2026-09-30) | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) |
+| 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-5` | yes (answered 2026-09-30) | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) |
 
 ### Quota, budget and cost
 
 | No. | Decision | Date | Sources | Rationale | ADR |
 |---|---|---|---|---|---|
-| 0013 | Pace the week with a decaying reserve of one heavy (P90) day per remaining day | 2026-08 | `README.md:54,166`, notes | yes | [0013](0013-pace-the-week-with-a-decaying-p90-reserve.md) |
+| 0013 | Pace the week with a decaying reserve of one heavy (P90) day per remaining day | 2026-08 | `README.md:54,166`, notes | partial | [0013](0013-pace-the-week-with-a-decaying-p90-reserve.md) |
 | 0014 | Weight each night's share of the weekly surplus by a back-loading ratio, flat by default; the last night absorbs the whole burn-down | 2026-09-07, flat default 2026-09-08 | `7924fe2`, `00d9735`, `b90f4fe`, `README.md:179-183`, `orchestrator/config.yaml:93-101` | yes | log only |
 | 0015 | Measure consumption from Claude Code's own transcripts instead of ccusage | 2026-09-09 | `0386c2c`, `README.md:169` | yes | log only |
 | 0016 | Budget in USD at list price, not in tokens; token-era keys are refused, not converted | 2026-09-12 | `abdfdf3`, `0804eb5`, `892039b`, `aec5217`, `README.md:137-140` | yes | [0016](0016-budget-in-usd-at-list-price.md) |
@@ -116,7 +116,7 @@ The number is the one its ADR takes, when it has one.
 |---|---|---|---|---|---|
 | 0046 | Autonomy levels `private`, `visible`, `gated`: `gated` actions are never performed unattended | 2026-08 | `examples/tasks/`, `orchestrator/prompts/orchestrate.md:42,72-76`, notes | partial | log only |
 | 0047 | Every task declares its delivery (`branch`, `pr`, `local`) as an obligation, on an axis separate from autonomy | 2026-09-09 | `c8c25bc`, `README.md:63` | yes | log only |
-| 0048 | Enforce the delivery rails with per-session deny rules built in one place, failing closed | 2026-09-15, one builder 2026-09-16, failing closed 2026-09-25 | `095b3d3`, `515cade`, `32a5a02`, `README.md:64`, `orchestrator/lib/permissions.py`, notes | yes | in [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) |
+| 0048 | Enforce the delivery rails with per-session deny rules built in one place, failing closed | 2026-09-15, one builder and failing closed 2026-09-25 | `095b3d3`, `515cade`, `32a5a02`, `README.md:64`, `orchestrator/lib/permissions.py`, notes | yes | in [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) |
 | 0049 | Push by explicit HTTPS URL, and tell the session so in its prompt | 2026-09-12, workflow files 2026-09-27 | `e306420`, `a8320b8` | yes | log only |
 | 0050 | Remove API base URL and key variables from the environment of every background session | 2026-09-25 | `35646f5`, notes | partial | log only |
 | 0051 | Pull requests stay draft while work remains on the task | 2026-09-27 | `69d6cef`, `orchestrator/prompts/orchestrate.md:53-57` | partial | log only |
@@ -162,7 +162,7 @@ Selected for an ADR (the backfill may argue for adding or dropping one, in its P
 - 0013 pacing with a decaying P90 reserve; 0016 budgets in USD
 - 0038 `mode: interactive`
 - 0068 bypass permissions with deny rules, and the delivery rails they enforce
-- 0052 one worktree per session; GitHub stacks for stacked work
+- 0052 one worktree per task; GitHub stacks for stacked work
 - 0048, the delivery rails, is folded into 0068 rather than written separately: the rails are what makes bypass mode acceptable
 - GitHub stacks has no row yet: the stacked-work change is still under review, and its ADR is written with it once it lands
 

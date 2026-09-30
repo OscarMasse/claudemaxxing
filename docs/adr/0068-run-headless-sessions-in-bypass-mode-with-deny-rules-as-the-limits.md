@@ -6,11 +6,11 @@
 ## Context
 
 Every orchestrated session runs `claude -p` headless, with nobody at the terminal to answer a permission prompt.
-The first unanswered prompt freezes the session until the slice's lock expires, so the slice is lost (maintainer's notes).
+An unanswered permission prompt leaves the session unable to act, and the slice is wasted until it is killed (maintainer's notes).
 The initial public release already launched sessions with `--permission-mode bypassPermissions` (`568f33a`, `orchestrator/run.sh:136` at that commit), as a stated judgment call of the first runner (maintainer's notes).
 There was never an allow list.
 
-At first, autonomy was bounded only by the task frontmatter (its `delivery:` key) and the rules written in the session prompt.
+At first, autonomy was bounded only by the task frontmatter (its `autonomy:` key, joined by `delivery:` on 2026-09-09, `c8c25bc`) and the rules written in the session prompt.
 Experience showed that prose alone does not hold the rails that must never break, so they moved into deny rules in three steps:
 
 - 2026-09-15: `run.sh` passes `--disallowedTools "Bash(git push*)"` (and its `rtk` variant) to every session whose delivery is not `pr`, because in bypass mode the prompt's "do NOT push" was the only thing between a `branch` or `local` task and origin (`095b3d3`).
@@ -25,7 +25,7 @@ This ADR also covers inventory row 0048 ("Enforce the delivery rails with per-se
 Headless sessions run with `--permission-mode bypassPermissions`, and the only enforced limits are per-session `--disallowedTools` deny rules.
 `orchestrator/lib/permissions.py` builds those rules in one place from the task's delivery and read-only dirs, and `run.sh` does not launch a session if the builder fails or returns nothing (`orchestrator/run.sh:199-212`, `orchestrator/run.sh:271`).
 A deny rule is evaluated by the harness before the model has a say and costs no tokens (`orchestrator/lib/permissions.py:1-5`).
-Beyond the rules, trust rests on isolation: a worktree per session, a scoped token, one account per session, rather than on the prompt (maintainer's notes).
+Beyond the rules, trust rests on isolation: a worktree per task, a scoped token, one account per session, rather than on the prompt (maintainer's notes).
 
 ## Alternatives considered
 
@@ -45,7 +45,7 @@ Beyond the rules, trust rests on isolation: a worktree per session, a scoped tok
 - Good: one builder with tests holds every family and its reason, and a broken builder stops the launch instead of running a session without rails.
 - Bad: the rules stop a session that forgot the rules, not one that circumvents them; every new command spelling has to be enumerated by hand.
 - Bad: some rules over-match (for example `git -C * ` prefixes and `gh api` body flags), accepted because a false refusal costs less than a missed push (`orchestrator/lib/permissions.py:41-43`, `orchestrator/lib/permissions.py:83-84`).
-- To watch: isolation (worktree per session, scoped token, account boundary) is the real safety net and must stay intact.
+- To watch: isolation (worktree per task, scoped token, account boundary) is the real safety net and must stay intact.
 
 ## Sources
 
@@ -53,6 +53,7 @@ Beyond the rules, trust rests on isolation: a worktree per session, a scoped tok
 - `095b3d3` (per-delivery push deny, 2026-09-15).
 - `515cade` (single deny-rule builder, 2026-09-25).
 - `32a5a02` (fail closed, more `gh` writes, 2026-09-25).
+- `c8c25bc` (`delivery:` key, 2026-09-09).
 - `fa258d4` (read-only optional dirs through the same builder).
 - `orchestrator/run.sh:199-212`, `orchestrator/run.sh:271`.
 - `orchestrator/lib/permissions.py`, `orchestrator/tests/test_permissions.py`.

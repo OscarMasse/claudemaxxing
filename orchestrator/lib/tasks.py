@@ -7,6 +7,7 @@ priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
 branch to resume in the task's worktree, lib/workspace.py),
 prerequisites (space-separated task basenames, `.md` suffix optional),
+stack (name of a GitHub stack the task is one layer of),
 not_before (YYYY-MM-DD or YYYY-MM-DDTHH:MM, local time: the task is not
 eligible before then; a date alone means local midnight),
 mode (autonomous|interactive, default autonomous: an interactive task needs the
@@ -107,7 +108,9 @@ Both are excluded from the normal priority queue; a task declaring neither is
 ordinary queued work.
 
 Prerequisite gating: a task with a `prerequisites:` key is not eligible until
-every named prerequisite task is itself `status: done`. Only the prerequisite's
+every named prerequisite task is itself `status: done`, and, when that
+prerequisite is `delivery: pr`, its PR is merged (checked with `gh`), unless both
+tasks declare the same `stack:` (a pushed layer is enough there). Only the prerequisite's
 own status is read, never its own prerequisites, so this check never recurses
 and cycles cannot cause a loop.
 
@@ -122,6 +125,7 @@ declared `priority:` in the file is never rewritten. See `_effective_priorities`
 """
 import math
 import re
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -281,14 +285,72 @@ def _is_done(root, name):
     return path.exists() and _frontmatter(path).get("status") == "done"
 
 
+PR_URL_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+_MERGED_CACHE = {}
+
+
+def _pr_merged(url):
+    """Whether the pull request at `url` is merged into its base, asked of
+    `gh`. Any failure (no gh, no network, unknown PR) is "not merged": fail
+    closed. Cached for the life of the process, only a positive answer is
+    final (an open PR may merge between two ticks, and each tick is a new
+    process)."""
+    if url in _MERGED_CACHE:
+        return _MERGED_CACHE[url]
+    try:
+        r = subprocess.run(
+            ["gh", "pr", "view", url, "--json", "state", "--jq", ".state"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    merged = r.returncode == 0 and r.stdout.strip() == "MERGED"
+    if merged:
+        _MERGED_CACHE[url] = True
+    return merged
+
+
+def _pr_urls(path):
+    """Pull request URLs recorded in the task file, first one first."""
+    try:
+        return PR_URL_RE.findall(path.read_text())
+    except OSError:
+        return []
+
+
+def _declared_stack(fm):
+    """The `stack:` name the task declares, or None."""
+    return (fm.get("stack") or "").strip() or None
+
+
+def _is_met(root, name, fm):
+    """Whether prerequisite `name` of the task with frontmatter `fm` is met.
+    It must be done first. Beyond that a `delivery: pr` prerequisite only
+    counts once its PR is merged into main, because a dependent started on an
+    open PR builds on an `origin/main` that lacks it. Exception: inside one
+    stack (same `stack:` value on both) a finished layer is enough, that is
+    the point of stacking. A merge-gated prerequisite with no recorded PR URL
+    is unmet (fail closed): the delivery contract was not honored."""
+    if not _is_done(root, name):
+        return False
+    path = task_path(root, name)
+    pfm = _frontmatter(path)
+    if _declared_delivery(pfm) != "pr":
+        return True
+    stack = _declared_stack(fm)
+    if stack and stack == _declared_stack(pfm):
+        return True
+    urls = _pr_urls(path)
+    return bool(urls) and all(_pr_merged(u) for u in urls)
+
+
 def _unmet_prerequisites(root, fm):
-    """Names of this task's declared prerequisites that are not done.
+    """Names of this task's declared prerequisites that are not met.
     Resolution: basename -> tasks/<name>.md, else tasks/archive/<name>.md
     (see `task_path`). A prerequisite file that does not exist counts as unmet
-    (fail closed), it never raises.
+    (fail closed), it never raises. See `_is_met` for what "met" means.
     Only the prerequisite's own status is read here, not its prerequisites in
     turn: no recursion happens, so a prerequisite cycle cannot loop."""
-    return [name for name in _prereq_names(fm) if not _is_done(root, name)]
+    return [name for name in _prereq_names(fm) if not _is_met(root, name, fm)]
 
 
 def _own_priority(fm):

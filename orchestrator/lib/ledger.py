@@ -18,6 +18,7 @@ measured burn rates and cost stats never bleed across subscriptions.
            session_costs(state_dir) -> {(task, model): usd_per_session}
            spent_since(state_dir, ts) -> USD burned since a timestamp
            accuracy(state_dir) -> per-task estimate-vs-actual error, in USD
+           outcome_histogram(runs_log) -> {outcome: count} over agent lines
 
 Row schema. Every row carries REQUIRED_KEYS. A row whose result file could
 not be parsed also carries `parse_error` (the exception text) and `reason`
@@ -33,6 +34,7 @@ under `total_cost_usd`), so it is the one to learn from. The token columns
 stay for the digest's volume reporting only.
 """
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -229,3 +231,32 @@ if __name__ == "__main__":
               "<effort> <slice> <exit> <account> [est_usd]\n"
               "       ledger.py fields <result.json>", file=sys.stderr)
         sys.exit(2)
+
+
+# The controlled vocabulary of `stopped=` in the agent lines of runs.log
+# (prompts/orchestrate.md step 9). There is no "killed": a session cut off by
+# run.sh's timeout never reaches step 9, so only the launcher line records it.
+OUTCOMES = ("done", "resumed", "routine-pass", "blocked", "noop")
+
+# runs.log interleaves two formats. The agent writes `2026-09-30T02:26:23+02:00
+# task=... did=... stopped=<outcome>`; the launcher writes `2026-09-30 01:58:34
+# mode=... exit=0`. Only the agent's line carries a `T` date separator.
+_AGENT_LINE = re.compile(r"^\d{4}-\d\d-\d\dT\S* task=")
+
+
+def outcome_histogram(runs_log):
+    """Count the agent lines of runs.log by outcome. Launcher lines are
+    skipped; any `stopped=` value outside OUTCOMES (or missing) counts as
+    `unknown`, which is where every pre-vocabulary line lands."""
+    hist = {}
+    path = Path(runs_log)
+    if not path.exists():
+        return hist
+    for line in path.read_text().splitlines():
+        if not _AGENT_LINE.match(line):
+            continue
+        _, sep, value = line.rpartition(" stopped=")
+        value = value.strip() if sep else ""
+        key = value if value in OUTCOMES else "unknown"
+        hist[key] = hist.get(key, 0) + 1
+    return hist

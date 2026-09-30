@@ -10,6 +10,24 @@ from lib import ledger
 LEDGER_PY = Path(__file__).resolve().parents[1] / "lib" / "ledger.py"
 
 
+class TestOutcomeHistogram(unittest.TestCase):
+    def test_counts_agent_lines_only(self):
+        lines = [
+            "2026-09-30T02:26:23+02:00 task=a.md did=x stopped=done",
+            "2026-09-30 02:24:50 mode=orchestrate account=max exit=0",
+            "2026-09-30T03:00:00+02:00 task=b.md did=y stopped=resumed",
+            "2026-09-30T03:10:00+02:00 task=c.md did=z stopped=slice-end",
+            "2026-09-30T03:11:00+02:00 task=d.md did=z stopped=done",
+            "2026-09-30T03:12:00+02:00 task=e.md did=w",
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "runs.log"
+            path.write_text("\n".join(lines) + "\n")
+            self.assertEqual(ledger.outcome_histogram(path),
+                             {"done": 2, "resumed": 1, "unknown": 2})
+            self.assertEqual(ledger.outcome_histogram(Path(d) / "none"), {})
+
+
 class TestLedger(unittest.TestCase):
     def test_stats_and_session_costs(self):
         with tempfile.TemporaryDirectory() as d:

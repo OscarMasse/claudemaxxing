@@ -16,6 +16,8 @@ The number is the one the ADR will take.
 
 - **Date**: the day the decision was actually taken: the commit that introduced it, or an earlier day when the maintainer's notes record the decision before it was committed.
   A row that merges several steps of one decision gives the date of each step.
+  A step is a commit or a note that changes what the decision says; a fix or a hardening that leaves it unchanged is not a step.
+  An ADR carries a single date: when a row with several steps is written up, the ADR takes the date of the step it records as the decision, and its Context tells the other steps with their dates.
   A decision taken before the initial public release (`568f33a`, 2026-09-04) is dated by month from the maintainer's notes, or `<= 2026-09-04` when it is already in that release and no source dates it earlier.
 - **Sources**: where the decision and its reasons can be read.
   `README.md:N` is a line of the top-level README at the commit that adds this inventory; a short SHA is a commit of this repository.
@@ -36,9 +38,9 @@ The number is the one the ADR will take.
 | 0008 | Keep a local custom scheduler rather than Claude Code's native scheduling | 2026-08 | `README.md:5,51`, notes | yes |
 | 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10` | missing |
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial |
-| 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-28 | `02ec85e`, `README.md:107-110`, notes | yes |
+| 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-27 | `02ec85e`, `README.md:107-110`, notes | yes |
 | 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial |
-| 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial |
+| 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08, before any config read 2026-09-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial |
 | 0067 | Every tick logs its decision and the reason, one line per account or slot | 2026-08 | `README.md:28-30,104`, `3d0739e`, notes | partial |
 | 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-4` | missing |
 
@@ -74,7 +76,7 @@ The number is the one the ADR will take.
 
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
-| 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes |
+| 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | no night ceiling 2026-09-08, task's model 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes |
 | 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09, running count and pre-cut filter 2026-09-12 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes |
 | 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77` | yes |
 
@@ -92,11 +94,11 @@ The number is the one the ADR will take.
 | 0039 | Done tasks archive themselves once idle for the lock TTL; lookups by name resolve the archive | 2026-09-28 | `2c12e4f`, `acfabe5`, `e0d8a94`, `README.md:58` | partial |
 | 0040 | The gatekeeper claims a task at launch instead of leaving the claim to the session | 2026-09-12 | `902654e`, `README.md:205` | yes |
 | 0041 | Reset stale `in-progress` tasks to `ready`, keeping their notes | 2026-09-08 | `b90f4fe`, `README.md:67` | yes |
-| 0042 | No silent defaults: only an absent key gets a default; an unreadable value makes the task unschedulable and reported | 2026-09-08 | `b90f4fe`, `4ca8cb2`, `0804eb5`, `README.md:66` | yes |
+| 0042 | No silent defaults: only an absent key gets a default; an unreadable value makes the task unschedulable and reported | 2026-09-06, general rule 2026-09-08 | `b90f4fe`, `4ca8cb2`, `0804eb5`, `README.md:66` | yes |
 | 0043 | Block stalled or storming tasks, and pause the engine on a launch-failure storm | 2026-09-17 | `3efc395`, `1829642`, `3b00625`, `7fb2812`, notes | yes |
 | 0044 | Kill switch: a `PAUSED` file stops every launch | 2026-08 | `568f33a`, `README.md:65`, notes | partial |
-| 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-25 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes |
-| 0064 | A `parallel: true` task may get several sessions at once, which shard its work; it is never claimed | 2026-08 | `README.md:205`, `902654e`, `3b00625`, notes | partial |
+| 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-16 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes |
+| 0064 | A `parallel: true` task may get several sessions at once, which shard its work; it is never claimed | 2026-08, never claimed 2026-09-12 | `README.md:205`, `902654e`, `3b00625`, notes | partial |
 
 ### Delivery, autonomy and rails
 
@@ -104,8 +106,8 @@ The number is the one the ADR will take.
 |---|---|---|---|---|
 | 0046 | Autonomy levels `private`, `visible`, `gated`: `gated` actions are never performed unattended | 2026-08 | `examples/tasks/`, `orchestrator/prompts/orchestrate.md:42,72-76`, notes | partial |
 | 0047 | Every task declares its delivery (`branch`, `pr`, `local`) as an obligation, on an axis separate from autonomy | 2026-09-09 | `c8c25bc`, `README.md:63` | yes |
-| 0048 | Enforce the delivery rails with per-session deny rules built in one place, failing closed | 2026-09-15 | `095b3d3`, `515cade`, `32a5a02`, `README.md:64`, `orchestrator/lib/permissions.py`, notes | yes |
-| 0049 | Push by explicit HTTPS URL, and tell the session so in its prompt | 2026-09-12 | `e306420`, `a8320b8` | yes |
+| 0048 | Enforce the delivery rails with per-session deny rules built in one place, failing closed | 2026-09-15, one builder 2026-09-16, failing closed 2026-09-25 | `095b3d3`, `515cade`, `32a5a02`, `README.md:64`, `orchestrator/lib/permissions.py`, notes | yes |
+| 0049 | Push by explicit HTTPS URL, and tell the session so in its prompt | 2026-09-12, workflow files 2026-09-27 | `e306420`, `a8320b8` | yes |
 | 0050 | Remove API base URL and key variables from the environment of every background session | 2026-09-25 | `35646f5`, notes | partial |
 | 0051 | Pull requests stay draft while work remains on the task | 2026-09-27 | `69d6cef`, `orchestrator/prompts/orchestrate.md:53-57` | partial |
 | 0065 | Hand the agent's GitHub token only to sessions of projects that may publish | 2026-09-24 | `000ee13` | partial |
@@ -133,7 +135,7 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0060 | Rehearse the engine without spending quota: `dry_run`, then an end-to-end sandbox with a stubbed `claude` | 2026-08, sandbox 2026-09-07 | `568f33a`, `d5ae75c`, `README.md:104-105`, notes | partial |
-| 0061 | CI runs exactly the local `check.sh`; a change is done only once CI is green | 2026-09-29 | `39cb0f6`, `README.md:114-119`, `check.sh`, notes | partial |
+| 0061 | CI runs exactly the local `check.sh`; a change is done only once CI is green | 2026-09-28 | `39cb0f6`, `README.md:114-119`, `check.sh`, notes | partial |
 | 0062 | Config compatibility: flow-style lists and `config.yaml` preferred; older spellings and the legacy flat config still parse | <= 2026-09-04, spellings 2026-09-06 | `07d8e6e`, `README.md:82`, `orchestrator/config.yaml:17-22` | partial |
 
 ## Open questions

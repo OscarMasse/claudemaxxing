@@ -19,6 +19,12 @@ measured burn rates and cost stats never bleed across subscriptions.
            spent_since(state_dir, ts) -> USD burned since a timestamp
            accuracy(state_dir) -> per-task estimate-vs-actual error, in USD
 
+Row schema. Every row carries REQUIRED_KEYS. A row whose result file could
+not be parsed also carries `parse_error` (the exception text) and `reason`
+("unreadable" or "invalid_json"); `exit` is the raw exit status of the run,
+so the failure is diagnosable. Other keys (cost_usd, tokens, ...) are optional
+and readers key off presence; historical rows are never backfilled.
+
 The unit is USD: a session's actual cost is the entry's `cost_usd`, which is
 Claude Code's own `total_cost_usd` for the run. That figure includes the
 subagents the session spawned, which the top-level `usage` block does not
@@ -30,6 +36,10 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+REQUIRED_KEYS = ("ts", "account", "mode", "task", "model", "effort",
+                 "slice_min", "exit", "est_usd")
 
 
 def record(state_dir, result_path, mode, task, model, effort, slice_min,
@@ -57,6 +67,8 @@ def record(state_dir, result_path, mode, task, model, effort, slice_min,
         text = data.get("result") or ""
     except (OSError, json.JSONDecodeError) as e:
         entry["parse_error"] = str(e)
+        entry["reason"] = ("invalid_json" if isinstance(e, json.JSONDecodeError)
+                           else "unreadable")
     state = Path(state_dir)
     state.mkdir(parents=True, exist_ok=True)
     with open(state / "costs.jsonl", "a") as f:
@@ -94,6 +106,14 @@ def stats(state_dir):
         t["total_tokens"] += sum(e.get(k) or 0 for k in
                                  ("input_tokens", "output_tokens", "cache_read", "cache_write"))
     return out
+
+
+def no_cost_share(state_dir, last=50):
+    """(no_cost_rows, total_rows) over the last `last` ledger rows: rows with
+    no cost_usd, e.g. a parse failure. A rising share means ledger coverage
+    is regressing and the gatekeeper is under-counting spend."""
+    rows = list(_entries(state_dir))[-last:]
+    return sum(1 for e in rows if e.get("cost_usd") is None), len(rows)
 
 
 def _entry_usd(e):

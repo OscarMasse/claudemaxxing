@@ -201,6 +201,9 @@ Both stay `ready` forever; `state/<account>/duties.json` records the period each
 Whatever needs no reasoning (commit and push a directory, prune caches) belongs in a plain cron/launchd job instead - it should not burn tokens at all.
 
 **The ledger is the memory.**
+The ledger lives at exactly one path per account, `state/<account>/costs.jsonl`: there is no top-level ledger, so a reader must never glob for one.
+Every row carries the required keys (`ts`, `account`, `mode`, `task`, `model`, `effort`, `slice_min`, `exit`, `est_usd`); cost fields are optional and readers key off presence, with no backfill.
+A row whose result file could not be parsed also carries `parse_error`, a `reason` and the raw `exit` status, and `gate.py status` prints a `ledger_coverage` line with the share of recent rows that carry no cost.
 Every session's result JSON is appended to `state/<account>/costs.jsonl`; the measured cost per (task, model) feeds the next scheduling decision, and the digest surfaces per-task cost so the owner can kill money pits.
 The tick that prints `RUN` for a queue task also claims it - `status: in-progress` plus a dated note - because a session takes minutes to record that itself, and the next tick used to launch a second session onto the still-`ready` task; duties, fillers and `parallel: true` shards are not claimed, they stay `ready` by contract, and a claim no session picks up is undone by the same self-repair that resets any stale `in-progress`.
 Cost is learned per SESSION, not per minute: sessions use a median 3% of their slice, so slice length predicts nothing and the cold-start default (`est_session_usd`) is in the same unit as the learned figure.

@@ -74,15 +74,16 @@ The tool imposes no taxonomy; task frontmatter picks a project with `project: <n
 
 The motivating example: work tasks run on an employer-provided subscription, personal tasks on your own.
 Neither budget, idle clock, nor ledger ever crosses over, so your employer's quota never subsidizes your hobby projects (or the reverse).
-A legacy flat config with no `accounts`/`projects` sections still works: a `default` account and project are synthesized.
+The config is TOML, read by the standard-library `tomllib`: top-level scalars are shared defaults, then one `[[accounts]]` and one `[[projects]]` table per entry; both are required, and any other shape is refused at load time.
+A backlog still holding the retired `config.yaml` makes the engine fail loud with the migration command (`scripts/config_yaml_to_toml.py`).
 
 ## Install
 
-Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.9+, the Claude Code CLI.
+Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.11+ (for the standard-library `tomllib` that reads the config), the Claude Code CLI.
 Nothing to install on the Python side: standard library only, no virtualenv, no pip.
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).
-2. Declare your `accounts` and `projects` in `orchestrator/config.yaml` (fully documented example in the file).
+2. Declare your `accounts` and `projects` in `orchestrator/config.toml` (fully documented example in the file).
 3. Let each account calibrate its own caps: pipe the status line's stdin to the recorder from the status line script of that account's profile (`statusLine` in `<claude_config_dir>/settings.json`), and seed the history once.
    See "Caps from rate-limit readings" below for the snippet and the seed command.
 4. Create a task in `tasks/` (see `examples/tasks/`) with `status: ready` and a matching `project:`.
@@ -99,7 +100,7 @@ A single session: `orchestrator/run.sh <minutes> [--account <name>]`.
 Dry run: `dry_run: true` in the config, then watch `state/gatekeeper.log` for a night.
 Rehearse a whole night in seconds, in a throwaway backlog with a stubbed `claude` and zero tokens: `orchestrator/e2e-sandbox.sh`.
 
-Install against your backlog with `BACKLOG_ROOT=~/backlog orchestrator/install.sh` and put your real config at `$BACKLOG_ROOT/config.yaml`; it lives outside this repo and is never committed.
+Install against your backlog with `BACKLOG_ROOT=~/backlog orchestrator/install.sh` and put your real config at `$BACKLOG_ROOT/config.toml`; it lives outside this repo and is never committed.
 The install records that root in `~/.config/claudemaxxing/backlog-root`, so an interactive shell (`gate.py status`, `manual.sh`) resolves the same backlog as the scheduled jobs without exporting anything.
 The root resolves from `ORCH_ROOT`, then `BACKLOG_ROOT`, then that file; with none of them every entry point exits with an error instead of silently reading the repo's example data, which only `ORCH_EXAMPLE=1` selects (tests, experiments).
 Human-facing output (`gate.py status`, manual dry runs and starts) prints `backlog=<path>` on its first line.

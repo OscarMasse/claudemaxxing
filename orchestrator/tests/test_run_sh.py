@@ -9,21 +9,21 @@ from pathlib import Path
 ORCH = Path(__file__).resolve().parents[1]
 
 CFG = (
-    "night_start: 02:00\nnight_end: 06:00\nmorning_guard: 08:30\n"
-    "prereset_burn_hours: 8\nactivity_idle_night_min: 40\n"
-    "night_slice_min: 50\nmax_parallel_sessions: 2\n"
-    "claude_bin: {bin}\nclaude_model: sonnet\nclaude_effort: low\n"
-    "accounts:\n"
-    "  - name: personal\n"
-    "    claude_config_dir: {root}/profile\n"
-    "    reset_weekday: 3\n"
-    "    reset_time: 05:59\n"
-    "    reset_tz: Europe/Warsaw\n"
-    "projects:\n"
-    "  - name: side-projects\n"
-    "    account: personal\n"
-    "    dirs: {root}/projects\n"
-    "    rank: 1\n"
+    'night_start = "02:00"\nnight_end = "06:00"\nmorning_guard = "08:30"\n'
+    "prereset_burn_hours = 8\nactivity_idle_night_min = 40\n"
+    "night_slice_min = 50\nmax_parallel_sessions = 2\n"
+    'claude_bin = "{bin}"\nclaude_model = "sonnet"\nclaude_effort = "low"\n'
+    "[[accounts]]\n"
+    'name = "personal"\n'
+    'claude_config_dir = "{root}/profile"\n'
+    "reset_weekday = 3\n"
+    'reset_time = "05:59"\n'
+    'reset_tz = "Europe/Warsaw"\n'
+    "[[projects]]\n"
+    'name = "side-projects"\n'
+    'account = "personal"\n'
+    'dirs = ["{root}/projects"]\n'
+    "rank = 1\n"
 )
 
 # Saves the prompt it receives on stdin, then answers like `claude -p
@@ -47,7 +47,7 @@ class RunShTest(unittest.TestCase):
         fake = self.root / "claude"
         fake.write_text(FAKE_CLAUDE)
         fake.chmod(0o755)
-        cfg = self.root / "config.yaml"
+        cfg = self.root / "config.toml"
         cfg.write_text(CFG.format(bin=fake, root=self.root))
         self.task = self.root / "tasks" / "t.md"
         self.task.write_text("---\ntitle: T\nproject: side-projects\n"
@@ -86,7 +86,7 @@ class RunShTest(unittest.TestCase):
         repo = make_repo(self.root.resolve(), "webapp")
         cfg = Path(self.env["ORCH_CONFIG"])
         cfg.write_text(cfg.read_text().replace(
-            f"dirs: {self.root}/projects", f"dirs: {repo}"))
+            f'dirs = ["{self.root}/projects"]', f'dirs = ["{repo}"]'))
         self.run_session(40, "ready")
         wt = repo / ".agent-worktrees" / "t"
         self.assertIn(str(wt), self.add_dirs())
@@ -106,8 +106,8 @@ class RunShTest(unittest.TestCase):
         repo, assets = make_repo(root, "webapp"), make_repo(root, "big-assets")
         cfg = Path(self.env["ORCH_CONFIG"])
         cfg.write_text(cfg.read_text().replace(
-            f"dirs: {self.root}/projects",
-            f"dirs: {repo}\n    optional_dirs: [{assets}]"))
+            f'dirs = ["{self.root}/projects"]',
+            f'dirs = ["{repo}"]\noptional_dirs = ["{assets}"]'))
         return assets
 
     def disallowed(self):

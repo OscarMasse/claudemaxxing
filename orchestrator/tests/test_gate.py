@@ -21,29 +21,38 @@ FIXTURE = {"week_usd": 40, "week_by_family": {}, "block": None,
 # makes Wednesday 2026-08-12 the late-week surplus scenario from the
 # controller tests.
 BASE_CFG = (
-    "dry_run: false\n"
-    "night_start: 02:00\nnight_end: 06:00\nmorning_guard: 08:30\n"
-    "prereset_burn_hours: 8\nactivity_idle_night_min: 40\n"
-    "night_slice_min: 50\n"
-    "claude_bin: /usr/local/bin/claude\nclaude_model: sonnet\nclaude_effort: low\n"
+    "dry_run = false\n"
+    'night_start = "02:00"\nnight_end = "06:00"\nmorning_guard = "08:30"\n'
+    "prereset_burn_hours = 8\nactivity_idle_night_min = 40\n"
+    "night_slice_min = 50\n"
+    'claude_bin = "/usr/local/bin/claude"\nclaude_model = "sonnet"\n'
+    'claude_effort = "low"\n'
 )
 
 PERSONAL = (
-    "accounts:\n"
-    "  - name: personal\n"
-    "    claude_config_dir: ~/.claude\n"
-    "    reset_weekday: 3\n"
-    "    reset_time: 05:59\n"
-    "    reset_tz: Europe/Warsaw\n"
+    "[[accounts]]\n"
+    'name = "personal"\n'
+    'claude_config_dir = "~/.claude"\n'
+    "reset_weekday = 3\n"
+    'reset_time = "05:59"\n'
+    'reset_tz = "Europe/Warsaw"\n'
 )
 
 PROJECTS = (
-    "projects:\n"
-    "  - name: side-projects\n"
-    "    account: personal\n"
-    "    dirs: ~/projects\n"
-    "    rank: 10\n"
+    "[[projects]]\n"
+    'name = "side-projects"\n'
+    'account = "personal"\n'
+    'dirs = ["~/projects"]\n'
+    "rank = 10\n"
 )
+
+
+def insert_flat(text, flat):
+    """`text` with the top-level keys `flat` added. TOML reads every key after
+    a [[...]] header as part of that table, so they go before the first one."""
+    lines = text.splitlines(keepends=True)
+    at = next((i for i, l in enumerate(lines) if l.startswith("[[")), len(lines))
+    return "".join(lines[:at]) + flat + "".join(lines[at:])
 
 
 SEED_AT = "2026-08-01T00:00:00+00:00"
@@ -52,7 +61,7 @@ SEED_AT = "2026-08-01T00:00:00+00:00"
 def seed_accounts(root):
     """Seed the rate-limit history of every configured account, as the owner
     does once with `lib/ratelimits.py seed`. Only fills an empty history."""
-    cfg = config.load(Path(root) / "config.yml")
+    cfg = config.load(Path(root) / "config.toml")
     for acct in config.accounts(cfg):
         ratelimits.seed(Path(root) / "orchestrator" / "state" / acct["name"],
                         100, 15, 10, SEED_AT)
@@ -92,12 +101,12 @@ class TestGate(unittest.TestCase):
         self.tmp.cleanup()
 
     def write_cfg(self, text):
-        (self.root / "config.yml").write_text(text)
+        (self.root / "config.toml").write_text(text)
 
     def append_cfg(self, text):
         """Append FLAT keys: they act as shared defaults for every account."""
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text() + text)
+        cfg = self.root / "config.toml"
+        cfg.write_text(insert_flat(cfg.read_text(), text))
 
     def write_task(self, name, text):
         """`delivery:` is mandatory in the files, and these tests are about
@@ -210,8 +219,8 @@ class TestGate(unittest.TestCase):
         # Tuesday night's allocation is $5.5 (see TestNightBudget); at an
         # estimated 2.5 per session, 2 sessions fit and a 3rd does not. The
         # slot ceiling (4) is not what decides this.
-        self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_usd: 2.5\n")
+        self.append_cfg("max_parallel_sessions = 4\n"
+                        "est_session_usd = 2.5\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -224,8 +233,8 @@ class TestGate(unittest.TestCase):
         # Same night, ten times cheaper: the count rises with the budget, up to
         # the safety ceiling. This is the point of the redesign - the metric is
         # dollars, not a fixed task count.
-        self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_usd: 0.25\n")
+        self.append_cfg("max_parallel_sessions = 4\n"
+                        "est_session_usd = 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -236,8 +245,8 @@ class TestGate(unittest.TestCase):
 
     def test_safety_ceiling_caps_the_slot_count(self):
         # Budget for many, machine for two: the ceiling wins.
-        self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_session_usd: 0.25\n")
+        self.append_cfg("max_parallel_sessions = 2\n"
+                        "est_session_usd = 0.25\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -249,8 +258,8 @@ class TestGate(unittest.TestCase):
     def test_heavy_task_limits_parallelism(self):
         # One session's estimated burn (50) exceeds the night allocation:
         # parallelizing is pointless, exactly one session runs.
-        self.append_cfg("max_parallel_sessions: 4\n"
-                        "est_session_usd: 50\n")
+        self.append_cfg("max_parallel_sessions = 4\n"
+                        "est_session_usd = 50\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "parallel: true\n---\n")
@@ -260,15 +269,15 @@ class TestGate(unittest.TestCase):
         self.assertEqual(len(lines), 1, r.stdout)
 
     def test_run_line_carries_the_launch_estimate(self):
-        self.append_cfg("max_parallel_sessions: 1\nest_session_usd: 2.5\n")
+        self.append_cfg("max_parallel_sessions = 1\nest_session_usd = 2.5\n")
         env = dict(self.env, ORCH_NOW="2026-08-11T02:30:00+02:00")
         r = run_gate(self.root, env)
         # "... <est_usd> <delivery>": money, two decimals.
         self.assertTrue(r.stdout.rstrip().endswith(" 2.50 branch"), r.stdout)
 
     def test_parallel_respects_active_slots(self):
-        self.append_cfg("max_parallel_sessions: 2\n"
-                        "est_session_usd: 0.25\n")
+        self.append_cfg("max_parallel_sessions = 2\n"
+                        "est_session_usd = 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -366,8 +375,8 @@ class TestGate(unittest.TestCase):
     def test_fable_is_serialised_even_when_slots_and_budget_allow_more(self):
         # Fable's binding constraint is its own token limit, not wall-clock
         # time, so parallel fable sessions only race each other to the wall.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
-                        "max_fable_slots: 1\n")
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n"
+                        "max_fable_slots = 1\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: fable\nparallel: true\n---\n")
@@ -378,8 +387,8 @@ class TestGate(unittest.TestCase):
     def test_the_fable_cap_leaves_the_slots_to_cheaper_models(self):
         # The point of the cap: one fable session, and the slots it does not
         # take go to models that are nowhere near their own limit.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
-                        "max_fable_slots: 1\n")
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n"
+                        "max_fable_slots = 1\n")
         self.write_task("t1.md", "---\ntitle: A\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: fable\nparallel: true\n---\n")
@@ -397,8 +406,8 @@ class TestGate(unittest.TestCase):
         # 2026-09-12 a Fable session was launched next to one from 11:14 that
         # was still running. run.sh writes the model as the lock's third
         # field so the tick can see what the live sessions run on.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
-                        "max_fable_slots: 1\n")
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n"
+                        "max_fable_slots = 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())} fable")
@@ -420,7 +429,9 @@ class TestGate(unittest.TestCase):
         state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
         (state / "RUNNING.2").write_text(f"999 {int(time.time())} fable")
-        p = gate.paths()
+        with mock.patch.dict(os.environ, {"ORCH_ROOT": str(self.root)}):
+            os.environ.pop("ORCH_CONFIG", None)
+            p = gate.paths()
         self.assertEqual(gate.active_slots(p, state), 2)
         self.assertEqual(gate.running_models(state), ["fable"])
 
@@ -428,8 +439,8 @@ class TestGate(unittest.TestCase):
         # 2026-09-12, 11:00: candidates opus, fable, fable, sonnet with 4 free
         # slots and one fable slot launched only 2. The model filter has to
         # run before the queue is cut to the slot count.
-        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
-                        "max_fable_slots: 1\n")
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n"
+                        "max_fable_slots = 1\n")
         (self.root / "tasks" / "t1.md").unlink()
         for i, model in enumerate(("opus", "fable", "fable", "sonnet", "sonnet")):
             self.write_task(f"q{i}.md", f"---\ntitle: {i}\nproject: side-projects\n"
@@ -441,7 +452,7 @@ class TestGate(unittest.TestCase):
                          ["opus", "fable", "sonnet", "sonnet"], r.stdout)
 
     def test_an_out_of_quota_family_does_not_eat_a_slot(self):
-        self.append_cfg("max_parallel_sessions: 2\nest_session_usd: 0.25\n")
+        self.append_cfg("max_parallel_sessions = 2\nest_session_usd = 0.25\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)
         (state / "exhausted.json").write_text(json.dumps({"opus": {
@@ -457,8 +468,8 @@ class TestGate(unittest.TestCase):
                          r.stdout)
 
     def test_fable_cap_is_configurable(self):
-        self.append_cfg("max_parallel_sessions: 4\nest_session_usd: 0.25\n"
-                        "max_fable_slots: 2\n")
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n"
+                        "max_fable_slots = 2\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: fable\nparallel: true\n---\n")
@@ -468,9 +479,9 @@ class TestGate(unittest.TestCase):
 
     def _prereset_ceiling_runs(self, model, now):
         # The burn-down runs wider than the night, and only the burn-down.
-        self.append_cfg("max_parallel_sessions: 2\nest_session_usd: 0.25\n"
-                        "prereset_max_parallel_sessions: 4\n"
-                        "prereset_max_fable_slots: 3\n")
+        self.append_cfg("max_parallel_sessions = 2\nest_session_usd = 0.25\n"
+                        "prereset_max_parallel_sessions = 4\n"
+                        "prereset_max_fable_slots = 3\n")
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         f"model: {model}\nparallel: true\n---\n")
@@ -503,8 +514,8 @@ class TestGate(unittest.TestCase):
                         r.stdout)
 
     def test_dry_run_does_not_claim(self):
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
+        cfg = self.root / "config.toml"
+        cfg.write_text(cfg.read_text().replace("dry_run = false", "dry_run = true"))
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
         self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
@@ -519,21 +530,21 @@ class TestGate(unittest.TestCase):
         self.assertIn("status: ready", (self.root / "tasks" / "t1.md").read_text())
 
     def test_dry_run_suppresses(self):
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
+        cfg = self.root / "config.toml"
+        cfg.write_text(cfg.read_text().replace("dry_run = false", "dry_run = true"))
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
 
     def test_orch_config_env_wins_over_backlog_config(self):
-        alt = self.root / "alt-config.yml"
-        alt.write_text((self.root / "config.yml").read_text()
-                       .replace("dry_run: false", "dry_run: true"))
+        alt = self.root / "alt-config.toml"
+        alt.write_text((self.root / "config.toml").read_text()
+                       .replace("dry_run = false", "dry_run = true"))
         r = run_gate(self.root, dict(self.env, ORCH_CONFIG=str(alt)))
         self.assertTrue(r.stdout.startswith("SKIP personal dry_run"), r.stdout)
 
     def test_backlog_root_env_drives_config_and_state_paths(self):
         # No ORCH_ROOT: BACKLOG_ROOT alone must select the external root's
-        # config.yml, tasks/ and state/.
+        # config.toml, tasks/ and state/.
         env = dict(os.environ,
                    BACKLOG_ROOT=str(self.root),
                    ORCH_NOW="2026-08-11T02:30:00+02:00",
@@ -554,7 +565,7 @@ class TestGate(unittest.TestCase):
         self.assertIn("account=personal", log.read_text())
 
     def test_stale_lock_broken_fresh_lock_respected(self):
-        self.append_cfg("max_parallel_sessions: 1\n")
+        self.append_cfg("max_parallel_sessions = 1\n")
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)
         lock = state / "RUNNING.1"
@@ -593,7 +604,7 @@ class TestGate(unittest.TestCase):
     def test_a_retired_token_key_makes_the_account_misconfigured(self):
         # No conversion factor exists between the old unit and dollars, so a
         # leftover *_tokens key is refused, not converted, in tick and status.
-        self.append_cfg("est_session_tokens: 2500000\n")
+        self.append_cfg("est_session_tokens = 2500000\n")
         r = run_gate(self.root, self.env)
         expected = ("account=personal misconfigured: retired key "
                     "est_session_tokens, the unit is USD since 2026-09-12 "
@@ -732,7 +743,7 @@ class TestGateJanitor(unittest.TestCase):
         # stacks and worktrees are the janitor's as well.
         proj = self.root / "proj"
         self.write_cfg(BASE_CFG + PERSONAL + PROJECTS.replace(
-            "    dirs: ~/projects\n", f"    optional_dirs: {proj}\n"))
+            'dirs = ["~/projects"]\n', f'optional_dirs = ["{proj}"]\n'))
         run_gate(self.root, self.env)
         self.assertEqual(self.downs(), "compose -p proj-a down --remove-orphans\n")
 
@@ -818,17 +829,19 @@ class TestGateMultiAccount(unittest.TestCase):
     """Two accounts scheduled in the same tick, fully isolated."""
 
     WORK = (
-        "  - name: work\n"
-        "    claude_config_dir: ~/.claude-work\n"
-        "    reset_weekday: 3\n"
-        "    reset_time: 05:59\n"
-        "    reset_tz: Europe/Warsaw\n"
+        "[[accounts]]\n"
+        'name = "work"\n'
+        'claude_config_dir = "~/.claude-work"\n'
+        "reset_weekday = 3\n"
+        'reset_time = "05:59"\n'
+        'reset_tz = "Europe/Warsaw"\n'
     )
     WORK_PROJECT = (
-        "  - name: job\n"
-        "    account: work\n"
-        "    dirs: ~/work\n"
-        "    rank: 10\n"
+        "[[projects]]\n"
+        'name = "job"\n'
+        'account = "work"\n'
+        'dirs = ["~/work"]\n'
+        "rank = 10\n"
     )
 
     def setUp(self):
@@ -836,7 +849,7 @@ class TestGateMultiAccount(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "orchestrator" / "state").mkdir(parents=True)
         (self.root / "tasks").mkdir()
-        (self.root / "config.yml").write_text(
+        (self.root / "config.toml").write_text(
             BASE_CFG + PERSONAL + self.WORK + PROJECTS + self.WORK_PROJECT)
         (self.root / "tasks" / "p.md").write_text(
             "---\ntitle: P\nproject: side-projects\nstatus: ready\n"
@@ -885,8 +898,8 @@ class TestGateMultiAccount(unittest.TestCase):
         self.assertTrue(lines[1].startswith("RUN work"), r.stdout)
 
     def test_running_lock_is_per_account(self):
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text() + "max_parallel_sessions: 1\n")
+        cfg = self.root / "config.toml"
+        cfg.write_text(insert_flat(cfg.read_text(), "max_parallel_sessions = 1\n"))
         state = self.root / "orchestrator" / "state" / "work"
         state.mkdir(parents=True, exist_ok=True)
         (state / "RUNNING.1").write_text(f"999 {int(time.time())}")
@@ -911,11 +924,11 @@ class TestGateMultiAccount(unittest.TestCase):
     def test_a_retired_cap_key_skips_only_that_account(self):
         # Caps are derived from the rate_limits history, a hand-entered one
         # is refused rather than silently used; the other account still runs.
-        cfg = self.root / "config.yml"
+        cfg = self.root / "config.toml"
         cfg.write_text(cfg.read_text().replace(
-            "    claude_config_dir: ~/.claude-work\n",
-            "    claude_config_dir: ~/.claude-work\n"
-            "    weekly_cap_usd: 100\n"))
+            'claude_config_dir = "~/.claude-work"\n',
+            'claude_config_dir = "~/.claude-work"\n'
+            "weekly_cap_usd = 100\n"))
         r = run_gate(self.root, self.env)
         lines = self.lines(r)
         self.assertTrue(lines[0].startswith("RUN personal"), r.stdout + r.stderr)
@@ -924,11 +937,11 @@ class TestGateMultiAccount(unittest.TestCase):
 
     def test_a_misconfigured_account_does_not_stop_the_other(self):
         # One subscription left in the token unit; the other keeps its night.
-        cfg = self.root / "config.yml"
+        cfg = self.root / "config.toml"
         cfg.write_text(cfg.read_text().replace(
-            "    claude_config_dir: ~/.claude-work\n",
-            "    claude_config_dir: ~/.claude-work\n"
-            "    fable_min_surplus_tokens: 100000000\n"))
+            'claude_config_dir = "~/.claude-work"\n',
+            'claude_config_dir = "~/.claude-work"\n'
+            "fable_min_surplus_tokens = 100000000\n"))
         r = run_gate(self.root, self.env)
         lines = self.lines(r)
         self.assertTrue(lines[0].startswith("RUN personal"), r.stdout + r.stderr)
@@ -939,36 +952,6 @@ class TestGateMultiAccount(unittest.TestCase):
         self.assertIn("account=work misconfigured: retired key "
                       "fable_min_surplus_tokens", log)
         self.assertIn("status: ready", (self.root / "tasks" / "w.md").read_text())
-
-
-class TestGateLegacyConfig(unittest.TestCase):
-    """A legacy flat config (no sections) keeps working: one synthesized
-    account named "default" and one project named "default"."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        (self.root / "orchestrator" / "state").mkdir(parents=True)
-        (self.root / "tasks").mkdir()
-        (self.root / "config.yml").write_text(
-            BASE_CFG +
-            "reset_weekday: 3\nreset_time: 05:59\nreset_tz: Europe/Warsaw\n"
-            "extra_dirs: ~/projects\n")
-        # A legacy task: no `project:` key at all.
-        (self.root / "tasks" / "t1.md").write_text(
-            "---\ntitle: X\nstatus: ready\ndelivery: branch\n"
-            "priority: high\ncreated: 2026-08-01\n---\n")
-        fx = self.root / "fixture.json"
-        fx.write_text(json.dumps(FIXTURE))
-        self.env = {"ORCH_USAGE_JSON": str(fx)}
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_legacy_flat_config_still_runs(self):
-        r = run_gate(self.root, self.env)
-        self.assertTrue(r.stdout.startswith("RUN default 50"), r.stdout + r.stderr)
-        self.assertIn("t1.md sonnet low default", r.stdout)
 
 
 class TestGateDuties(unittest.TestCase):
@@ -984,8 +967,8 @@ class TestGateDuties(unittest.TestCase):
         (self.root / "fixture.json").write_text(json.dumps(FIXTURE))
         self.env = {"ORCH_USAGE_JSON": str(self.root / "fixture.json"),
                     "ORCH_NOW": self.NIGHT}
-        (self.root / "config.yml").write_text(
-            BASE_CFG + "max_parallel_sessions: 4\n"
+        (self.root / "config.toml").write_text(
+            BASE_CFG + "max_parallel_sessions = 4\n"
             + PERSONAL + PROJECTS)
 
     def tearDown(self):
@@ -998,8 +981,9 @@ class TestGateDuties(unittest.TestCase):
             + extra + "---\n")
 
     def cost(self, per_session):
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text() + f"est_session_usd: {per_session}\n")
+        cfg = self.root / "config.toml"
+        cfg.write_text(insert_flat(cfg.read_text(),
+                                   f"est_session_usd = {per_session}\n"))
 
     def runs(self, r):
         return [l for l in r.stdout.splitlines() if l.startswith("RUN")]
@@ -1035,8 +1019,8 @@ class TestGateDuties(unittest.TestCase):
         self.assertEqual(len(self.runs(run_gate(self.root, env))), 1)
 
     def test_dry_run_does_not_consume_the_duty_period(self):
-        cfg = self.root / "config.yml"
-        cfg.write_text(cfg.read_text().replace("dry_run: false", "dry_run: true"))
+        cfg = self.root / "config.toml"
+        cfg.write_text(cfg.read_text().replace("dry_run = false", "dry_run = true"))
         self.cost(2.5)
         self.task("sync.md", "duty: nightly\n")
         r = run_gate(self.root, self.env)

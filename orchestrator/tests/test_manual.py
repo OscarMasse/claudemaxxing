@@ -17,22 +17,23 @@ from lib import ratelimits  # noqa: E402
 DAY = datetime.fromisoformat("2026-08-15T15:00:00+02:00")
 
 CFG = (
-    "night_start: 02:00\nnight_end: 06:00\nmorning_guard: 08:30\n"
-    "prereset_burn_hours: 8\nactivity_idle_night_min: 40\n"
-    "night_slice_min: 50\nmax_parallel_sessions: 2\nmax_fable_slots: 1\n"
-    "est_session_usd: 2.85\n"
-    "claude_bin: /usr/local/bin/claude\nclaude_model: sonnet\nclaude_effort: low\n"
-    "accounts:\n"
-    "  - name: personal\n"
-    "    claude_config_dir: ~/.claude\n"
-    "    reset_weekday: 3\n"
-    "    reset_time: 05:59\n"
-    "    reset_tz: Europe/Warsaw\n"
-    "projects:\n"
-    "  - name: side-projects\n"
-    "    account: personal\n"
-    "    dirs: ~/projects\n"
-    "    rank: 10\n"
+    'night_start = "02:00"\nnight_end = "06:00"\nmorning_guard = "08:30"\n'
+    "prereset_burn_hours = 8\nactivity_idle_night_min = 40\n"
+    "night_slice_min = 50\nmax_parallel_sessions = 2\nmax_fable_slots = 1\n"
+    "est_session_usd = 2.85\n"
+    'claude_bin = "/usr/local/bin/claude"\nclaude_model = "sonnet"\n'
+    'claude_effort = "low"\n'
+    "[[accounts]]\n"
+    'name = "personal"\n'
+    'claude_config_dir = "~/.claude"\n'
+    "reset_weekday = 3\n"
+    'reset_time = "05:59"\n'
+    'reset_tz = "Europe/Warsaw"\n'
+    "[[projects]]\n"
+    'name = "side-projects"\n'
+    'account = "personal"\n'
+    'dirs = ["~/projects"]\n'
+    "rank = 10\n"
 )
 
 
@@ -74,7 +75,7 @@ class TestManual(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "orchestrator" / "state").mkdir(parents=True)
         (self.root / "tasks").mkdir()
-        (self.root / "config.yml").write_text(CFG)
+        (self.root / "config.toml").write_text(CFG)
         env = {"ORCH_ROOT": str(self.root), "ORCH_NOW": DAY.isoformat(),
                "ORCH_IDLE_MIN": "0", "ORCH_NO_NOTIFY": "1"}
         patcher = mock.patch.dict(os.environ, env)

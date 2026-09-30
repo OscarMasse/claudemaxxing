@@ -259,8 +259,9 @@ class TestCli(unittest.TestCase):
 
     def test_record_bad_json_writes_err_file_silently(self):
         # The CLI reads the config of the ORCH_ROOT backlog, like gate.py.
-        (Path(self.tmp.name) / "config.yaml").write_text(
-            "accounts:\n  - name: acct\n    claude_config_dir: /nonexistent\n")
+        (Path(self.tmp.name) / "config.toml").write_text(
+            '[[accounts]]\nname = "acct"\nclaude_config_dir = "/nonexistent"\n'
+            '[[projects]]\nname = "p"\naccount = "acct"\n')
         name = "acct"
         rc, out = self.run_record(name, "not json")
         self.assertEqual((rc, out), (0, ""))

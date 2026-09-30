@@ -35,32 +35,34 @@ cat > "$SANDBOX/usage.json" <<'FIXTURE'
 FIXTURE
 
 # Small dollar figures keep the arithmetic readable in the output.
-cat > "$SANDBOX/config.yaml" <<CFG
-dry_run: false
-night_start: 02:00
-night_end: 06:00
-morning_guard: 08:30
-prereset_burn_hours: 8
-activity_idle_night_min: 40
-night_slice_min: 50
-max_parallel_sessions: 4
-night_budget_ratio: 2.0
-est_session_usd: 2.5
-claude_bin: $SANDBOX/claude-stub.sh
-claude_model: sonnet
-claude_effort: low
-max_session_usd: 1
-accounts:
-  - name: max
-    claude_config_dir: $SANDBOX/cfgdir
-    reset_weekday: 4
-    reset_time: 05:59
-    reset_tz: Europe/Warsaw
-projects:
-  - name: demo
-    account: max
-    dirs: $SANDBOX/proj
-    rank: 10
+cat > "$SANDBOX/config.toml" <<CFG
+dry_run = false
+night_start = "02:00"
+night_end = "06:00"
+morning_guard = "08:30"
+prereset_burn_hours = 8
+activity_idle_night_min = 40
+night_slice_min = 50
+max_parallel_sessions = 4
+night_budget_ratio = 2.0
+est_session_usd = 2.5
+claude_bin = "$SANDBOX/claude-stub.sh"
+claude_model = "sonnet"
+claude_effort = "low"
+max_session_usd = 1
+
+[[accounts]]
+name = "max"
+claude_config_dir = "$SANDBOX/cfgdir"
+reset_weekday = 4
+reset_time = "05:59"
+reset_tz = "Europe/Warsaw"
+
+[[projects]]
+name = "demo"
+account = "max"
+dirs = ["$SANDBOX/proj"]
+rank = 10
 CFG
 
 task() {  # task <file> <priority> [extra frontmatter line]
@@ -72,7 +74,7 @@ task queue.md high
 task sync.md low "duty: nightly"
 task tidy.md low "filler: true"
 
-export BACKLOG_ROOT="$SANDBOX" ORCH_ROOT="$SANDBOX" ORCH_CONFIG="$SANDBOX/config.yaml"
+export BACKLOG_ROOT="$SANDBOX" ORCH_ROOT="$SANDBOX" ORCH_CONFIG="$SANDBOX/config.toml"
 export ORCH_IDLE_MIN=999 ORCH_NO_NOTIFY=1 ORCH_USAGE_JSON="$SANDBOX/usage.json"
 # Caps are derived from the rate_limits history; the sandbox has no status
 # line feeding it, so it starts from a seed row (the caps used as-is).

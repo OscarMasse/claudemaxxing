@@ -5,59 +5,114 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from lib import config
+from lib import config, tasks
 
 NESTED = (
     "# comment\n"
-    "dry_run: true\n"
-    "night_start: 02:00\n"
-    "night_budget_ratio: 2.0\n"
-    "claude_bin: /usr/local/bin/claude\n"
-    "max_session_usd: 100\n"
-    "accounts:\n"
-    "  - name: personal\n"
-    "    claude_config_dir: ~/.claude\n"
-    "    max_session_usd: 300\n"
-    "    reset_tz: Europe/Warsaw\n"
-    "    reset_time: 05:59\n"
-    "  - name: work\n"
-    "    claude_config_dir: ~/.claude-work\n"
-    "    claude_bin: /opt/claude\n"
-    "projects:\n"
-    "  - name: side-projects\n"
-    "    account: personal\n"
-    "    dirs: ~/projects ~/oss\n"
-    "    rank: 10\n"
-    "  - name: job\n"
-    "    account: work\n"
-    "    dirs: ~/work\n"
-    "    local_only_default: true\n"
+    "dry_run = true\n"
+    "night_start = \"02:00\"\n"
+    "night_budget_ratio = 2.0\n"
+    "claude_bin = \"/usr/local/bin/claude\"\n"
+    "max_session_usd = 100\n"
+    "[[accounts]]\n"
+    "name = \"personal\"\n"
+    "claude_config_dir = \"~/.claude\"\n"
+    "max_session_usd = 300\n"
+    "reset_tz = \"Europe/Warsaw\"\n"
+    "reset_time = \"05:59\"\n"
+    "[[accounts]]\n"
+    "name = \"work\"\n"
+    "claude_config_dir = \"~/.claude-work\"\n"
+    "claude_bin = \"/opt/claude\"\n"
+    "[[projects]]\n"
+    "name = \"side-projects\"\n"
+    "account = \"personal\"\n"
+    "dirs = [\"~/projects\", \"~/oss\"]\n"
+    "rank = 10\n"
+    "[[projects]]\n"
+    "name = \"job\"\n"
+    "account = \"work\"\n"
+    "dirs = [\"~/work\"]\n"
+    "local_only_default = true\n"
 )
+
+MINIMAL = ('[[accounts]]\nname = "a"\n'
+           '[[projects]]\nname = "p"\naccount = "a"\n')
 
 
 def write_cfg(text):
-    f = tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False)
+    f = tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False)
     f.write(text)
     f.close()
     return Path(f.name)
 
 
-class TestFlatParsing(unittest.TestCase):
+class TestScalarParsing(unittest.TestCase):
     def test_parses_types(self):
         cfg = config.load(write_cfg(
             "# comment\n"
-            "dry_run: true\n"
-            "max_session_usd: 300000000\n"
-            "night_budget_ratio: 2.0\n"
-            "reset_tz: Europe/Warsaw\n"
-            "reset_time: 05:59\n"
-            "digest_time: 07:37\n"))
+            "dry_run = true\n"
+            "max_session_usd = 300000000\n"
+            "night_budget_ratio = 2.0\n"
+            'reset_tz = "Europe/Warsaw"\n'
+            'reset_time = "05:59"\n'
+            'digest_time = "07:37"\n' + MINIMAL))
         self.assertIs(cfg["dry_run"], True)
         self.assertEqual(cfg["max_session_usd"], 300000000)
         self.assertAlmostEqual(cfg["night_budget_ratio"], 2.0)
         self.assertEqual(cfg["reset_tz"], "Europe/Warsaw")
         self.assertEqual(cfg["reset_time"], "05:59")
         self.assertEqual(cfg["digest_time"], "07:37")
+
+
+class TestRejectedShapes(unittest.TestCase):
+    """validate() refuses at load time every structure the engine ignores."""
+
+    def assert_refused(self, text, pattern):
+        with self.assertRaisesRegex(ValueError, pattern):
+            config.load(write_cfg(text))
+
+    def test_top_level_table_refused(self):
+        self.assert_refused(MINIMAL + "[foo]\nbar = 1\n", "'foo' is a table")
+
+    def test_table_inside_account_refused(self):
+        self.assert_refused(
+            '[[accounts]]\nname = "a"\n[accounts.caps]\nx = 1\n'
+            '[[projects]]\nname = "p"\naccount = "a"\n', "'caps' is a table")
+
+    def test_array_where_scalar_expected_refused(self):
+        self.assert_refused('night_start = ["02:00"]\n' + MINIMAL,
+                            "'night_start' is an array")
+
+    def test_array_in_account_refused(self):
+        self.assert_refused('[[accounts]]\nname = "a"\ndirs = ["~/x"]\n'
+                            '[[projects]]\nname = "p"\naccount = "a"\n',
+                            "'dirs' is an array")
+
+    def test_non_string_dirs_refused(self):
+        self.assert_refused(MINIMAL + "dirs = [1, 2]\n", "array of strings")
+
+    def test_missing_accounts_refused(self):
+        self.assert_refused('[[projects]]\nname = "p"\naccount = "a"\n',
+                            r"no \[\[accounts\]\]")
+
+    def test_missing_projects_refused(self):
+        self.assert_refused('[[accounts]]\nname = "a"\n',
+                            r"no \[\[projects\]\]")
+
+    def test_unquoted_time_refused(self):
+        self.assert_refused("reset_time = 05:59:00\n" + MINIMAL,
+                            "'reset_time' has type time")
+
+    def test_syntax_error_is_value_error(self):
+        self.assert_refused("dry_run = \n" + MINIMAL, "config: ")
+
+    def test_yaml_path_refused_with_migration_hint(self):
+        path = Path(tempfile.mkdtemp()) / "config.yaml"
+        path.write_text("dry_run: true\n")
+        with self.assertRaisesRegex(config.ConfigFormatError,
+                                    "config_yaml_to_toml.py"):
+            config.load(path)
 
 
 class TestSections(unittest.TestCase):
@@ -71,11 +126,6 @@ class TestSections(unittest.TestCase):
         self.assertEqual(self.cfg["accounts"][1]["claude_bin"], "/opt/claude")
         self.assertEqual(self.cfg["projects"][0]["rank"], 10)
         self.assertIs(self.cfg["projects"][1]["local_only_default"], True)
-
-    def test_scalar_after_section_returns_to_top_level(self):
-        cfg = config.load(write_cfg(NESTED + "max_parallel_sessions: 3\n"))
-        self.assertEqual(cfg["max_parallel_sessions"], 3)
-        self.assertEqual(len(cfg["accounts"]), 2)
 
     def test_accounts_merge_flat_defaults(self):
         accts = config.accounts(self.cfg)
@@ -109,37 +159,38 @@ class TestSections(unittest.TestCase):
         self.assertIs(projs["job"]["local_only_default"], True)
 
     def _project_cfg(self, extra):
-        return config.load(write_cfg(
-            "accounts:\n  - name: a\n"
-            "projects:\n  - name: p\n    account: a\n" + extra))
+        return config.load(write_cfg(MINIMAL + extra))
 
     def test_project_optional_dirs_default_empty_and_expand(self):
         self.assertEqual(config.projects(self._project_cfg(""))["p"]["optional_dirs"], [])
         projs = config.projects(self._project_cfg(
-            "    optional_dirs: [~/projects/big-assets]\n"))
+            'optional_dirs = ["~/projects/big-assets"]\n'))
         self.assertEqual(projs["p"]["optional_dirs"],
                          [os.path.expanduser("~/projects/big-assets")])
 
+    def test_empty_dirs(self):
+        self.assertEqual(config.projects(self._project_cfg("dirs = []\n"))["p"]["dirs"], [])
+
     def test_project_expedite_class(self):
-        projs = config.projects(self._project_cfg("    class: expedite\n"))
+        projs = config.projects(self._project_cfg('class = "expedite"\n'))
         self.assertIs(projs["p"]["expedite"], True)
 
     def test_project_retired_priority_refused(self):
         # The old hard first sort key must not be silently reinterpreted.
         with self.assertRaisesRegex(ValueError, "retired key 'priority'"):
-            config.projects(self._project_cfg("    priority: 5\n"))
+            config.projects(self._project_cfg("priority = 5\n"))
 
     def test_project_unknown_key_refused(self):
         with self.assertRaisesRegex(ValueError, "unknown key 'rnak'"):
-            config.projects(self._project_cfg("    rnak: 1\n"))
+            config.projects(self._project_cfg("rnak = 1\n"))
 
     def test_project_unknown_class_refused(self):
         with self.assertRaisesRegex(ValueError, "unknown class 'expedit'"):
-            config.projects(self._project_cfg("    class: expedit\n"))
+            config.projects(self._project_cfg('class = "expedit"\n'))
 
     def test_project_non_integer_rank_refused(self):
         with self.assertRaisesRegex(ValueError, "not an integer"):
-            config.projects(self._project_cfg("    rank: high\n"))
+            config.projects(self._project_cfg('rank = "high"\n'))
 
     def test_project_local_only_cli(self):
         # run.sh keys the agent GitHub token on this: a local-only project
@@ -155,51 +206,29 @@ class TestSections(unittest.TestCase):
 
     def test_project_unknown_account_raises(self):
         cfg = config.load(write_cfg(
-            "accounts:\n  - name: a\n    claude_config_dir: ~/.claude\n"
-            "projects:\n  - name: p\n    account: nope\n"))
+            '[[accounts]]\nname = "a"\n'
+            '[[projects]]\nname = "p"\naccount = "nope"\n'))
         with self.assertRaises(ValueError):
             config.projects(cfg)
 
     def test_account_without_name_raises(self):
-        cfg = config.load(write_cfg("accounts:\n  - claude_config_dir: ~/.claude\n"))
+        cfg = config.load(write_cfg(
+            '[[accounts]]\nclaude_config_dir = "~/.claude"\n'
+            '[[projects]]\nname = "p"\naccount = "a"\n'))
         with self.assertRaises(ValueError):
             config.accounts(cfg)
 
 
-class TestFlowStyleLists(unittest.TestCase):
-    """Multi-value fields accept YAML flow style [a, b]; the legacy
-    space-separated form keeps parsing."""
-
-    def dirs_for(self, dirs_line):
-        cfg = config.load(write_cfg(
-            "accounts:\n  - name: personal\n    claude_config_dir: ~/.claude\n"
-            f"projects:\n  - name: p\n    account: personal\n    {dirs_line}\n"))
-        return config.projects(cfg)["p"]["dirs"]
-
-    def test_flow_style_list(self):
-        self.assertEqual(self.dirs_for("dirs: [~/one, ~/two]"),
-                         [os.path.expanduser("~/one"),
-                          os.path.expanduser("~/two")])
-
-    def test_space_separated_still_parses(self):
-        self.assertEqual(self.dirs_for("dirs: ~/one ~/two"),
-                         [os.path.expanduser("~/one"),
-                          os.path.expanduser("~/two")])
-
-    def test_single_entry_and_whitespace_tolerance(self):
-        self.assertEqual(self.dirs_for("dirs: [ ~/one ]"),
-                         [os.path.expanduser("~/one")])
-
-    def test_empty_list(self):
-        self.assertEqual(self.dirs_for("dirs: []"), [])
+class TestSplitValues(unittest.TestCase):
+    """Frontmatter lists (tasks.py) accept flow style and space separation."""
 
     def test_split_values_directly(self):
-        self.assertEqual(config.split_values("[a, b]"), ["a", "b"])
-        self.assertEqual(config.split_values("a b"), ["a", "b"])
-        self.assertEqual(config.split_values(""), [])
-        self.assertEqual(config.split_values("[]"), [])
+        self.assertEqual(tasks.split_values("[a, b]"), ["a", "b"])
+        self.assertEqual(tasks.split_values("a b"), ["a", "b"])
+        self.assertEqual(tasks.split_values(""), [])
+        self.assertEqual(tasks.split_values("[]"), [])
         # A lone bracket is not flow style and must not be mangled.
-        self.assertEqual(config.split_values("[a"), ["[a"])
+        self.assertEqual(tasks.split_values("[a"), ["[a"])
 
 
 class TestMisconfiguredAccount(unittest.TestCase):
@@ -221,42 +250,19 @@ class TestMisconfiguredAccount(unittest.TestCase):
         # misconfigures every account that does not override it - which none
         # can, since the key itself is the problem.
         cfg = config.load(write_cfg(
-            "est_session_tokens: 2500000\n"
-            "accounts:\n"
-            "  - name: a\n    max_session_usd: 1\n"
-            "  - name: b\n    max_session_usd: 1\n"))
+            "est_session_tokens = 2500000\n"
+            '[[accounts]]\nname = "a"\nmax_session_usd = 1\n'
+            '[[accounts]]\nname = "b"\nmax_session_usd = 1\n'
+            '[[projects]]\nname = "p"\naccount = "a"\n'))
         problems = [config.misconfigured_account(a) for a in config.accounts(cfg)]
         self.assertTrue(all(p and "est_session_tokens" in p for p in problems))
 
 
-class TestLegacyFallback(unittest.TestCase):
-    def setUp(self):
-        self.cfg = config.load(write_cfg(
-            "max_session_usd: 100\n"
-            "reset_tz: Europe/Warsaw\nclaude_bin: /usr/local/bin/claude\n"
-            "extra_dirs: ~/projects ~/work\n"))
-
-    def test_default_account_synthesized(self):
-        accts = config.accounts(self.cfg)
-        self.assertEqual(len(accts), 1)
-        self.assertEqual(accts[0]["name"], "default")
-        self.assertEqual(accts[0]["claude_config_dir"],
-                         os.path.expanduser("~/.claude"))
-        self.assertEqual(accts[0]["max_session_usd"], 100)
-
-    def test_default_project_synthesized_from_extra_dirs(self):
-        projs = config.projects(self.cfg)
-        self.assertEqual(list(projs), ["default"])
-        self.assertEqual(projs["default"]["account"], "default")
-        self.assertEqual(projs["default"]["dirs"],
-                         [os.path.expanduser("~/projects"),
-                          os.path.expanduser("~/work")])
-
-
 class TestResolution(unittest.TestCase):
-    """resolve_path order: ORCH_CONFIG, then $BACKLOG_ROOT/config.yaml,
-    then the repo's example orchestrator/config.yaml (ORCH_EXAMPLE=1 only). Both the `.yaml` and the
-    legacy `.yml` spelling are accepted at every step, `.yaml` preferred."""
+    """resolve_path order: ORCH_CONFIG, then $BACKLOG_ROOT/config.toml,
+    then the repo's example orchestrator/config.toml (ORCH_EXAMPLE=1 only).
+    A retired config.yaml alone in the root fails loud with the migration
+    command."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -274,39 +280,44 @@ class TestResolution(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_orch_config_wins(self):
-        explicit = self.root / "explicit.yml"
-        explicit.write_text("dry_run: true\n")
-        (self.root / "config.yml").write_text("dry_run: false\n")
+        explicit = self.root / "explicit.toml"
+        explicit.write_text("dry_run = true\n")
+        (self.root / "config.toml").write_text("dry_run = false\n")
         os.environ["ORCH_CONFIG"] = str(explicit)
         os.environ["BACKLOG_ROOT"] = str(self.root)
         self.assertEqual(config.resolve_path(), explicit)
 
     def test_backlog_root_config_next(self):
-        (self.root / "config.yml").write_text("dry_run: true\n")
+        (self.root / "config.toml").write_text("dry_run = true\n")
         os.environ["BACKLOG_ROOT"] = str(self.root)
-        self.assertEqual(config.resolve_path(), self.root / "config.yml")
+        self.assertEqual(config.resolve_path(), self.root / "config.toml")
 
     def test_repo_default_last(self):
         os.environ["BACKLOG_ROOT"] = str(self.root)  # no config in it
         self.assertEqual(config.resolve_path(),
-                         config.repo_root() / "orchestrator" / "config.yaml")
+                         config.repo_root() / "orchestrator" / "config.toml")
 
-    def test_yaml_extension_is_found(self):
-        (self.root / "config.yaml").write_text("dry_run: true\n")
-        os.environ["BACKLOG_ROOT"] = str(self.root)
-        self.assertEqual(config.resolve_path(), self.root / "config.yaml")
+    def test_yaml_alone_raises_with_migration_command(self):
+        for name in ("config.yaml", "config.yml"):
+            with self.subTest(name=name):
+                (self.root / name).write_text("dry_run: true\n")
+                os.environ["BACKLOG_ROOT"] = str(self.root)
+                with self.assertRaisesRegex(config.ConfigFormatError,
+                                            "scripts/config_yaml_to_toml.py"):
+                    config.resolve_path()
+                (self.root / name).unlink()
 
-    def test_yaml_wins_over_yml_when_both_exist(self):
-        (self.root / "config.yaml").write_text("dry_run: true\n")
-        (self.root / "config.yml").write_text("dry_run: false\n")
+    def test_toml_wins_over_yaml_when_both_exist(self):
+        (self.root / "config.toml").write_text("dry_run = true\n")
+        (self.root / "config.yaml").write_text("dry_run: false\n")
         os.environ["BACKLOG_ROOT"] = str(self.root)
-        self.assertEqual(config.resolve_path(), self.root / "config.yaml")
+        self.assertEqual(config.resolve_path(), self.root / "config.toml")
 
     def test_explicit_root_argument_overrides_env(self):
-        (self.root / "config.yml").write_text("dry_run: true\n")
+        (self.root / "config.toml").write_text("dry_run = true\n")
         os.environ["BACKLOG_ROOT"] = "/nonexistent"
         self.assertEqual(config.resolve_path(self.root),
-                         self.root / "config.yml")
+                         self.root / "config.toml")
 
     def test_repo_root_only_under_orch_example(self):
         self.assertEqual(config.backlog_root(), config.repo_root())
@@ -329,7 +340,7 @@ class TestResolution(unittest.TestCase):
     def test_root_without_config_fails_outside_example(self):
         os.environ.pop("ORCH_EXAMPLE")
         os.environ["BACKLOG_ROOT"] = str(self.root)  # no config in it
-        with self.assertRaisesRegex(config.BacklogRootError, "no config.yaml"):
+        with self.assertRaisesRegex(config.BacklogRootError, "no config.toml"):
             config.resolve_path()
 
     def test_record_root_cli_round_trips(self):
@@ -384,8 +395,8 @@ class TestEntryPointsFailLoudly(unittest.TestCase):
     def test_gate_status_prints_backlog_first_when_recorded(self):
         root = Path(self.tmp.name) / "backlog"
         root.mkdir()
-        (root / "config.yaml").write_text(
-            (self.orch / "config.yaml").read_text())
+        (root / "config.toml").write_text(
+            (self.orch / "config.toml").read_text())
         subprocess.run([sys.executable, "lib/config.py", "record-root", str(root)],
                        cwd=self.orch, env=self.env, check=True, capture_output=True)
         r = subprocess.run([sys.executable, "gate.py", "status"], cwd=self.orch,
@@ -401,8 +412,8 @@ class TestDigestFileCLI(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self.cfg = self.root / "config.yml"
-        self.cfg.write_text("digest_time: 07:37\n")
+        self.cfg = self.root / "config.toml"
+        self.cfg.write_text('digest_time = "07:37"\n' + MINIMAL)
         self.config_py = Path(__file__).resolve().parents[1] / "lib" / "config.py"
 
     def tearDown(self):
@@ -440,7 +451,7 @@ class TestDigestFileCLI(unittest.TestCase):
 
 class TestRealConfig(unittest.TestCase):
     def test_real_config_shape(self):
-        cfg = config.load(Path(__file__).resolve().parents[1] / "config.yaml")
+        cfg = config.load(Path(__file__).resolve().parents[1] / "config.toml")
         for key in ("dry_run", "night_start", "night_end", "morning_guard",
                     "prereset_burn_hours",
                     "activity_idle_night_min", "night_slice_min",

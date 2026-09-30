@@ -1,22 +1,22 @@
-"""Parse the orchestrator's config.yaml (a small hand-rolled YAML subset, zero deps).
+"""Load the orchestrator's config.toml with the standard library (tomllib).
 
-Exactly two shapes are supported, and nothing else:
+The syntax is plain TOML; the structure is pinned by `validate`:
 
-  key: value            # top-level scalar (the legacy flat format)
-  section:              # a top-level key with no value opens a list of flat mappings
-    - key: value
-      key: value
+  key = value           # top-level scalar: a shared default for every account
+  [[accounts]]          # an array of flat tables, one per subscription
+  name = "max"
+  [[projects]]          # an array of flat tables, one per project
+  name = "work"
+  dirs = ["~/work"]     # dirs and optional_dirs are arrays of strings
 
-Scalar coercion: true/false, integers, floats; everything else stays a string,
-so times (05:59) and dates (2026-08-19) survive as strings and are parsed
-downstream. Comments (#) and blank lines are ignored. No deeper nesting, no
-quoting, no multi-line values.
+Every other value is a scalar (string, integer, float, boolean). Times and
+dates are quoted strings ("05:59", "2026-08-19"), parsed downstream. A nested
+table, an array where a scalar is expected, or a missing [[accounts]] or
+[[projects]] is refused at load time. Until 2026-10-01 the file was a
+hand-rolled YAML subset (config.yaml); scripts/config_yaml_to_toml.py
+migrates one, and the engine refuses to start on a config.yaml alone.
 
-Multi-value fields (like a project's `dirs`) are written in YAML flow style,
-`dirs: [~/one, ~/two]`; the legacy space-separated form still parses. See
-`split_values`.
-
-Sections used: `accounts` and `projects` (see config.yaml for the full story).
+Sections used: `accounts` and `projects` (see config.toml for the full story).
 
 Accessors:
   misconfigured_account(acct) -> a problem string, or None. The budget unit is
@@ -37,21 +37,14 @@ Accessors:
                     carrying any other key (the retired `priority` included)
                     is refused.
 
-Backward compatibility: when the sections are absent, accounts() synthesizes a
-single account named "default" (profile ~/.claude, calibration from the flat
-keys) and projects() a single project named "default" whose dirs come from the
-legacy flat `extra_dirs` key. Tasks without a `project:` frontmatter key route
-to the project named "default" when one exists, so a legacy flat config and
-legacy task files keep working unchanged.
-
 Resolution (the single place that decides which config file is live):
   1. `ORCH_CONFIG` env var, when set (explicit override, tests and one-offs).
-  2. `<backlog root>/config.yaml`, when it exists (the operator's real config,
-     living outside the public repo so it can never be committed here).
-  3. The repo's own `orchestrator/config.yaml` (the documented example), ONLY
+  2. `<backlog root>/config.toml`, when it exists (the operator's real config,
+     living outside the public repo so it can never be committed here). A
+     config.yaml there without a config.toml fails loud with the migration
+     command (ConfigFormatError).
+  3. The repo's own `orchestrator/config.toml` (the documented example), ONLY
      when ORCH_EXAMPLE=1 asks for it (tests, e2e sandbox).
-`.yaml` is the preferred spelling and wins when both exist; `.yml` is still
-accepted at every step so an existing install keeps working without a rename.
 The backlog root itself is, in order: the ORCH_ROOT env var, the BACKLOG_ROOT
 env var, the path recorded by install.sh in ROOT_FILE, and the repo root only
 under ORCH_EXAMPLE=1. With none of them, every entry point fails loudly
@@ -63,24 +56,25 @@ CLI (used by run.sh so shell scripts never parse the config themselves):
   python3 lib/config.py resolve            # print the resolved config path
   python3 lib/config.py backlog-root       # print the resolved backlog root
   python3 lib/config.py record-root <path> # write <path> to ROOT_FILE (install)
-  python3 lib/config.py <config.yaml> get <key> [default]
-  python3 lib/config.py <config.yaml> accounts
-  python3 lib/config.py <config.yaml> first-account
-  python3 lib/config.py <config.yaml> account <name> <key> [default]
-  python3 lib/config.py <config.yaml> account-dirs <name>
-  python3 lib/config.py <config.yaml> account-projects <name>
-  python3 lib/config.py <config.yaml> project-dirs <name>
-  python3 lib/config.py <config.yaml> project-optional-dirs <name>
-  python3 lib/config.py <config.yaml> account-optional-dirs <name>
-  python3 lib/config.py <config.yaml> project-account <name>
-  python3 lib/config.py <config.yaml> project-workdir <name>  # worktree|main
-  python3 lib/config.py <config.yaml> digest-file      # today/tomorrow's digest
+  python3 lib/config.py <config.toml> get <key> [default]
+  python3 lib/config.py <config.toml> accounts
+  python3 lib/config.py <config.toml> first-account
+  python3 lib/config.py <config.toml> account <name> <key> [default]
+  python3 lib/config.py <config.toml> account-dirs <name>
+  python3 lib/config.py <config.toml> account-projects <name>
+  python3 lib/config.py <config.toml> project-dirs <name>
+  python3 lib/config.py <config.toml> project-optional-dirs <name>
+  python3 lib/config.py <config.toml> account-optional-dirs <name>
+  python3 lib/config.py <config.toml> project-account <name>
+  python3 lib/config.py <config.toml> project-workdir <name>  # worktree|main
+  python3 lib/config.py <config.toml> digest-file      # today/tomorrow's digest
                                                        # path per digest_time
                                                        # (ORCH_NOW overrides
                                                        # "now", for tests)
 """
 import os
 import sys
+import tomllib
 from datetime import datetime
 from pathlib import Path
 
@@ -129,113 +123,119 @@ def backlog_root():
         f"it in {recorded} (ORCH_EXAMPLE=1 uses the repo's example data)")
 
 
-CONFIG_NAMES = ("config.yaml", "config.yml")
+CONFIG_NAME = "config.toml"
+RETIRED_NAMES = ("config.yaml", "config.yml")
 
 
-def _first_existing(directory):
-    """The first CONFIG_NAMES spelling present in `directory`, else None.
-    `.yaml` wins when both exist: it is the preferred spelling, `.yml` is
-    accepted so existing installs keep working without a rename."""
-    for name in CONFIG_NAMES:
-        candidate = Path(directory) / name
-        if candidate.exists():
-            return candidate
+class ConfigFormatError(BacklogRootError):
+    """A retired config.yaml sits where config.toml is expected."""
+
+
+def migration_hint(directory):
+    """The exact command that turns `directory`'s config.yaml into TOML."""
+    script = repo_root() / "scripts" / "config_yaml_to_toml.py"
+    return (f"{directory} has a retired config.yaml and no {CONFIG_NAME}: "
+            f"the format is TOML since 2026-10-01, migrate it with "
+            f"`python3 {script} {directory}`")
+
+
+def _find(directory):
+    """`directory`/config.toml when it exists, else None. A retired
+    config.yaml (or .yml) without it fails loud with the migration command
+    rather than falling through to another config."""
+    candidate = Path(directory) / CONFIG_NAME
+    if candidate.exists():
+        return candidate
+    if any((Path(directory) / n).exists() for n in RETIRED_NAMES):
+        raise ConfigFormatError(migration_hint(directory))
     return None
 
 
 def resolve_path(root=None):
     """The live config file, in resolution order: ORCH_CONFIG env override,
-    then <backlog root>/config.yaml (or .yml) when it exists, then the repo's
-    example orchestrator/config.yaml under ORCH_EXAMPLE=1 only. `root`
-    overrides backlog_root(). Raises BacklogRootError when the root has no
-    config and the example was not asked for."""
+    then <backlog root>/config.toml when it exists, then the repo's example
+    orchestrator/config.toml under ORCH_EXAMPLE=1 only. `root` overrides
+    backlog_root(). Raises BacklogRootError when the root has no config and
+    the example was not asked for, ConfigFormatError when the root still
+    holds a config.yaml."""
     explicit = os.environ.get("ORCH_CONFIG")
     if explicit:
         return Path(explicit).expanduser()
     root = Path(root) if root is not None else backlog_root()
-    found = _first_existing(root)
+    found = _find(root)
     if found is not None:
         return found
     if not example_requested():
         raise BacklogRootError(
-            f"no config.yaml in backlog root {root} (set BACKLOG_ROOT to the "
+            f"no {CONFIG_NAME} in backlog root {root} (set BACKLOG_ROOT to the "
             f"real backlog, or ORCH_EXAMPLE=1 for the repo's example config)")
-    example = repo_root() / "orchestrator"
-    return _first_existing(example) or example / CONFIG_NAMES[0]
+    return repo_root() / "orchestrator" / CONFIG_NAME
 
 
-def _coerce(raw):
-    if raw in ("true", "false"):
-        return raw == "true"
-    try:
-        return int(raw)
-    except ValueError:
-        pass
-    try:
-        return float(raw)
-    except ValueError:
-        return raw
+# The only shapes a config may take. tomllib parses the syntax; these checks
+# pin the structure, so a typo or a misplaced table fails loud at load time
+# instead of silently changing a schedule.
+SECTIONS = ("accounts", "projects")
+LIST_KEYS = ("dirs", "optional_dirs")
+_SCALARS = (bool, int, float, str)
 
 
-def split_values(raw):
-    """A multi-value field (like a project's `dirs`) as a list of strings.
+def _check_scalar(where, key, value):
+    if isinstance(value, dict):
+        raise ValueError(f"config: {where} key {key!r} is a table, expected a "
+                         f"scalar (string, number or boolean)")
+    if isinstance(value, list):
+        raise ValueError(f"config: {where} key {key!r} is an array, expected a "
+                         f"scalar (string, number or boolean)")
+    if not isinstance(value, _SCALARS):
+        # TOML dates and times: the engine parses them downstream from
+        # strings, so they must be quoted ("05:59", not 05:59:00).
+        raise ValueError(f"config: {where} key {key!r} has type "
+                         f"{type(value).__name__}, write it as a quoted string")
 
-    Two spellings are accepted: YAML flow style `[a, b]` (preferred, and what
-    the shipped config uses) and the legacy space-separated `a b`. Flow style is
-    detected by the brackets, so a value containing spaces is only expressible
-    with it - which is why it is preferred.
-    """
-    raw = str(raw).strip()
-    if raw.startswith("[") and raw.endswith("]"):
-        inner = raw[1:-1]
-        return [v.strip() for v in inner.split(",") if v.strip()]
-    return raw.split()
+
+def _check_entry(section, entry):
+    where = f"[[{section}]] entry {entry.get('name', '?')!r}"
+    for key, value in entry.items():
+        if key in LIST_KEYS and section == "projects":
+            if not (isinstance(value, list)
+                    and all(isinstance(v, str) for v in value)):
+                raise ValueError(f"config: {where} key {key!r} must be an "
+                                 f"array of strings")
+            continue
+        _check_scalar(where, key, value)
 
 
-def _pair(stripped):
-    """Split one "key: value" line; only the FIRST colon separates key from
-    value, so "night_start: 02:00" works. Returns (key, value) or None."""
-    key, _, raw = stripped.partition(":")
-    key, raw = key.strip(), raw.strip()
-    if not key:
-        return None
-    return key, raw
+def validate(cfg):
+    """Refuse any structure the engine does not read: top-level keys are
+    scalars except the two arrays of tables, whose entries are flat (scalars,
+    plus the string arrays in LIST_KEYS). Returns cfg."""
+    for key, value in cfg.items():
+        if key in SECTIONS:
+            if not (isinstance(value, list)
+                    and all(isinstance(e, dict) for e in value)):
+                raise ValueError(f"config: {key!r} must be an array of tables "
+                                 f"([[{key}]])")
+            for entry in value:
+                _check_entry(key, entry)
+        else:
+            _check_scalar("top-level", key, value)
+    for key in SECTIONS:
+        if not cfg.get(key):
+            raise ValueError(f"config: no [[{key}]] table")
+    return cfg
 
 
 def load(path):
-    cfg = {}
-    section = None  # the list currently being filled, if any
-    item = None     # the list item currently being filled, if any
-    for raw_line in Path(path).read_text().splitlines():
-        line = raw_line.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        indent = len(line) - len(line.lstrip())
-        stripped = line.strip()
-        if indent == 0:
-            section = item = None
-            pair = _pair(stripped)
-            if pair is None:
-                continue
-            key, raw = pair
-            if raw:
-                cfg[key] = _coerce(raw)
-            else:
-                cfg[key] = []
-                section = cfg[key]
-        elif section is not None:
-            if stripped.startswith("- "):
-                item = {}
-                section.append(item)
-                stripped = stripped[2:].strip()
-                if not stripped:
-                    continue
-            if item is None:
-                continue
-            pair = _pair(stripped)
-            if pair and pair[1]:
-                item[pair[0]] = _coerce(pair[1])
-    return cfg
+    path = Path(path)
+    if path.suffix in (".yaml", ".yml"):
+        raise ConfigFormatError(migration_hint(path.parent))
+    with path.open("rb") as f:
+        try:
+            cfg = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"config: {path}: {e}") from None
+    return validate(cfg)
 
 
 # Retired keys, each with where its job went. A config that still carries
@@ -275,9 +275,8 @@ def scalars(cfg):
 def accounts(cfg):
     """Merged account dicts: top-level scalars as defaults, account keys win."""
     base = scalars(cfg)
-    raw = cfg.get("accounts") or [{"name": "default", "claude_config_dir": "~/.claude"}]
     out, seen = [], set()
-    for a in raw:
+    for a in cfg.get("accounts") or []:
         if "name" not in a:
             raise ValueError("config: account entry without a name")
         if a["name"] in seen:
@@ -324,12 +323,8 @@ def projects(cfg):
     """Project registry {name: project}. Validates account references and
     refuses unknown or retired keys."""
     known = {a["name"] for a in accounts(cfg)}
-    raw = cfg.get("projects")
-    if not raw:
-        raw = [{"name": "default", "account": accounts(cfg)[0]["name"],
-                "dirs": cfg.get("extra_dirs", "")}]
     out = {}
-    for p in raw:
+    for p in cfg.get("projects") or []:
         if "name" not in p:
             raise ValueError("config: project entry without a name")
         if "account" not in p:
@@ -361,9 +356,9 @@ def projects(cfg):
         out[p["name"]] = {
             "name": p["name"],
             "account": p["account"],
-            "dirs": [os.path.expanduser(d) for d in split_values(p.get("dirs", ""))],
+            "dirs": [os.path.expanduser(d) for d in p.get("dirs", [])],
             "optional_dirs": [os.path.expanduser(d) for d in
-                              split_values(p.get("optional_dirs", ""))],
+                              p.get("optional_dirs", [])],
             "rank": rank,
             "expedite": cls == "expedite",
             "local_only_default": bool(p.get("local_only_default", False)),

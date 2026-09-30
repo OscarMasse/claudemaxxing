@@ -95,7 +95,7 @@ def _entry_tokens(usage):
 def entry_usd(model_id, usage):
     """List-price cost in USD of one transcript entry's `usage` block."""
     prices = PRICES.get(family(model_id) or UNKNOWN_PRICE_FAMILY)
-    return sum(n * price for n, price in zip(_components(usage), prices)) / 1e6
+    return sum(n * price for n, price in zip(_components(usage), prices, strict=True)) / 1e6
 
 
 def _files(config_dir):

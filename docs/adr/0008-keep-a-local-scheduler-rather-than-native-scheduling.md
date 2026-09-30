@@ -23,11 +23,11 @@ For context, the OS-specific part sits behind a documented seam of five scripts,
 - **Headless runs driving themselves toward a goal.** Rejected (maintainer's notes): headless `-p` mode had no goal-style mode to replace the scheduler's loop.
 - **Strongest argument against.** (Own analysis.) A custom scheduler is a permanent maintenance tax on infrastructure that is not the product: the design notes list the failures it has already cost (launchd pending spawns across DarkWake, clamshell sleep, idle detection; `docs/design.md:9`, `docs/design.md:220`), it ties the engine to macOS, and every native scheduling improvement widens the gap between what the engine maintains and what it could get for free.
 
-**Would we decide the same today?** Yes - as long as native scheduling stays session-bound and cloud agents cannot see the local machine, which were the facts on 2026-08-19; the project's own principle makes this a condition to re-check at each harness release, and the decision should be superseded as soon as a native, persistent, locally executing scheduler exists.
+**Would we decide the same today?** Yes - as long as native scheduling stays session-bound and cloud agents cannot see the local machine, which were the facts on 2026-08-19 (not re-checked in this record); the project's own principle makes this a condition to re-check at each harness release, and the decision should be superseded as soon as a native, persistent, locally executing scheduler exists.
 
 ## Consequences
 
-- Good: the scheduler sees and acts on all local state (quota, activity, task files; per-task worktrees were added later) and survives reboots and sleep through launchd.
+- Good: the scheduler sees and acts on all local state (quota, activity, task files; per-task worktrees were added later) and restarts through the launchd KeepAlive loop, with the digest job as watchdog (`docs/design.md:220` records launchd losing nights across DarkWake).
 - Good: the kill switch, budgets and self-repair live in one place the engine controls (`docs/design.md`).
 - Bad: the engine owns the reliability of its own scheduling, including OS quirks, and ships for macOS only (`README.md:120-122`).
 - Bad: the decision rests on the current limits of the harness and has to be revisited when they change.

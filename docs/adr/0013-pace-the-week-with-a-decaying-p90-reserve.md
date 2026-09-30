@@ -15,7 +15,7 @@ The maintainer's notes record the decaying-reserve controller in the orchestrato
 
 On every tick, the background system may spend only `available = weekly_cap - consumed - p90_daily * days_remaining`, where `p90_daily` is a heavy (90th percentile) day of the owner's own usage and `days_remaining` is the fractional number of days to the next reset (`orchestrator/lib/controller.py:50-57`, `:226-227`).
 If `available <= 0` the night tick skips with the reserve in its log line (`orchestrator/lib/controller.py:229-232`).
-The reserve decays linearly to zero at the reset, so the week starts protective and ends fully released (`docs/design.md`, "Budget controller").
+The reserve decays linearly to zero at the reset, so the week starts protective and ends fully released (`docs/design.md:160`, under "Caps from rate-limit readings").
 The controller keeps no memory: `available` is recomputed from measured consumption on every tick, so a heavy interactive day shrinks every later night and a quiet one grows it (`docs/design.md`, "Per-night allocation").
 How that surplus is split between nights is a separate decision (inventory row 0014), and the pre-reset burn-down ignores the reserve entirely (inventory row 0026).
 The P90 value was first hand-configured (`p90_daily_tokens`, then `p90_daily_usd`); it is now seeded once and scaled with the derived weekly cap (`orchestrator/lib/ratelimits.py:30`, `:233`).
@@ -39,7 +39,7 @@ The P90 value was first hand-configured (`p90_daily_tokens`, then `p90_daily_usd
 ## Consequences
 
 - Good: the owner's worst plausible remaining week is protected at every point of the week, without forecasting.
-- Good: stateless and deterministic in its inputs, so it is testable and every skip explains itself (`orchestrator/lib/controller.py:1-13`).
+- Good: stateless and deterministic in its inputs, so it is testable and every skip explains itself (`orchestrator/lib/controller.py:1-13` for determinism, `:229-232` for the self-explaining skip).
 - Bad: early-week nights are small by design, and the week's useful background work concentrates late, which makes the last nights and the burn-down load-bearing.
 - Bad: the protection is only as good as the P90 figure; usage from other devices is invisible to the measurement (`docs/design.md`, "Caps from rate-limit readings").
 
@@ -51,7 +51,7 @@ The P90 value was first hand-configured (`p90_daily_tokens`, then `p90_daily_usd
 
 - `orchestrator/lib/controller.py:1-13`, `:50-57`, `:226-232`.
 - `orchestrator/lib/ratelimits.py:30`, `:233`.
-- `docs/design.md`, "Quota-aware scheduling" (bullet at line 47), "Budget controller" (heading at line 131), "Per-night allocation" (heading at line 173).
+- `docs/design.md`, "Quota-aware scheduling" (bullet at line 47), line 160 (linear decay, under "Caps from rate-limit readings"), "Per-night allocation" (heading at line 173).
 - `README.md:30`.
 - Commit `568f33a` (initial public release, controller already present).
 - Maintainer's notes (quota strategy).

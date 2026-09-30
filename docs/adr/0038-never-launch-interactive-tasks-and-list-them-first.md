@@ -17,8 +17,8 @@ A task may declare `mode: interactive`; the default is `mode: autonomous` (`a22f
 The engine never launches an interactive task, not even by name through `manual.py`, yet the task stays `ready` in the backlog with its priority and deadline (`docs/design.md:53`).
 Two checks enforce it: the queue skips interactive tasks (`orchestrator/lib/tasks.py:509-511`), and `resolve`, which `manual.py` uses to launch a task by name, refuses them (`orchestrator/lib/tasks.py:587-588`).
 `gate.py status` prints one `interactive task=...` line per such task (`orchestrator/gate.py:678-681`), and the digest opens with a `## Today` section listing them, as what the owner should do first in a live session (`a22fae3`, `orchestrator/prompts/digest.md`).
-Tasks due within a day, or overdue, come first, earliest deadline first; the rest follow by priority (`13424b0`, `orchestrator/lib/tasks.py:670-674`).
-Any other `mode:` value makes the task unschedulable and reported, never guessed (`orchestrator/lib/tasks.py:173-184`).
+Tasks due within a day, or overdue, come first, earliest deadline first; the rest follow by priority (`13424b0`, `orchestrator/lib/tasks.py:671-675`).
+Any other `mode:` value makes the task unschedulable and reported, never guessed (`orchestrator/lib/tasks.py:173-184`, reported by `misconfigured()` at `:872-873`).
 
 ## Alternatives considered
 
@@ -35,7 +35,7 @@ Any other `mode:` value makes the task unschedulable and reported, never guessed
 - Good: the questions list only holds real questions.
 - Good: an unknown `mode:` value fails loud instead of launching owner work or silently parking engine work.
 - Bad: the engine does nothing with these tasks beyond listing them; whether they get done depends on the owner reading the digest.
-- Bad: the interactive ordering is a second ordering rule next to the queue's, measured in days rather than nights (`orchestrator/lib/tasks.py:672-674`), to keep in step.
+- Bad: the interactive ordering is a second ordering rule next to the queue's, measured in days rather than nights (`orchestrator/lib/tasks.py:674-675`), to keep in step.
 
 ## Sources
 

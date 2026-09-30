@@ -40,7 +40,7 @@ The change landed in four commits the same day: measurement (`abdfdf3`), control
 
 - Commits `abdfdf3`, `0804eb5`, `892039b`, `aec5217`.
 - `orchestrator/lib/transcripts.py:1-9`, `:47-59`.
-- `orchestrator/lib/config.py:21-25`, `:245-266`.
+- `orchestrator/lib/config.py:22-26`, `:245-266`.
 - `orchestrator/lib/controller.py:10-12`.
 - `orchestrator/config.yaml:25-32`.
 - `docs/design.md`, "Budget controller" (lines 132-134).

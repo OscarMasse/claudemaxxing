@@ -1,6 +1,6 @@
 # 0001. Record architecture decisions
 
-- Status: proposed (accepted once merged)
+- Status: proposed
 - Date: 2026-09-30
 
 ## Context
@@ -41,5 +41,5 @@ An accepted ADR is not rewritten when the decision changes; a new ADR supersedes
 
 - Michael Nygard, [Documenting Architecture Decisions](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) (2011).
 - [MADR](https://adr.github.io/madr/), the Markdown Architectural Decision Records template this one is trimmed from.
-- README.md, sections "Design details" and "FAQ".
+- [README.md](../../README.md), sections "Design details" and "FAQ".
 - Commits `9ca80f2` and `2d6dd86` (a design adopted and reverted the same day), `193b8f0`, `6bcf946`, `9671680`, `f4cd445` (one decision over four commits).

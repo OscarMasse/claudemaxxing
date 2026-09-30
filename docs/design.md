@@ -83,7 +83,7 @@ A legacy flat config with no `accounts`/`projects` sections still works: a `defa
 
 ## Install
 
-Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.11+, the Claude Code CLI.
+Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.9+, the Claude Code CLI.
 Nothing to install on the Python side: standard library only, no virtualenv, no pip.
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).

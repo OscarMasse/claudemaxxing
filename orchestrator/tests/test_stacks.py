@@ -30,7 +30,7 @@ class TestStacks(unittest.TestCase):
         got = stacks.collect(self.root)
         self.assertEqual(list(got), ["s"])
         self.assertEqual([l["task"] for l in got["s"]], ["a", "b"])
-        self.assertEqual(got["s"][0]["pr"], URL_A)
+        self.assertEqual(got["s"][0]["pr"], URL_A)  # last recorded URL
 
     def test_ready_when_all_done_open_green(self):
         out = stacks.render(stacks.collect(self.root),
@@ -48,3 +48,9 @@ class TestStacks(unittest.TestCase):
         out = stacks.render(stacks.collect(self.root),
                             lambda u: ("OPEN", "green"))
         self.assertIn("not ready", out[0])
+
+    def test_merged_bottom_layer_keeps_stack_ready(self):
+        out = stacks.render(
+            stacks.collect(self.root),
+            lambda u: ("MERGED", "green") if u == URL_A else ("OPEN", "green"))
+        self.assertIn("ready to merge", out[0])

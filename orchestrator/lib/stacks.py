@@ -33,7 +33,7 @@ def collect(root):
         for n in sorted(names, key=lambda n: (depth(n), n)):
             urls = tasks._pr_urls(tasks.task_path(root, n))
             layers.append({"task": n, "status": fms[n].get("status", "?"),
-                           "pr": urls[0] if urls else None})
+                           "pr": urls[-1] if urls else None})
         out[stack] = layers
     return out
 
@@ -55,7 +55,8 @@ def pr_state(url):
     results = [x.upper() for x in results]
     if not results:
         checks = "none"
-    elif any(x in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT") for x in results):
+    elif any(x in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT",
+                               "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE") for x in results):
         checks = "red"
     elif all(x in ("SUCCESS", "NEUTRAL", "SKIPPED") for x in results):
         checks = "green"
@@ -75,8 +76,10 @@ def render(stacks, fetch=pr_state):
                 state, checks = fetch(layer["pr"])
             else:
                 state, checks = "no PR", "none"
-            if not (layer["status"] == "done" and state == "OPEN"
-                    and checks == "green"):
+            if state == "MERGED":
+                pass  # a merged bottom layer is fine (partial merge)
+            elif not (layer["status"] == "done" and state == "OPEN"
+                      and checks == "green"):
                 ready = False
             rows.append(f"  {i}. {layer['task']} - {layer['status']}, "
                         f"PR {state}, checks {checks}")

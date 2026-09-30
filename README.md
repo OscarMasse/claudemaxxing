@@ -1,6 +1,7 @@
 # claudemaxxing
 
 **Your Claude Max quota expires every week whether you use it or not.**
+
 **claudemaxxing spends the leftover on your own backlog while you sleep.**
 
 You write task specs in Markdown.
@@ -22,17 +23,17 @@ In the morning you read a digest and review pull requests.
 - rankr-gardener (nightly duty): reviewed, opened #131, filed two follow-ups.
 ```
 
-*Example: a real morning digest from the author's backlog, trimmed.*
+*Example: a real morning digest from the author's backlog, trimmed.*\
 *Each line is a decision the owner takes in a minute, not a log to read.*
 
 - **Nights are budget-safe.**
-  The engine reads your real consumption from Claude Code's own transcripts and keeps a reserve for your heaviest day.
+  The engine reads your real consumption from Claude Code's own transcripts and keeps a heavy day's worth in reserve for every day left before the reset.
   Sessions only get the surplus.
 - **Mornings are yours.**
-  No session opens a quota window that would cross the morning guard, and any interactive activity on the account blocks night launches.
-  The one exception is the last night before the weekly reset, when the surplus would expire anyway.
+  No session opens a quota window that would run past the morning guard, and your own recent activity on the account blocks night launches.
+  The one exception is the burn-down before the weekly reset, when the surplus would expire anyway.
 - **Every task ends where it says.**
-  `delivery: pr | branch | local` is a contract, enforced by deny rules on `git push` and `gh`, not by the prompt.
+  `delivery: pr | branch | local` is a contract: only a `pr` session may push or call a mutating `gh`, and the harness denies both to the others.
 - **One kill switch.**
   `touch orchestrator/PAUSED` in the backlog stops every launch.
   Delete it to resume.
@@ -44,7 +45,7 @@ Runs entirely on your Mac: launchd, dependency-free Python, and the Claude Code 
 
 ## Quick start
 
-Requirements: macOS, Python 3.11+, the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
+Requirements: macOS, Python 3.9+, the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
 Nothing to install on the Python side.
 
 Rehearse a whole night first, in a throwaway backlog with a stubbed `claude` and zero tokens:
@@ -67,7 +68,7 @@ orchestrator/manual.sh --tasks research-static-site-generators --dry-run
 ```
 
 The seed gives the budget its first caps: your weekly and 5-hour limits and a heavy day's usage, in USD at API list price.
-Any plausible figures do to start; the status line hook described in the full setup replaces them with measured ones after your first day.
+Any plausible figures do to start; the status line hook described in the full setup replaces them with measured ones once enough of the week has been used to read the ratio.
 The account name must match an `accounts` entry of your config.
 The dry run prints the plan and launches nothing.
 When it looks right, register the nightly loop and the 07:37 digest job:
@@ -82,10 +83,10 @@ Full setup, including the status line hook that keeps the quota caps calibrated,
 ## How it works
 
 ```
-  you                      the engine (every 5 min)                 Claude Code
-  ----                     ------------------------                 -----------
-  write tasks/*.md   -->   gatekeeper: budget, idle, window   -->   claude -p, one task per session
-  read the digest    <--   digest: done / to validate / questions   <--   verify, review, push, log cost
+  you                   the engine (every 5 min)                    Claude Code
+  ---                   ------------------------                    -----------
+  write tasks/*.md   -> gatekeeper: budget, idle, window         -> claude -p, one task per session
+  read the digest    <- digest: done / to validate / questions   <- verify, review, push, log cost
 ```
 
 1. **Capture.**
@@ -109,8 +110,9 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
 
 ## Safety and limits
 
-- **The last night runs open bar.**
-  Before the weekly reset, unspent quota is lost, so that night ignores the budget, the morning guard and the activity lock and launches until the account's limit is hit.
+- **The burn-down runs open bar.**
+  Unspent quota is lost at the weekly reset, so the last hours before it (`prereset_burn_hours`, 8 by default, anchored to the reset time, day or night) ignore the budget, the morning guard and the activity lock.
+  Only the slot ceilings, the kill switch and the account's own limit stop it.
 - **macOS only, for now.**
   Scheduling goes through launchd and `pmset`.
   The OS seam is five scripts, documented in [orchestrator/platform/README.md](orchestrator/platform/README.md); a Linux port would swap in systemd timers.
@@ -129,7 +131,7 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
   Force pushes, `git filter-branch` and credential reads are denied to every session.
   Pushing to `main` is forbidden by the prompt only: protect `main` with branch protection or a pre-push hook.
 - **Where an agent may write.**
-  Only its own worktree under `<repo>/.agent-worktrees/<task>`.
+  Its own worktree under `<repo>/.agent-worktrees/<task>`, plus the backlog itself (task notes, digest, questions).
   The main checkout, and your uncommitted work in it, is never touched, unless a task or project explicitly declares `workdir: main`.
 - **What it cannot see.**
   Usage from other devices or from claude.ai is invisible to the transcript scan, so the caps are recalibrated from the status line's rate-limit readings rather than trusted once.

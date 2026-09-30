@@ -1169,3 +1169,12 @@ class TestPrMergeGate(unittest.TestCase):
         write_task(self.root, "up.md", project="side-projects",
                    status="ready", prerequisites="low")
         self.assertIn("up.md", self.names())
+
+    def test_stack_runs_one_layer_at_a_time(self):
+        write_task(self.root, "a.md", project="side-projects",
+                   status="in-progress", stack="feat")
+        write_task(self.root, "b.md", project="side-projects",
+                   status="ready", stack="feat")
+        write_task(self.root, "c.md", project="side-projects",
+                   status="ready")
+        self.assertEqual(self.names(), ["c.md"])

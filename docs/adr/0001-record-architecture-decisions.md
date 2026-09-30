@@ -1,6 +1,6 @@
 # 0001. Record architecture decisions
 
-- Status: accepted
+- Status: proposed (accepted once merged)
 - Date: 2026-09-30
 
 ## Context
@@ -13,7 +13,7 @@ The rest lives only in the maintainer's notes, outside this repository.
 
 None of these places records a decision as a unit: what was decided, what else was weighed and why it lost, and what the choice costs.
 Some decisions were taken, reverted and replaced within days (`9ca80f2`, reverted by `2d6dd86`), so the reason a design is the way it is cannot be read from the code alone.
-Most changes to this repository are written by agents, which makes an explicit, checkable record of each choice more important, not less: the owner has to be able to explain and defend every one of them.
+Whoever maintains the engine has to be able to explain and defend each of these choices, and that needs the reason recorded next to the decision.
 
 ## Decision
 

@@ -1114,3 +1114,58 @@ class TestNotBefore(unittest.TestCase):
         t, _, _ = tasks.resolve(self.root, PROJECTS, "personal", "t",
                                 now=datetime(2026, 9, 29, 7, 0))
         self.assertIsNotNone(t)
+
+
+class TestPrMergeGate(unittest.TestCase):
+    URL = "https://github.com/o/r/pull/7"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "tasks").mkdir()
+        self.merged = {}
+        self._orig = tasks._pr_merged
+        tasks._pr_merged = lambda url: self.merged.get(url, False)
+
+    def tearDown(self):
+        tasks._pr_merged = self._orig
+        self.tmp.cleanup()
+
+    def dep(self, **fm):
+        write_task(self.root, "low.md", project="side-projects",
+                   status="done", delivery="pr", **fm)
+        with open(self.root / "tasks" / "low.md", "a") as f:
+            f.write(f"PR: {self.URL}\n")
+        write_task(self.root, "up.md", project="side-projects",
+                   status="ready", prerequisites="low",
+                   **({"stack": fm["stack"]} if "stack" in fm else {}))
+
+    def names(self):
+        return [Path(t["path"]).name
+                for t in tasks.launch_order(self.root, PROJECTS, "personal", 5)]
+
+    def test_open_pr_prerequisite_is_unmet(self):
+        self.dep()
+        self.assertNotIn("up.md", self.names())
+
+    def test_merged_pr_prerequisite_is_met(self):
+        self.dep()
+        self.merged[self.URL] = True
+        self.assertIn("up.md", self.names())
+
+    def test_missing_pr_url_fails_closed(self):
+        write_task(self.root, "low.md", project="side-projects",
+                   status="done", delivery="pr")
+        write_task(self.root, "up.md", project="side-projects",
+                   status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
+
+    def test_same_stack_needs_only_a_finished_layer(self):
+        self.dep(stack="feat")
+        self.assertIn("up.md", self.names())
+
+    def test_branch_delivery_prerequisite_needs_only_done(self):
+        write_task(self.root, "low.md", project="side-projects", status="done")
+        write_task(self.root, "up.md", project="side-projects",
+                   status="ready", prerequisites="low")
+        self.assertIn("up.md", self.names())

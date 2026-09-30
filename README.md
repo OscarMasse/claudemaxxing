@@ -82,11 +82,15 @@ Full setup, including the status line hook that keeps the quota caps calibrated,
 
 ## How it works
 
-```
-  you                   the engine (every 5 min)                    Claude Code
-  ---                   ------------------------                    -----------
-  write tasks/*.md   -> gatekeeper: budget, idle, window         -> claude -p, one task per session
-  read the digest    <- digest: done / to validate / questions   <- verify, review, push, log cost
+```mermaid
+flowchart LR
+    you([you])
+    tasks[tasks/*.md]
+    gate{{gatekeeper<br/>every 5 min: budget, idle, window}}
+    session[claude -p<br/>one task per session]
+    digest[digest<br/>done / to validate / questions]
+    you -- write --> tasks --> gate -- launches --> session
+    session -- verify, review, push, log cost --> digest -- read --> you
 ```
 
 1. **Capture.**

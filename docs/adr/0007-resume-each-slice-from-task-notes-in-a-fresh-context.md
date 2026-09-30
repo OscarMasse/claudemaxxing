@@ -16,7 +16,7 @@ The notes-based resume was already in place at the public release (`568f33a`, 20
 Every slice starts a new session with a fresh context, and the only state carried between slices is the resume point written in the task file.
 At the end of a slice the session writes, in the task's `## Notes`, what is done, what is next and the exact commands and files, then hands the task back as `ready` (`orchestrator/prompts/orchestrate.md:111`).
 The next session, possibly days later, reads that note and resumes from it.
-A session killed mid-task keeps its last notes, so the gatekeeper's repair resumes rather than restarts it (`docs/design.md`, "Self-repair").
+A session killed mid-task keeps its last notes, so after the gatekeeper's repair, the next session resumes rather than restarts it (`docs/design.md:60`, "Self-repair").
 
 ## Alternatives considered
 

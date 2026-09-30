@@ -31,7 +31,7 @@ The number is the one its ADR takes, when it has one.
 - **Sources**: where the decision and its reasons can be read.
   `README.md:N` is a line of the top-level README at the commit that adds this inventory; a short SHA is a commit of this repository.
   `notes` means part of the reasoning, or the date, is only in the maintainer's design notes, outside this repository, and will be restated in the ADR.
-- **ADR**: the ADR that records the decision, or `log only` when the row is the decision's whole record (see [Which rows get an ADR](#which-rows-get-an-adr)).
+- **ADR**: the ADR that records the decision, `in NNNN` when the row is folded into another ADR, or `log only` when the row is the decision's whole record (see [Which rows get an ADR](#which-rows-get-an-adr)).
 - **Rationale**: `yes` when the sources state why and what was rejected, `partial` when they state why but not the alternatives or the costs, `missing` when no source states why.
   No row is `missing` today; a new one would be a question for the owner.
 

@@ -136,7 +136,20 @@ Procedure:
       major issues persist after 3, leave `status: ready` with the open issues
       listed in `## Notes`.
 9. Append one line to {{BACKLOG_ROOT}}/orchestrator/state/runs.log:
-   `<ISO date> task=<basename, e.g. my-task.md> did=<one-line summary> stopped=<reason>`
+   `<ISO date> task=<basename, e.g. my-task.md> did=<one-line summary> stopped=<outcome>`
+   `stopped=` takes EXACTLY one of these five values, verbatim, nothing else:
+   - `done` - verification passed, task set `done`.
+   - `resumed` - work remains, task left `ready` with a resume point. Use it
+     when the slice ran out of time or the token budget ran out.
+   - `routine-pass` - one bounded pass of a `recurring` / `duty` / `filler`
+     task, left `ready`.
+   - `blocked` - a question for the owner was written and the task set `blocked`.
+   - `noop` - you found nothing you could do and changed nothing.
+   Put any nuance in `did=`. The file holds two logs: the launcher (run.sh)
+   also appends its own lines (`YYYY-MM-DD HH:MM:SS mode=... exit=N`, a space
+   after the date, no `stopped=`). Yours is the `T`-dated `task=` line; never
+   edit the launcher's. A session killed by the timeout never reaches this
+   step, so the launcher line is the only record of it.
    (this is the machine log, keep it as is). ALSO append ONE markdown bullet
    under the `## Runs` section of {{DIGEST_FILE}} (create the file with a
    `# Digest <date>` header and a `## Runs` section if it does not exist yet):

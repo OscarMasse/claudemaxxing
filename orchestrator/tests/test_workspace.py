@@ -42,18 +42,18 @@ class WorkspaceTest(unittest.TestCase):
         self.backlog = self.root / "backlog"
         (self.backlog / "tasks").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(self.backlog)], check=True)
-        self.repo = make_repo(self.root, "rankr")
+        self.repo = make_repo(self.root, "webapp")
         # The owner's checkout: on a feature branch, with uncommitted work.
         git(self.repo, "checkout", "-q", "-b", "owner-feature")
         (self.repo / "wip.txt").write_text("owner's work\n")
-        self.task = self.write_task("rankr-fix.md", "")
+        self.task = self.write_task("webapp-fix.md", "")
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def write_task(self, name, extra):
         p = self.backlog / "tasks" / name
-        p.write_text(f"---\nproject: rankr\nstatus: in-progress\n{extra}---\n")
+        p.write_text(f"---\nproject: webapp\nstatus: in-progress\n{extra}---\n")
         return p
 
     def dirs(self, *dirs, task=None):
@@ -67,11 +67,11 @@ class WorkspaceTest(unittest.TestCase):
     def test_repo_dir_becomes_a_task_worktree_from_origin_main(self):
         before = self.status()
         out = self.dirs(self.repo, self.backlog)
-        wt = self.repo / ".agent-worktrees" / "rankr-fix"
+        wt = self.repo / ".agent-worktrees" / "webapp-fix"
         self.assertEqual(out, [str(wt), str(self.backlog)])
         self.assertNotIn(str(self.repo), out)
         self.assertEqual(git(wt, "rev-parse", "--abbrev-ref", "HEAD"),
-                         "agent/rankr-fix")
+                         "agent/webapp-fix")
         self.assertEqual(git(wt, "rev-parse", "HEAD"),
                          git(self.repo, "rev-parse", "origin/main"))
         # The main checkout is untouched: same branch, same dirty file, and
@@ -129,8 +129,8 @@ class WorkspaceTest(unittest.TestCase):
         the task branch's current tip."""
         if pr_state and head is None:
             head = git(self.repo, "rev-parse", "--verify", "-q",
-                       "agent/rankr-fix") if (self.repo / ".agent-worktrees"
-                                                / "rankr-fix").exists() else "0" * 40
+                       "agent/webapp-fix") if (self.repo / ".agent-worktrees"
+                                                / "webapp-fix").exists() else "0" * 40
         with mock.patch.object(workspace, "_pr", return_value=(pr_state, head)):
             return workspace.reap([str(self.repo), str(self.backlog)])
 
@@ -143,10 +143,10 @@ class WorkspaceTest(unittest.TestCase):
     def test_reap_removes_a_merged_clean_worktree(self):
         wt = Path(self.dirs(self.repo)[0])
         self.commit_in(wt)
-        git(wt, "push", "-q", "origin", "agent/rankr-fix:main")
+        git(wt, "push", "-q", "origin", "agent/webapp-fix:main")
         self.assertEqual(self.reap(), [(wt, "removed")])
         self.assertFalse(wt.exists())
-        self.assertEqual(git(self.repo, "branch", "--list", "agent/rankr-fix"), "")
+        self.assertEqual(git(self.repo, "branch", "--list", "agent/webapp-fix"), "")
         # The owner's checkout never moved.
         self.assertEqual(self.status()[0], "owner-feature")
 
@@ -155,7 +155,7 @@ class WorkspaceTest(unittest.TestCase):
         self.commit_in(wt)
         self.assertEqual(self.reap("CLOSED"), [(wt, "removed")])
         self.assertFalse(wt.exists())
-        self.assertNotEqual(git(self.repo, "branch", "--list", "agent/rankr-fix"), "")
+        self.assertNotEqual(git(self.repo, "branch", "--list", "agent/webapp-fix"), "")
 
     def test_reap_reports_a_dirty_worktree_and_leaves_it(self):
         wt = Path(self.dirs(self.repo)[0])
@@ -193,33 +193,33 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(git(wt, "rev-parse", "HEAD"), head)
 
     def test_declared_branch_reuses_its_existing_worktree(self):
-        old = self.repo / ".agent-worktrees" / "rankr-old-name"
+        old = self.repo / ".agent-worktrees" / "webapp-old-name"
         git(self.repo, "worktree", "add", "-q", "-b", "legacy-branch",
             str(old), "origin/main")
-        task = self.write_task("rankr-fix.md", "branch: legacy-branch\n")
+        task = self.write_task("webapp-fix.md", "branch: legacy-branch\n")
         self.assertEqual(self.dirs(self.repo, task=task), [str(old)])
 
     def test_declared_branch_without_worktree_is_attached_at_the_task_path(self):
         git(self.repo, "branch", "legacy-branch", "origin/main")
-        task = self.write_task("rankr-fix.md", "branch: legacy-branch\n")
+        task = self.write_task("webapp-fix.md", "branch: legacy-branch\n")
         wt = Path(self.dirs(self.repo, task=task)[0])
-        self.assertEqual(wt, self.repo / ".agent-worktrees" / "rankr-fix")
+        self.assertEqual(wt, self.repo / ".agent-worktrees" / "webapp-fix")
         self.assertEqual(git(wt, "branch", "--show-current"), "legacy-branch")
 
     def test_declared_branch_only_on_the_remote_is_fetched_into_the_worktree(self):
         git(self.repo, "push", "-q", "origin", "origin/main:refs/heads/pr-branch")
         git(self.repo, "fetch", "-q", "origin")
-        task = self.write_task("rankr-fix.md", "branch: pr-branch\n")
+        task = self.write_task("webapp-fix.md", "branch: pr-branch\n")
         wt = Path(self.dirs(self.repo, task=task)[0])
         self.assertEqual(git(wt, "branch", "--show-current"), "pr-branch")
 
     def test_declared_branch_in_the_main_checkout_is_refused(self):
-        task = self.write_task("rankr-fix.md", "branch: owner-feature\n")
+        task = self.write_task("webapp-fix.md", "branch: owner-feature\n")
         with self.assertRaises(workspace.WorkspaceError):
             self.dirs(self.repo, task=task)
 
     def test_reap_ignores_worktrees_it_did_not_create(self):
-        other = self.repo / ".agent-worktrees" / "rankr-topic"
+        other = self.repo / ".agent-worktrees" / "webapp-topic"
         git(self.repo, "worktree", "add", "-q", "-b", "someone-else",
             str(other), "origin/main")
         self.assertEqual(self.reap("MERGED"), [])
@@ -240,14 +240,14 @@ class WorkspaceTest(unittest.TestCase):
         self.assertIn("ghost.md", (self.backlog / "NEEDS-HUMAN.md").read_text())
 
     def test_undeclared_optional_dir_stays_readonly_without_worktree(self):
-        assets = make_repo(self.root, "pokemon-assets")
+        assets = make_repo(self.root, "big-assets")
         self.assertEqual(workspace.split_optional(self.task, [str(assets)]),
                          ([], [str(assets)]))
         self.assertFalse((assets / ".agent-worktrees").exists())
 
     def test_declared_optional_dir_is_used(self):
-        assets = make_repo(self.root, "pokemon-assets")
-        task = self.write_task("sprites.md", "uses: [pokemon-assets]\n")
+        assets = make_repo(self.root, "big-assets")
+        task = self.write_task("sprites.md", "uses: [big-assets]\n")
         self.assertEqual(workspace.split_optional(task, [str(assets)]),
                          ([str(assets)], []))
 
@@ -255,7 +255,7 @@ class WorkspaceTest(unittest.TestCase):
         task = self.write_task("ghost.md", "uses: [nope]\n")
         r = subprocess.run(
             ["python3", str(Path(workspace.__file__)), "optional", str(task),
-             str(self.backlog), str(self.root / "pokemon-assets")],
+             str(self.backlog), str(self.root / "big-assets")],
             capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertEqual(r.stdout, "")

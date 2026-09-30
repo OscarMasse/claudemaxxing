@@ -14,17 +14,17 @@ from lib import janitor  # noqa: E402
 class TestReapable(unittest.TestCase):
     def test_only_agent_worktrees_inside_project_dirs(self):
         rows = [
-            ("rankr-a", "/p/rankr/.agent-worktrees/rankr-a"),
-            ("rankr-a", "/p/rankr/.agent-worktrees/rankr-a"),  # 2nd container
-            ("rankr", "/p/rankr"),                               # owner checkout
-            ("mine", "/p/rankr/.worktrees/mine"),                # owner worktree
+            ("webapp-a", "/p/webapp/.agent-worktrees/webapp-a"),
+            ("webapp-a", "/p/webapp/.agent-worktrees/webapp-a"),  # 2nd container
+            ("webapp", "/p/webapp"),                               # owner checkout
+            ("mine", "/p/webapp/.worktrees/mine"),                # owner worktree
             ("work", "/w/core/.agent-worktrees/x"),              # other root
             ("", ""),                                            # not compose
         ]
-        self.assertEqual(janitor.reapable(rows, ["/p"]), ["rankr-a"])
+        self.assertEqual(janitor.reapable(rows, ["/p"]), ["webapp-a"])
 
     def test_no_project_dirs_reaps_nothing(self):
-        rows = [("rankr-a", "/p/rankr/.agent-worktrees/rankr-a")]
+        rows = [("webapp-a", "/p/webapp/.agent-worktrees/webapp-a")]
         self.assertEqual(janitor.reapable(rows, []), [])
 
 
@@ -36,8 +36,8 @@ class TestSweep(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.calls = self.dir / "calls"
-        rows = ("rankr-a\t/p/rankr/.agent-worktrees/rankr-a\n"
-                "rankr\t/p/rankr\n")
+        rows = ("webapp-a\t/p/webapp/.agent-worktrees/webapp-a\n"
+                "webapp\t/p/webapp\n")
         stub = self.dir / "docker"
         stub.write_text(
             "#!/bin/sh\n"
@@ -51,9 +51,9 @@ class TestSweep(unittest.TestCase):
 
     def test_downs_agent_stacks_only(self):
         with mock.patch.dict(os.environ, {"ORCH_DOCKER_BIN": self.stub}):
-            self.assertEqual(janitor.sweep(["/p"]), [("rankr-a", True)])
+            self.assertEqual(janitor.sweep(["/p"]), [("webapp-a", True)])
         self.assertEqual(self.calls.read_text(),
-                         "compose -p rankr-a down --remove-orphans\n")
+                         "compose -p webapp-a down --remove-orphans\n")
 
     def test_disabled_by_empty_bin(self):
         with mock.patch.dict(os.environ, {"ORCH_DOCKER_BIN": ""}):

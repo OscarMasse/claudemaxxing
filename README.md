@@ -12,18 +12,18 @@ In the morning you read a digest and review pull requests.
 # Digest 2026-09-29
 
 ## To validate
-- rankr PR #133 (template-from-catalog images): ready, merge and release.
-- rankr PR #131 (lint rule banning raw fetch() to the API): ready, review/merge.
+- webapp PR #133 (template-from-catalog images): ready, merge and release.
+- webapp PR #131 (lint rule banning raw fetch() to the API): ready, review/merge.
 - claudemaxxing PR #27 (CI gate): green, merge.
 
 ## Questions
-- rankr-just-dev-lan: accept the LAN image-upload limitation, or grow the task to fix it first?
+- webapp-just-dev-lan: accept the LAN image-upload limitation, or grow the task to fix it first?
 
 ## Done
-- rankr-gardener (nightly duty): reviewed, opened #131, filed two follow-ups.
+- webapp-gardener (nightly duty): reviewed, opened #131, filed two follow-ups.
 ```
 
-*Example: a real morning digest from the author's backlog, trimmed.*\
+*Example: a morning digest, trimmed.*\
 *Each line is a decision the owner takes in a minute, not a log to read.*
 
 - **Nights are budget-safe.**

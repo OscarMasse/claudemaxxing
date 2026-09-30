@@ -77,17 +77,17 @@ class StallTest(Base):
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
 
     def test_three_spellings_count_as_one(self):
-        path = self.task("rankr-discovery.md")
-        spellings = ["tasks/rankr-discovery.md", "rankr-discovery.md",
-                     "/Users/oscar/backlog/tasks/rankr-discovery.md"]
+        path = self.task("webapp-discovery.md")
+        spellings = ["tasks/webapp-discovery.md", "webapp-discovery.md",
+                     "/home/me/backlog/tasks/webapp-discovery.md"]
         for i in range(5):
             self.session(path, self.t0 + timedelta(minutes=50 * i),
                          note=f"s{i}", spelling=spellings[i % 3])
         self.assertEqual({r["task"] for r in stalls.orchestrate_runs(self.state)},
-                         {"rankr-discovery.md"})
+                         {"webapp-discovery.md"})
         found = stalls.detect(self.root, self.state, self.now)
         self.assertEqual([(f[0], f[1], f[2]) for f in found],
-                         [("rankr-discovery.md", "storming", 5)])
+                         [("webapp-discovery.md", "storming", 5)])
         # The same night seen from a later day is history, not a storm.
         self.now += timedelta(days=2)
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
@@ -102,10 +102,10 @@ class StallTest(Base):
         self.assertEqual(stalls.detect(self.root, self.state, self.now), [])
 
     def test_clamped_ladder_is_not_charged_to_the_task(self):
-        # The 2026-09-27 replay: rankr-control-skill launched five times in
+        # The 2026-09-27 replay: webapp-control-skill launched five times in
         # slices the window end clamped to 33/23/18/13/7 minutes, each session
         # doing real work. Only the first launch is the task's own.
-        path = self.task("rankr-control-skill.md")
+        path = self.task("webapp-control-skill.md")
         t = datetime(2026, 9, 27, 2, 59)
         for i, (minute, slice_min) in enumerate(
                 ((0, 33), (10, 23), (15, 18), (20, 13), (25, 7))):
@@ -114,7 +114,7 @@ class StallTest(Base):
             with open(self.state / "runs.log", "a") as f:
                 f.write(f"{t + timedelta(minutes=minute):%F %T} mode=orchestrate "
                         f"account=max slot=2 slice={slice_min}min "
-                        f"task=rankr-control-skill.md project=rankr "
+                        f"task=webapp-control-skill.md project=webapp "
                         f"model=opus/high exit=0\n")
         now = t + timedelta(minutes=30)
         runs = stalls.orchestrate_runs(self.state)

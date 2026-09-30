@@ -132,9 +132,9 @@ Procedure:
       allowed) whose instruction is to REFUTE the work - re-read the task's
       definition of done and the changes produced, and hunt for unmet criteria,
       errors, and gaps. Fix what it finds, then spawn a NEW reviewer. Set `done`
-      only when a review pass finds zero new major issues. Cap at 3 passes: if
-      major issues persist after 3, leave `status: ready` with the open issues
-      listed in `## Notes`.
+      only when a review pass finds zero new major issues. Cap at 2 passes: if
+      a major issue still stands after the second, do not start a third: set
+      `status: blocked` with the open issues listed in `## Notes` (step 6).
 9. Append one line to {{BACKLOG_ROOT}}/orchestrator/state/runs.log:
    `<ISO date> task=<basename, e.g. my-task.md> did=<one-line summary> stopped=<reason>`
    (this is the machine log, keep it as is). ALSO append ONE markdown bullet

@@ -18,8 +18,8 @@ The number is the one the ADR will take.
   A row that merges several steps of one decision gives the date of each step.
   A step is a commit or a note that changes what the decision says; a fix or a hardening that leaves it unchanged is not a step.
   An ADR carries a single date: when a row with several steps is written up, the ADR takes the date of the step it records as the decision, and its Context tells the other steps with their dates.
-  A month-only row takes the day its notes give, and a `<= 2026-09-04` row takes the release day, the earliest the public history can show.
-  A decision taken before the initial public release (`568f33a`, 2026-09-04) is dated by month from the maintainer's notes, or `<= 2026-09-04` when it is already in that release and no source dates it earlier.
+  A decision taken before the initial public release (`568f33a`, 2026-09-04) is dated here by month on purpose, because its exact day is only in the maintainer's notes, or `<= 2026-09-04` when it is already in that release and no source dates it earlier.
+  Its ADR takes the day the notes give, or for a `<= 2026-09-04` row the release day, the earliest the public history can show.
 - **Sources**: where the decision and its reasons can be read.
   `README.md:N` is a line of the top-level README at the commit that adds this inventory; a short SHA is a commit of this repository.
   `notes` means part of the reasoning, or the date, is only in the maintainer's design notes, outside this repository, and will be restated in the ADR.
@@ -118,7 +118,7 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0052 | One git worktree per task, never a repo's main checkout; sessions start outside every repo | 2026-09-28 | `193b8f0`, `6bcf946`, `9671680`, `f4cd445`, `README.md:68,70` | yes |
-| 0053 | Optional dirs are read-only unless a task declares them in `uses:` | 2026-09-28 | `fa258d4`, `README.md:69`, `orchestrator/config.yaml:161-167` | yes |
+| 0053 | Optional dirs are read-only unless a task declares them in `uses:` | 2026-09-28 | `fa258d4`, `README.md:69`, `orchestrator/config.yaml:161-167` | partial |
 | 0054 | Night janitors remove finished worktrees and abandoned compose stacks, only when nothing is running | 2026-09-24, worktrees 2026-09-28 | `b95a48a`, `193b8f0`, `6bcf946`, `README.md:70-71` | yes |
 | 0055 | Headless sessions run subagents and Bash in the foreground only | 2026-09-25 | `282404f`, `orchestrator/prompts/orchestrate.md:155-159` | yes |
 
@@ -155,3 +155,4 @@ These texts contradict a decision above; the ADR, once written, is the reference
 - `orchestrator/config.yaml:84-85` says the pre-reset burn-down "upgrades sessions to Fable", which `6c32f0c` removed: nothing upgrades a task's model (0029).
 - `README.md:89` says the repo root is the backlog root, while `02ec85e` made an unset backlog root an error unless `ORCH_EXAMPLE=1` selects the example data (0011).
 - `README.md:24` ("token usage") and `README.md:124` ("tonight's token allocation") still speak of tokens, while the budget unit is USD (0016).
+- `README.md:181` says the night share "is back-loaded", while the default `night_budget_ratio: 1.0` (`orchestrator/config.yaml:101`) is a flat split (0014).

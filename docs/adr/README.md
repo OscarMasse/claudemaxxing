@@ -27,8 +27,8 @@ The number is the one the ADR will take.
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
 | 0002 | Keep the backlog as plain Markdown task files with YAML-like frontmatter | 2026-08 | `README.md:44,78,93`, `examples/tasks/`, `568f33a`, notes | partial |
-| 0003 | Select tasks in a local, zero-token gatekeeper, never in the session | 2026-08 | `README.md:230-232`, notes | yes |
-| 0004 | One task per session (a multi-task budgeted session was adopted and reverted) | 2026-08, reaffirmed 2026-09-08 | `9ca80f2`, `2d6dd86`, `b90f4fe` | yes |
+| 0003 | Select the task of every scheduled launch in a local, zero-token gatekeeper, not in the session | 2026-08 | `README.md:230-232`, notes | yes |
+| 0004 | One task per session (a multi-task budgeted session was adopted and reverted) | 2026-08, reaffirmed 2026-09-08 | `README.md:51`, `9ca80f2`, `2d6dd86`, `b90f4fe`, notes | yes |
 | 0005 | Run the night as a pipeline: a 5-minute tick that never waits on the sessions it launched | 2026-09-08 | `b90f4fe`, `README.md:217-220` | yes |
 | 0006 | Tick from a KeepAlive loop instead of launchd StartInterval; the daily digest job doubles as watchdog | 2026-08 | `README.md:222-224`, `orchestrator/platform/README.md:9,12`, notes | yes |
 | 0007 | Fresh context for every slice, resumed from notes in the task file, not from `claude -p --resume` | 2026-08 | `orchestrator/prompts/orchestrate.md:111`, notes | yes |
@@ -36,9 +36,10 @@ The number is the one the ADR will take.
 | 0009 | Standard-library Python only, with a hand-rolled YAML subset for the config | 2026-08 | `README.md:5,87`, `orchestrator/config.yaml:1-10` | missing |
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial |
 | 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-28 | `02ec85e`, `README.md:107-110`, notes | yes |
-| 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | yes |
-| 0066 | Session slots are `RUNNING.N` lock files, taken before any config read and broken after a lock TTL | 2026-08 | `orchestrator/run.sh:83-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial |
-| 0067 | Every tick logs its decision and the reason, one line per account or slot | <= 2026-09-04 | `README.md:28-30,104`, `3d0739e` | partial |
+| 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial |
+| 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial |
+| 0067 | Every tick logs its decision and the reason, one line per account or slot | 2026-08 | `README.md:28-30,104`, `3d0739e`, notes | partial |
+| 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-4` | missing |
 
 ### Quota, budget and cost
 
@@ -62,7 +63,7 @@ The number is the one the ADR will take.
 | 0023 | A missed night is not caught up the next day | 2026-09-08 | `README.md:183`, notes | yes |
 | 0024 | No background quota window may cross the morning guard, so the last cold start is the guard minus 5h | 2026-08 | `README.md:124-125`, notes | yes |
 | 0025 | End of window: a guard tolerance and a minimum slice, and no relaunch ladder into shorter slices | 2026-09-27 | `ce9870d`, `ab6eebc`, `README.md:126-128`, `orchestrator/config.yaml:50-53,69-72`, notes | yes |
-| 0026 | The pre-reset burn-down runs with no budget, no reserve and no activity lock | 2026-09-11 | `6c32f0c`, `6d08203`, `README.md:55,132-134` | yes |
+| 0026 | The pre-reset burn-down runs with no budget, no reserve and no activity lock | 2026-09-11, lock dropped 2026-09-24 | `6c32f0c`, `6d08203`, `README.md:55,132-134` | yes |
 | 0027 | Detect owner activity from interactive transcript events, not from file mtimes | 2026-08 | `README.md:55,234-236`, `c2a633c`, notes | yes |
 | 0028 | Give each session its absolute start and deadline, and tag early exits | 2026-09-27 | `ce9870d`, `README.md:129`, notes | yes |
 | 0063 | Work in time-boxed slices re-decided every tick, not one long run; a hard kill at the slice plus 10 minutes | 2026-08 | `README.md:33-39`, `orchestrator/run.sh:240,268`, `orchestrator/lib/with_timeout.py`, notes | partial |
@@ -71,7 +72,7 @@ The number is the one the ADR will take.
 
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
-| 0029 | A task's `model:` is what its session runs: no ceiling, no upgrade, no ordering between models | 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131` | yes |
+| 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes |
 | 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes |
 | 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77` | yes |
 
@@ -129,15 +130,16 @@ The number is the one the ADR will take.
 
 | No. | Decision | Date | Sources | Rationale |
 |---|---|---|---|---|
-| 0060 | Rehearse the engine without spending quota: `dry_run`, then an end-to-end sandbox with a stubbed `claude` | <= 2026-09-04, sandbox 2026-09-07 | `568f33a`, `d5ae75c`, `README.md:104-105` | partial |
+| 0060 | Rehearse the engine without spending quota: `dry_run`, then an end-to-end sandbox with a stubbed `claude` | 2026-08, sandbox 2026-09-07 | `568f33a`, `d5ae75c`, `README.md:104-105`, notes | partial |
 | 0061 | CI runs exactly the local `check.sh`; a change is done only once CI is green | 2026-09-29 | `39cb0f6`, `README.md:114-119`, `check.sh`, notes | partial |
-| 0062 | Config compatibility: flow-style lists and `config.yaml` preferred; older spellings and the legacy flat config still parse | 2026-09-06 | `07d8e6e`, `README.md:82`, `orchestrator/config.yaml:17-22` | partial |
+| 0062 | Config compatibility: flow-style lists and `config.yaml` preferred; older spellings and the legacy flat config still parse | <= 2026-09-04, spellings 2026-09-06 | `07d8e6e`, `README.md:82`, `orchestrator/config.yaml:17-22` | partial |
 
 ## Open questions
 
-Questions for the owner, from the `missing` rows.
+Questions for the owner: every `missing` row, plus the `partial` rows whose central reason is not recorded.
 
 - **0009.** Why standard-library Python only, and a hand-rolled YAML subset rather than a YAML library? Was it to avoid a virtualenv under launchd, to keep installation to a clone, or something else?
+- **0068.** Why do unattended sessions bypass permission prompts, with deny rules as the only enforced limits, rather than running on an explicit allow list (`--allowedTools`)?
 - **0038.** What made interactive work a task mode of its own, rather than a `blocked` task or a task left out of the backlog?
 
 ## Documentation drift found while building the inventory
@@ -146,3 +148,5 @@ These texts contradict a decision above; the ADR, once written, is the reference
 
 - `README.md:53` says the adversarial review is "looped until a pass finds zero new major issues", while `orchestrator/prompts/orchestrate.md:135`, the authority for the review procedure, caps it at 3 passes (0056).
 - `orchestrator/config.yaml:84-85` says the pre-reset burn-down "upgrades sessions to Fable", which `6c32f0c` removed: nothing upgrades a task's model (0029).
+- `README.md:89` says the repo root is the backlog root, while `02ec85e` made an unset backlog root an error unless `ORCH_EXAMPLE=1` selects the example data (0011).
+- `README.md:24` ("token usage") and `README.md:124` ("tonight's token allocation") still speak of tokens, while the budget unit is USD (0016).

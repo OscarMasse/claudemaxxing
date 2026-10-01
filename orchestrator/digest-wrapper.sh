@@ -5,6 +5,8 @@
 # gatekeeper loop is not running (launchd "pended spawn" limbo, crash),
 # kickstart it through the platform hook.
 set -u
+# Homebrew first: python3 must be 3.14, not the macOS system 3.9.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 cd "$(dirname "$0")" || exit 1
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.

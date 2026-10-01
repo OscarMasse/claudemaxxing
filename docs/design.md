@@ -79,7 +79,7 @@ A backlog still holding the retired `config.yaml` makes the engine fail loud wit
 
 ## Install
 
-Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.11+ (for the standard-library `tomllib` that reads the config), the Claude Code CLI.
+Requirements: **macOS only** (the shipped scheduling adapter is launchd + pmset; the seam for other OSes is documented in `orchestrator/platform/README.md`), Python 3.14+ (Homebrew `python@3.14`; the macOS system `/usr/bin/python3` is too old), the Claude Code CLI.
 Nothing to install on the Python side: standard library only, no virtualenv, no pip.
 
 1. Clone the repo; its root is the backlog root (`tasks/`, `digests/`, `NEEDS-HUMAN.md` live there, gitignored).

@@ -331,3 +331,90 @@ class TestReviewFixes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FIXTURE = ORCH / "tests" / "fixtures" / "stream_json_session.jsonl"
+
+
+def rejected_stream(path, resets):
+    event = {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "rejected", "resetsAt": resets, "rateLimitType": "five_hour",
+        "utilization": 1.0, "unifiedWindows": {
+            "five_hour": {"utilization": 1.0, "resetsAt": resets},
+            "seven_day": {"utilization": 0.81, "resetsAt": resets + 86400}}}}
+    path.write_text(json.dumps(event) + "\n"
+                    + json.dumps({"type": "result", "is_error": True}) + "\n")
+
+
+class TestHeadless(unittest.TestCase):
+    """Readings from a captured `claude -p --output-format stream-json` run."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name) / "acct"
+        self.acct = {"name": "acct", "claude_config_dir": "/nonexistent"}
+        self.now = datetime(2026, 10, 1, 18, 30, tzinfo=UTC)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_from_stream_converts_to_status_line_shape(self):
+        payload, infos = ratelimits.from_stream(FIXTURE.read_text().splitlines())
+        self.assertEqual(payload["rate_limits"], {
+            "seven_day": {"used_percentage": 79.0, "resets_at": 1790913600},
+            "five_hour": {"used_percentage": 0.0, "resets_at": 1790895600}})
+        self.assertEqual([i["status"] for i in infos], ["allowed_warning"])
+
+    def test_percentages_are_rounded_not_float_noise(self):
+        line = json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed", "unifiedWindows": {
+                "five_hour": {"utilization": 0.29, "resetsAt": 1}}}})
+        payload, _ = ratelimits.from_stream([line])
+        self.assertEqual(payload["rate_limits"]["five_hour"]["used_percentage"], 29.0)
+
+    def test_headless_records_tagged_reading_and_logs_warning(self):
+        log = ratelimits.headless(self.acct, self.state, "opus", FIXTURE, self.now,
+                                  entries=[(self.now - timedelta(hours=1), "m", 3.0, 0)])
+        rows = ratelimits.load(self.state)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["origin"], "headless")
+        self.assertEqual(rows[0]["seven_day"]["used_percentage"], 79.0)
+        self.assertEqual(rows[0]["seven_day"]["engine_usd"], 3.0)
+        self.assertEqual(rows[0]["five_hour"]["used_percentage"], 0.0)
+        self.assertEqual(len(log), 1)
+        self.assertIn("status=allowed_warning", log[0])
+        self.assertFalse((self.state / "exhausted.json").exists())
+
+    def test_status_line_rows_are_tagged_statusline(self):
+        p = payload(week_pct=30, week_resets=WEEK_RESET)
+        row = ratelimits.record(self.acct, self.state, p, T0, entries=[])
+        self.assertEqual(row["origin"], "statusline")
+
+    def test_rejected_marks_model_out_of_quota_until_resets_at(self):
+        from lib import quota
+        stream = Path(self.tmp.name) / "out.jsonl"
+        resets = int((self.now + timedelta(hours=2)).timestamp())
+        rejected_stream(stream, resets)
+        log = ratelimits.headless(self.acct, self.state, "opus", stream, self.now, entries=[])
+        blocked = quota.blocked(self.state, self.now)
+        self.assertEqual(blocked["opus"].timestamp(), resets)
+        self.assertEqual(quota.history(self.state)["opus"]["scope"], "five_hour")
+        self.assertTrue(any("quota exhausted model=opus" in x for x in log))
+
+    def test_rejected_keeps_an_existing_stderr_record(self):
+        from lib import quota
+        stream = Path(self.tmp.name) / "out.jsonl"
+        rejected_stream(stream, int((self.now + timedelta(hours=2)).timestamp()))
+        until = self.now + timedelta(hours=3)
+        quota.record_fallback(self.state, "opus", self.now, until=until, scope="session")
+        ratelimits.headless(self.acct, self.state, "opus", stream, self.now, entries=[])
+        self.assertEqual(quota.history(self.state)["opus"]["scope"], "session")
+
+    def test_missing_or_eventless_output_records_nothing(self):
+        self.assertEqual(ratelimits.headless(self.acct, self.state, "opus",
+                                             Path(self.tmp.name) / "none", self.now), [])
+        plain = Path(self.tmp.name) / "plain.json"
+        plain.write_text('{"total_cost_usd": 0.5}')
+        self.assertEqual(ratelimits.headless(self.acct, self.state, "opus", plain,
+                                             self.now, entries=[]), [])
+        self.assertEqual(ratelimits.load(self.state), [])

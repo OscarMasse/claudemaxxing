@@ -1,4 +1,5 @@
 """run.sh end to end, with a fake `claude` binary standing in for the session."""
+import json
 import os
 import subprocess
 import tempfile
@@ -26,12 +27,14 @@ CFG = (
 )
 
 # Saves the prompt it receives on stdin, then answers like `claude -p
-# --output-format json` would after running FAKE_DURATION_MS.
+# --output-format stream-json --verbose` would after running FAKE_DURATION_MS.
 FAKE_CLAUDE = """#!/bin/bash
 cat > "$FAKE_PROMPT_OUT"
 printf '%s\\n' "$@" > "$FAKE_ARGS_OUT"
 pwd -P > "$FAKE_ARGS_OUT.cwd"
-printf '{"total_cost_usd": 0.5, "duration_ms": %s, "result": "ok"}' "$FAKE_DURATION_MS"
+printf '{"type": "system", "subtype": "init"}\n'
+printf '{"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "unifiedWindows": {"five_hour": {"utilization": 0.25, "resetsAt": 4102444800}, "seven_day": {"utilization": 0.5, "resetsAt": 4102444800}}}}\n'
+printf '{"type": "result", "total_cost_usd": 0.5, "duration_ms": %s, "result": "ok"}\n' "$FAKE_DURATION_MS"
 """
 
 
@@ -151,6 +154,19 @@ class RunShTest(unittest.TestCase):
         self.assertRegex(prompt, r"ends at \d{4}-\d\d-\d\d \d\d:\d\d \S+")
         self.assertIn("run `date`", prompt)
         self.assertNotIn("{{", prompt)
+
+    def test_stream_json_feeds_ledger_and_headless_reading(self):
+        self.run_session(50, "ready")
+        args = (self.root / "args.txt").read_text().splitlines()
+        i = args.index("--output-format")
+        self.assertEqual(args[i + 1:i + 3], ["stream-json", "--verbose"])
+        state = self.root / "orchestrator" / "state" / "personal"
+        cost = json.loads((state / "costs.jsonl").read_text().splitlines()[-1])
+        self.assertEqual((cost["cost_usd"], cost["exit"]), (0.5, 0))
+        row = json.loads((state / "rate_limits.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(row["origin"], "headless")
+        self.assertEqual(row["five_hour"]["used_percentage"], 25.0)
+        self.assertEqual(row["seven_day"]["used_percentage"], 50.0)
 
     def test_early_exit_with_work_left_is_tagged(self):
         run, digest = self.run_session(3, "ready")

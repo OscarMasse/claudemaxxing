@@ -225,3 +225,37 @@ class TestLearning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStreamJsonResult(unittest.TestCase):
+    """run.sh writes stream-json; the ledger reads its final result line."""
+
+    FIXTURE = Path(__file__).resolve().parent / "fixtures" / "stream_json_session.jsonl"
+
+    def test_stream_and_single_object_give_the_same_row(self):
+        result = [json.loads(x) for x in self.FIXTURE.read_text().splitlines()][-1]
+        with tempfile.TemporaryDirectory() as d:
+            single = Path(d) / "single.json"
+            single.write_text(json.dumps(result))
+            rows = []
+            for i, path in enumerate((self.FIXTURE, single)):
+                state = Path(d) / str(i)
+                text = ledger.record(state, path, "orchestrate", "t.md", "haiku",
+                                     "low", 50, 0, "max")
+                rows.append(json.loads((state / "costs.jsonl").read_text()))
+                self.assertEqual(text, result["result"])
+                rows[-1].pop("ts")
+            self.assertEqual(rows[0], rows[1])
+            self.assertEqual(rows[0]["cost_usd"], result["total_cost_usd"])
+            self.assertEqual(ledger.result_fields(self.FIXTURE),
+                             ledger.result_fields(single))
+
+    def test_stream_without_result_line_is_invalid_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "out.jsonl"
+            path.write_text('{"type": "system"}\n{"type": "assistant"}\n')
+            ledger.record(Path(d), path, "orchestrate", "t.md", "haiku",
+                          "low", 50, 1, "max")
+            row = json.loads((Path(d) / "costs.jsonl").read_text())
+            self.assertEqual(row["reason"], "invalid_json")
+            self.assertEqual(ledger.result_fields(path), (0.0, 0))

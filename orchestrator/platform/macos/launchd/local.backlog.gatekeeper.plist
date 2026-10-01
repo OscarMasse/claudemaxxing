@@ -14,7 +14,11 @@
   <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Background</string>
   <key>EnvironmentVariables</key>
-  <dict><key>BACKLOG_ROOT</key><string>__BACKLOG_ROOT__</string></dict>
+  <dict>
+    <key>BACKLOG_ROOT</key><string>__BACKLOG_ROOT__</string>
+    <!-- launchd's default PATH resolves python3 to the too-old system one. -->
+    <key>PATH</key><string>__PATH__</string>
+  </dict>
   <key>StandardOutPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.gatekeeper.log</string>
   <key>StandardErrorPath</key><string>__BACKLOG_ROOT__/orchestrator/state/launchd.gatekeeper.log</string>
 </dict>

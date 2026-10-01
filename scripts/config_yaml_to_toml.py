@@ -16,8 +16,14 @@ file is left in place: delete it once `gate.py status` looks right.
 """
 import json
 import sys
-import tomllib
-from pathlib import Path
+
+if sys.version_info < (3, 14):
+    sys.exit(f"claudemaxxing needs Python 3.14+, but {sys.executable} is "
+             f"{sys.version.split()[0]}. Put a 3.14 interpreter first on PATH "
+             f"(Homebrew: /opt/homebrew/bin) or re-run orchestrator/install.sh.")
+
+import tomllib  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 LIST_KEYS = ("dirs", "optional_dirs")
 

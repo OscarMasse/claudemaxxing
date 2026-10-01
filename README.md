@@ -45,7 +45,7 @@ Runs entirely on your Mac: launchd, dependency-free Python, and the Claude Code 
 
 ## Quick start
 
-Requirements: macOS, Python 3.11+ (for the standard-library `tomllib` that reads the config), the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
+Requirements: macOS, Python 3.14+ (Homebrew `python@3.14`; the macOS system `/usr/bin/python3` is too old), the [Claude Code CLI](https://code.claude.com/docs/en/overview) logged into a Pro or Max account.
 Nothing to install on the Python side.
 
 Rehearse a whole night first, in a throwaway backlog with a stubbed `claude` and zero tokens:

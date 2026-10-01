@@ -17,11 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The engine is stdlib-only; 3.9 is the oldest interpreter it targets
-      # (see pyproject.toml), the macOS system python being the floor.
+      # The engine is stdlib-only and targets Python 3.14 (see pyproject.toml
+      # and the guard in orchestrator/lib/config.py).
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.14"
 
       - name: Install ruff
         run: python3 -m pip install ruff

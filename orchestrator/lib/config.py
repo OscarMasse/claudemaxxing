@@ -74,7 +74,15 @@ CLI (used by run.sh so shell scripts never parse the config themselves):
 """
 import os
 import sys
-import tomllib
+
+# Every entry point imports this module, so the interpreter floor lives here,
+# before the first import a 3.9 system python cannot satisfy.
+if sys.version_info < (3, 14):
+    sys.exit(f"claudemaxxing needs Python 3.14+, but {sys.executable} is "
+             f"{sys.version.split()[0]}. Put a 3.14 interpreter first on PATH "
+             f"(Homebrew: /opt/homebrew/bin) or re-run orchestrator/install.sh.")
+
+import tomllib  # noqa: E402
 from datetime import datetime
 from pathlib import Path
 

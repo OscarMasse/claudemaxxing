@@ -5,6 +5,8 @@
 # two nights lost). A KeepAlive loop has no scheduled-spawn state to lose:
 # the process ticks itself, and launchd only has to restart it if it dies.
 set -u
+# Homebrew first: python3 must be 3.14, not the macOS system 3.9.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 cd "$(dirname "$0")" || exit 1
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.

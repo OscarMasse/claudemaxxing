@@ -33,7 +33,8 @@ Headless sessions report too (since 2026-10-01): run.sh launches with
 `--output-format stream-json --verbose`, whose output carries
 `rate_limit_event` lines, and `ratelimits.py headless` converts the last one
 to the status line shape (`used_percentage` = `utilization` x 100) and
-records it the same way, stamped at the event's own time (`from_stream`). Every row carries its `origin` (`statusline` or
+records it the same way, stamped at the event's own time (`from_stream`),
+so the history file is not strictly in time order. Every row carries its `origin` (`statusline` or
 `headless`; rows before that date have none and are status line ones). So
 night sessions now feed the derivation; between sessions the engine keeps
 the latest derived caps and its own measurement since. `utilization` comes
@@ -104,7 +105,9 @@ def _valid(row):
 
 
 def load(state_dir):
-    """History rows, oldest first. Unreadable or malformed lines are skipped."""
+    """History rows in file order: append order, which headless rows stamped at
+    their event time can break (readers do not rely on time order).
+    Unreadable or malformed lines are skipped."""
     path = Path(state_dir) / HISTORY
     if not path.is_file():
         return []
@@ -257,7 +260,10 @@ def record(acct, state_dir, payload, now, entries=None, origin="statusline"):
         except BlockingIOError:
             return None
         last = next((r for r in reversed(load(state_dir)) if not r.get("seed")), None)
-        if last and (now - _ts(last["ts"]) < MIN_INTERVAL or _same(last, readings)):
+        # A headless reading older than the last row (a parallel slot that
+        # finished first) is still kept: the throttle is for bursts only.
+        if last and (timedelta(0) <= now - _ts(last["ts"]) < MIN_INTERVAL
+                     or _same(last, readings)):
             return None
         lengths = {key: length for key, length, *_ in WINDOWS}
         starts = {k: resets - lengths[k] for k, (_pct, resets) in readings.items()}

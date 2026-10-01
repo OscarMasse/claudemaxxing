@@ -14,6 +14,12 @@
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 ORCH_DIR="$(pwd)"
+# launchd hands down a bare PATH (/usr/bin:/bin:...), so node and the homebrew
+# tools are missing and anything the session shells out to that needs them (a
+# hook, an MCP server, a project's test command) dies with FileNotFoundError.
+# Same export as gatekeeper.sh. Set before the first python3 call: it must
+# be Homebrew's 3.14, not the macOS system 3.9.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 # The backlog root (tasks/, digests/, NEEDS-HUMAN.md, orchestrator/state/) is
 # resolved by lib/config.py (env, then the file install.sh records) and
 # exported so gate.py resolves the same config and state paths. It exits
@@ -21,11 +27,6 @@ ORCH_DIR="$(pwd)"
 BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2
 export BACKLOG_ROOT
 STATE_ROOT="$BACKLOG_ROOT/orchestrator/state"
-# launchd hands down a bare PATH (/usr/bin:/bin:...), so node and the homebrew
-# tools are missing and anything the session shells out to that needs them (a
-# hook, an MCP server, a project's test command) dies with FileNotFoundError.
-# Same export as gatekeeper.sh.
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 ACCOUNT="${ORCH_ACCOUNT:-}"
 MODE="orchestrate"

@@ -32,12 +32,12 @@ switch to that worktree for this slice only if the branch is not in a main check
 directory you are about to branch or reset shows changes you did not make, stop:
 they are someone else's work.
 
-Stacks: a task with a `stack: <name>` key is one layer of a GitHub stack (`gh stack`,
-extension github/gh-stack). Start the slice with `gh stack sync` in the task's
-worktree so you build on what is actually merged, then add your layer on top of the
-stack's current head with `gh stack add` and publish it with `gh stack submit`.
-Never build on a lower layer that is not done; a failed lower layer holds yours.
-Only a `pr` session may submit.
+Stacks: a task the gatekeeper stacked on a prerequisite whose PR is still open
+gets a paragraph in its task directive above saying so, with the base branch and
+the `gh stack link` command (extension github/gh-stack; `gh extension install
+github/gh-stack` if `gh extension list` lacks it). Follow it. Without that
+paragraph the task is not stacked: never base your branch on another task's
+unmerged branch yourself. Only a `pr` session may publish a layer.
 
 Procedure:
 1. List {{BACKLOG_ROOT}}/tasks/*.md and read their frontmatter. Eligible tasks:
@@ -94,7 +94,8 @@ Procedure:
    - Nothing leaves the machine: no comments, no pushes, no external calls.
 2. Hard prerequisites are enforced by the scheduler through the task's own
    `prerequisites:` frontmatter, not by you re-reading prose: the gatekeeper never
-   hands you a task whose declared prerequisites are not all `status: done`.
+   hands you a task whose declared prerequisites are not all `status: done`
+   (and merged, for a `pr` prerequisite, unless it stacked your task on it).
    If, while working a task, you discover an undeclared hard prerequisite (its
    prose assumes something another task must finish first, but that task is not
    listed in `prerequisites:`), do not work around it: add the missing task's

@@ -34,6 +34,9 @@ GH_MUTATING = (
     "release create", "release edit", "release delete",
     "repo create", "repo edit", "repo delete", "gist create",
     "workflow run", "label create",
+    # gh-stack extension: each of these pushes branches or edits PRs.
+    "stack submit", "stack link", "stack push", "stack sync", "stack merge",
+    "stack unstack",
 )
 
 WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")

@@ -23,6 +23,7 @@ PUSHES = [
     "git -C /tmp/wt push origin agent/x",
 ]
 GH_WRITES = [
+    "gh stack submit --auto", "gh stack link 41 agent/x", "gh stack sync",
     "gh pr comment 12 --body hi",
     "rtk gh pr comment 12 --body hi",
     "gh -R o/r pr comment 12 --body hi",

@@ -78,6 +78,37 @@ class WorkspaceTest(unittest.TestCase):
         # the worktrees dir does not even show as untracked.
         self.assertEqual(self.status(), before)
 
+    def test_stacked_task_branches_from_the_base_pr_branch(self):
+        seed = self.root / "webapp-seed"
+        git(seed, "checkout", "-q", "-b", "agent/low")
+        git(seed, "commit", "-q", "--allow-empty", "-m", "lower layer")
+        git(seed, "push", "-q", "origin", "agent/low")
+        base = {"task": "low", "url": "https://github.com/o/r/pull/1",
+                "repo": "o/r", "head": "agent/low"}
+        with mock.patch.object(workspace.tasks, "stack_base",
+                               return_value=(base, None)), \
+                mock.patch.object(workspace, "origin_repo", return_value="o/r"):
+            wt = Path(self.dirs(self.repo)[0])
+        self.assertEqual(git(wt, "rev-parse", "HEAD"),
+                         git(seed, "rev-parse", "agent/low"))
+        self.assertEqual(git(wt, "rev-parse", "--abbrev-ref", "HEAD"),
+                         "agent/webapp-fix")
+
+    def test_stacked_task_without_the_pr_repo_is_refused(self):
+        base = {"task": "low", "url": "https://github.com/o/r/pull/1",
+                "repo": "o/r", "head": "agent/low"}
+        with mock.patch.object(workspace.tasks, "stack_base",
+                               return_value=(base, None)), \
+                mock.patch.object(workspace, "origin_repo", return_value="o/x"):
+            with self.assertRaises(workspace.WorkspaceError):
+                self.dirs(self.repo)
+
+    def test_origin_repo_reads_https_and_ssh_remotes(self):
+        for url in ("https://github.com/o/r.git", "git@github.com:o/r.git",
+                    "https://github.com/o/r"):
+            git(self.repo, "remote", "set-url", "origin", url)
+            self.assertEqual(workspace.origin_repo(self.repo), "o/r")
+
     def test_second_slice_reuses_the_worktree_and_its_commits(self):
         wt = Path(self.dirs(self.repo)[0])
         (wt / "f.txt").write_text("x")

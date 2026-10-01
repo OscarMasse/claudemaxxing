@@ -16,6 +16,7 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 | [0038](0038-never-launch-interactive-tasks-and-list-them-first.md) | Never launch `mode: interactive` tasks and list them first for the owner | accepted (retroactive) |
 | [0052](0052-give-every-task-its-own-git-worktree.md) | Give every task its own git worktree, never a repo's main checkout | accepted (retroactive) |
 | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) | Run headless sessions in bypass mode, with deny rules as the only enforced limits | accepted (retroactive) |
+| [0071](0071-use-github-stacked-prs-for-stacked-work.md) | Use GitHub stacked PRs for stacked work; a prerequisite outside the stack waits for the merge | accepted |
 
 ## Inventory
 
@@ -109,6 +110,8 @@ The number is the one its ADR takes, when it has one.
 | 0044 | Kill switch: a `PAUSED` file stops every launch | 2026-08 | `568f33a`, `README.md:65`, notes | partial | log only |
 | 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-16 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes | log only |
 | 0064 | A `parallel: true` task may get several sessions at once, which shard its work; it is never claimed | 2026-08, never claimed 2026-09-12 | `README.md:205`, `902654e`, `3b00625`, notes | partial | log only |
+| 0070 | A `delivery: pr` prerequisite is met only once its PR is merged into main, checked with `gh` and failing closed | 2026-09-25 | `edfed1d`, `docs/design.md:50`, `orchestrator/lib/tasks.py:325-345`, notes | yes | in [0071](0071-use-github-stacked-prs-for-stacked-work.md) |
+| 0071 | Stacked work uses GitHub's native stacked PRs (`stack:` key, one layer at a time, the engine never merges), not a custom shared stack branch | 2026-09-25, rules 2026-09-26 | `edfed1d`, `aad8860`, `7890fbc`, `cae500b`, `docs/design.md:51`, notes | yes | [0071](0071-use-github-stacked-prs-for-stacked-work.md) |
 
 ### Delivery, autonomy and rails
 
@@ -150,7 +153,7 @@ The number is the one its ADR takes, when it has one.
 
 ## Which rows get an ADR
 
-Sixty-eight rows for an engine of a few thousand lines is a decision log, not sixty-eight ADRs.
+Seventy rows for an engine of a few thousand lines is a decision log, not seventy ADRs.
 The table above IS the log and stays complete.
 An ADR file is written only for the decisions that shape the system and that a reader could reasonably contest; every other row is `log only`, its line in the table being its whole record.
 
@@ -162,9 +165,9 @@ Selected for an ADR (the backfill may argue for adding or dropping one, in its P
 - 0013 pacing with a decaying P90 reserve; 0016 budgets in USD
 - 0038 `mode: interactive`
 - 0068 bypass permissions with deny rules, and the delivery rails they enforce
-- 0052 one worktree per task; GitHub stacks for stacked work
+- 0052 one worktree per task; 0071 GitHub stacks for stacked work
 - 0048, the delivery rails, is folded into 0068 rather than written separately: the rails are what makes bypass mode acceptable
-- GitHub stacks has no row yet: the stacked-work change is still under review, and its ADR is written with it once it lands
+- 0070, merge-gated prerequisites, is folded into 0071: stacks are the exception that makes waiting for the merge affordable
 
 Each ADR written must carry the strongest argument against the decision and a "Would we decide the same today?" line.
 When the answer is no, the ADR points to the follow-up that supersedes it.

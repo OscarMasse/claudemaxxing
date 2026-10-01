@@ -47,4 +47,5 @@ if [ ! -x "$KEEP_AWAKE" ]; then KEEP_AWAKE=""; fi
 
 nohup ${KEEP_AWAKE:+"$KEEP_AWAKE"} python3 manual.py "$@" \
   >> "$STATE_ROOT/manual.out" 2>&1 < /dev/null &
-echo "manual runner started. Progress: grep manual $STATE_ROOT/gatekeeper.log - stop: $0 --stop"
+echo "manual runner started. Runner lines: grep -E 'account=[a-z0-9_-]+ manual ' $STATE_ROOT/gatekeeper.log | tail"
+echo "Session progress: the task file's ## Notes, and $STATE_ROOT/manual.out - stop: $0 --stop"

@@ -27,5 +27,7 @@ jobs:
         run: python3 -m pip install ruff
 
       # shellcheck is preinstalled on ubuntu runners.
+      # The engine's scripts pin a macOS PATH (Homebrew first); ORCH_PATH
+      # keeps setup-python's 3.14 instead of the runner's /usr/bin/python3.
       - name: Run the checks
-        run: ./check.sh
+        run: ORCH_PATH="$PATH" ./check.sh

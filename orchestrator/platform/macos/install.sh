@@ -13,8 +13,8 @@ cd "$(dirname "$0")"
 ORCH_DIR="$(cd ../.. && pwd)"
 BACKLOG_ROOT="$(cd "${BACKLOG_ROOT:?run orchestrator/install.sh, not this adapter}" && pwd)"
 UID_N=$(id -u)
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-JOB_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
+JOB_PATH="$PATH"
 mkdir -p "$BACKLOG_ROOT/orchestrator/state"
 
 # digest_time drives the digest job's schedule; read it through config.py so

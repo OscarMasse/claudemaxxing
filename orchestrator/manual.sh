@@ -8,7 +8,7 @@
 # on battery too (caffeinate -i holds without AC; a closed lid still sleeps).
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.
 BACKLOG_ROOT="$(python3 lib/config.py backlog-root)" || exit 2

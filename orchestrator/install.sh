@@ -3,7 +3,7 @@
 # ORCH_PLATFORM overrides detection (tests, unusual setups).
 set -euo pipefail
 # Homebrew first: python3 must be 3.14, not the macOS system 3.9.
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 cd "$(dirname "$0")"
 PLATFORM="${ORCH_PLATFORM:-}"
 if [ -z "$PLATFORM" ]; then

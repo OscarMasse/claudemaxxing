@@ -19,7 +19,7 @@ ORCH_DIR="$(pwd)"
 # hook, an MCP server, a project's test command) dies with FileNotFoundError.
 # Same export as gatekeeper.sh. Set before the first python3 call: it must
 # be Homebrew's 3.14, not the macOS system 3.9.
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 # The backlog root (tasks/, digests/, NEEDS-HUMAN.md, orchestrator/state/) is
 # resolved by lib/config.py (env, then the file install.sh records) and
 # exported so gate.py resolves the same config and state paths. It exits

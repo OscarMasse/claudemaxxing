@@ -14,7 +14,10 @@ dirs comes back as a worktree dedicated to that task.
 The layout
 ----------
 `<repo>/.agent-worktrees/<task-slug>` on branch `agent/<task-slug>`, created
-from `origin/main` (fetched first, best effort). A later slice of the same
+from `origin/main` (fetched first, best effort). A task that stacks on a
+prerequisite whose PR is still open (lib/tasks.py `stack_base`) branches from
+that PR's head instead, in the repo the PR belongs to: the session builds its
+layer on top and adds its PR to the stack with `gh stack link`. A later slice of the same
 task reuses the worktree, or re-attaches the branch when only the branch is
 left. The deterministic names are the record: nothing else has to remember
 which worktree belongs to which task.
@@ -155,13 +158,37 @@ def _exclude_worktrees(repo):
         exclude.write_text(f"{text}{sep}{line}\n")
 
 
-def prepare(repo, slug, declared_branch=None):
+def origin_repo(repo):
+    """`owner/name` of the repo's `origin` on GitHub, or None."""
+    r = _git(repo, "remote", "get-url", "origin", timeout=10)
+    m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$",
+                  r.stdout.strip()) if r.returncode == 0 else None
+    return m.group(1) if m else None
+
+
+def _fetch_head(repo, head):
+    """Fetch the stack base branch `head` and return `origin/<head>`."""
+    try:
+        r = _git(repo, "fetch", "--quiet", "origin",
+                 f"+refs/heads/{head}:refs/remotes/origin/{head}", timeout=120)
+    except subprocess.TimeoutExpired:
+        r = None
+    if (r is None or r.returncode != 0) and not _has_ref(repo, f"origin/{head}"):
+        raise WorkspaceError(f"{repo}: cannot fetch stack base {head}")
+    return f"origin/{head}"
+
+
+def prepare(repo, slug, declared_branch=None, stack_head=None):
     """Path of the task's worktree in `repo`, created or reused.
 
     `declared_branch` is the task's `branch:` key: work started before this
     module existed lives on a branch of its own name, often in a worktree of
     its own name. When that branch exists in `repo`, its worktree is reused
-    wherever it is, or the branch is attached at the standard path."""
+    wherever it is, or the branch is attached at the standard path.
+
+    `stack_head` is the branch of the open PR the task stacks on: a new
+    branch starts from it rather than from the default branch. An existing
+    branch is never rebuilt; its session rebases onto the base itself."""
     repo = Path(repo).resolve()
     path = repo / WORKTREES_DIRNAME / slug
     branch = BRANCH_PREFIX + slug
@@ -192,7 +219,7 @@ def prepare(repo, slug, declared_branch=None):
     if _has_ref(repo, f"refs/heads/{branch}"):
         r = _git(repo, "worktree", "add", str(path), branch, timeout=900)
     else:
-        base = _fetch_base(repo)
+        base = _fetch_head(repo, stack_head) if stack_head else _fetch_base(repo)
         if base is None:
             raise WorkspaceError(f"{repo}: no default branch to branch from "
                                  f"(tried origin/HEAD, {', '.join(BASES)})")
@@ -218,14 +245,21 @@ def session_dirs(task_file, backlog_root, dirs, project_workdir="worktree"):
         workdir = tasks.WORKDIR_MAIN
     slug = Path(task_file).stem
     declared_branch = tasks._frontmatter(Path(task_file)).get("branch")
+    base, _ = tasks.stack_base(backlog_root, slug)
     backlog = Path(backlog_root).resolve()
-    out = []
+    out, stacked = [], False
     for d in dirs:
         if (workdir == tasks.WORKDIR_MAIN or Path(d).resolve() == backlog
                 or not repo_toplevel(d)):
             out.append(str(d))
-        else:
-            out.append(str(prepare(d, slug, declared_branch)))
+            continue
+        head = base and origin_repo(d) == base["repo"] and base["head"]
+        stacked = stacked or bool(head)
+        out.append(str(prepare(d, slug, declared_branch, head or None)))
+    if base and not stacked:
+        raise WorkspaceError(
+            f"stacks on {base['url']}, whose repo {base['repo']} is not a "
+            f"worktree dir of the task's project")
     return out
 
 

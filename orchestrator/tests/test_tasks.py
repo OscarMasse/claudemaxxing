@@ -1116,65 +1116,155 @@ class TestNotBefore(unittest.TestCase):
         self.assertIsNotNone(t)
 
 
+
 class TestPrMergeGate(unittest.TestCase):
-    URL = "https://github.com/o/r/pull/7"
+    """Merge-gated prerequisites, and the linear case that stacks instead."""
+    REPO = "o/r"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "tasks").mkdir()
-        self.merged = {}
-        self._orig = tasks._pr_merged
-        tasks._pr_merged = lambda url: self.merged.get(url, False)
+        self.prs = {}       # url -> {"state", "head"}
+        self.on_top = {}    # head branch -> [open PR urls based on it]
+        self._orig = (tasks._pr_info, tasks._open_prs_on)
+        tasks._pr_info = lambda url: self.prs.get(url)
+        tasks._open_prs_on = lambda repo, head: self.on_top.get(head, [])
 
     def tearDown(self):
-        tasks._pr_merged = self._orig
+        tasks._pr_info, tasks._open_prs_on = self._orig
         self.tmp.cleanup()
 
-    def dep(self, **fm):
-        write_task(self.root, "low.md", project="side-projects",
-                   status="done", delivery="pr", **fm)
-        with open(self.root / "tasks" / "low.md", "a") as f:
-            f.write(f"PR: {self.URL}\n")
-        write_task(self.root, "up.md", project="side-projects",
-                   status="ready", prerequisites="low",
-                   **({"stack": fm["stack"]} if "stack" in fm else {}))
+    def task(self, name, pr=None, state="OPEN", **fm):
+        fm.setdefault("project", "side-projects")
+        fm.setdefault("delivery", "pr")
+        write_task(self.root, f"{name}.md", **fm)
+        if pr:
+            url = f"https://github.com/{self.REPO}/pull/{pr}"
+            with open(self.root / "tasks" / f"{name}.md", "a") as f:
+                f.write(f"PR: {url}\n")
+            self.prs[url] = {"state": state, "head": f"agent/{name}"}
+            return url
 
     def names(self):
         return [Path(t["path"]).name
                 for t in tasks.launch_order(self.root, PROJECTS, "personal", 5)]
 
-    def test_open_pr_prerequisite_is_unmet(self):
-        self.dep()
-        self.assertNotIn("up.md", self.names())
-
-    def test_merged_pr_prerequisite_is_met(self):
-        self.dep()
-        self.merged[self.URL] = True
+    def test_linear_open_pr_prerequisite_stacks(self):
+        url = self.task("low", pr=1, status="done")
+        self.task("up", status="ready", prerequisites="low")
         self.assertIn("up.md", self.names())
+        base, reason = tasks.stack_base(self.root, "up")
+        self.assertEqual(base, {"task": "low", "url": url, "repo": self.REPO,
+                                "head": "agent/low"})
+        self.assertIsNone(reason)
+
+    def test_merged_pr_prerequisite_is_met_without_stacking(self):
+        self.task("low", pr=1, state="MERGED", status="done")
+        self.task("up", status="ready", prerequisites="low")
+        self.assertIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up"), (None, None))
+
+    def test_unfinished_prerequisite_is_unmet(self):
+        self.task("low", pr=1, status="in-progress")
+        self.task("up", status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
 
     def test_missing_pr_url_fails_closed(self):
-        write_task(self.root, "low.md", project="side-projects",
-                   status="done", delivery="pr")
-        write_task(self.root, "up.md", project="side-projects",
-                   status="ready", prerequisites="low")
+        self.task("low", status="done")
+        self.task("up", status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up"),
+                         (None, "no PR recorded"))
+
+    def test_diamond_waits_for_the_merge(self):
+        self.task("a", pr=1, status="done")
+        self.task("b", pr=2, status="done")
+        self.task("up", status="ready", prerequisites="a b")
+        self.assertNotIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up"), (None, "diamond"))
+
+    def test_one_open_and_one_merged_prerequisite_stacks(self):
+        self.task("a", pr=1, status="done")
+        self.task("b", pr=2, state="MERGED", status="done")
+        self.task("up", status="ready", prerequisites="a b")
+        self.assertIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up")[0]["task"], "a")
+
+    def test_fork_first_ready_by_name_stacks_the_other_waits(self):
+        self.task("low", pr=1, status="done")
+        self.task("x", status="ready", prerequisites="low")
+        self.task("y", status="ready", prerequisites="low")
+        self.assertIn("x.md", self.names())
+        self.assertNotIn("y.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "y"), (None, "fork"))
+
+    def test_unlaunchable_ready_sibling_does_not_hold_the_layer(self):
+        self.task("low", pr=1, status="done")
+        self.task("other", status="ready")
+        self.task("x", status="ready", prerequisites="low other")
+        self.task("y", status="ready", prerequisites="low")
+        self.assertIn("y.md", self.names())
+
+    def test_in_progress_sibling_takes_the_layer(self):
+        self.task("low", pr=1, status="done")
+        self.task("y", status="in-progress", prerequisites="low")
+        self.task("x", status="ready", prerequisites="low")
+        self.assertNotIn("x.md", self.names())
+        self.assertIsNotNone(tasks.stack_base(self.root, "y")[0])
+
+    def test_done_sibling_with_open_pr_takes_the_layer(self):
+        self.task("low", pr=1, status="done")
+        self.task("y", pr=2, status="done", prerequisites="low")
+        self.task("x", status="ready", prerequisites="low")
+        self.assertEqual(tasks.stack_base(self.root, "x"), (None, "fork"))
+
+    def test_open_pr_already_on_the_base_branch_is_a_fork(self):
+        self.task("low", pr=1, status="done")
+        self.task("up", status="ready", prerequisites="low")
+        self.on_top["agent/low"] = [("https://github.com/o/r/pull/9", "z")]
         self.assertNotIn("up.md", self.names())
 
-    def test_same_stack_needs_only_a_finished_layer(self):
-        self.dep(stack="feat")
+    def test_own_pr_on_the_base_branch_is_not_a_fork(self):
+        self.task("low", pr=1, status="done")
+        own = self.task("up", pr=2, status="in-progress", prerequisites="low")
+        self.on_top["agent/low"] = [(own, "agent/up")]
+        self.assertIsNotNone(tasks.stack_base(self.root, "up")[0])
+
+    def test_own_pr_not_yet_in_the_notes_is_not_a_fork(self):
+        self.task("low", pr=1, status="done")
+        self.task("up", status="ready", prerequisites="low")
+        self.on_top["agent/low"] = [("https://github.com/o/r/pull/9",
+                                     "agent/up")]
         self.assertIn("up.md", self.names())
+
+    def test_other_project_waits_for_the_merge(self):
+        self.task("low", pr=1, status="done", project="webapp")
+        self.task("up", status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up"),
+                         (None, "other project"))
+
+    def test_branch_task_never_stacks(self):
+        self.task("low", pr=1, status="done")
+        self.task("up", status="ready", prerequisites="low", delivery="branch")
+        self.assertEqual(tasks.stack_base(self.root, "up"),
+                         (None, "not a pr task"))
+
+    def test_closed_pr_waits(self):
+        self.task("low", pr=1, state="CLOSED", status="done")
+        self.task("up", status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
+
+    def test_gh_unavailable_fails_closed(self):
+        self.task("low", pr=1, status="done")
+        self.prs.clear()
+        self.task("up", status="ready", prerequisites="low")
+        self.assertNotIn("up.md", self.names())
+        self.assertEqual(tasks.stack_base(self.root, "up"),
+                         (None, "gh unavailable"))
 
     def test_branch_delivery_prerequisite_needs_only_done(self):
-        write_task(self.root, "low.md", project="side-projects", status="done")
-        write_task(self.root, "up.md", project="side-projects",
-                   status="ready", prerequisites="low")
+        self.task("low", status="done", delivery="branch")
+        self.task("up", status="ready", prerequisites="low")
         self.assertIn("up.md", self.names())
-
-    def test_stack_runs_one_layer_at_a_time(self):
-        write_task(self.root, "a.md", project="side-projects",
-                   status="in-progress", stack="feat")
-        write_task(self.root, "b.md", project="side-projects",
-                   status="ready", stack="feat")
-        write_task(self.root, "c.md", project="side-projects",
-                   status="ready")
-        self.assertEqual(self.names(), ["c.md"])

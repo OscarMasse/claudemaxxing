@@ -187,6 +187,16 @@ fi
 
 if [ -n "$TASK_FILE" ]; then
   DIRECTIVE="The gatekeeper already selected the task for this slice: $TASK_FILE. Work ONLY on that task and skip the selection in step 1."
+  # A task stacked on an open PR got its worktree from that PR's branch
+  # (lib/workspace.py): without the directive it would open its PR on main,
+  # carrying the lower layer's commits. Fail closed.
+  if [ "$MODE" = "orchestrate" ] && [ "$DELIVERY" = "pr" ]; then
+    if ! STACK_DIRECTIVE="$(python3 lib/stacks.py directive "$BACKLOG_ROOT" "$TASK_FILE")"; then
+      echo "$(date '+%F %T') task=$(basename "$TASK_FILE") stack directive failed, not launching" >> "$STATE_ROOT/runs.log"
+      exit 1
+    fi
+    [ -n "$STACK_DIRECTIVE" ] && DIRECTIVE="$DIRECTIVE $STACK_DIRECTIVE"
+  fi
 else
   DIRECTIVE="No task was pre-selected: pick one yourself per step 1."
 fi

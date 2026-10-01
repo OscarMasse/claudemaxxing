@@ -16,7 +16,7 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 | [0038](0038-never-launch-interactive-tasks-and-list-them-first.md) | Never launch `mode: interactive` tasks and list them first for the owner | accepted (retroactive) |
 | [0052](0052-give-every-task-its-own-git-worktree.md) | Give every task its own git worktree, never a repo's main checkout | accepted (retroactive) |
 | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) | Run headless sessions in bypass mode, with deny rules as the only enforced limits | accepted (retroactive) |
-| [0071](0071-use-github-stacked-prs-for-stacked-work.md) | Use GitHub stacked PRs for stacked work; a prerequisite outside the stack waits for the merge | accepted |
+| [0071](0071-use-github-stacked-prs-for-stacked-work.md) | Stack linear PR-on-PR dependencies as GitHub stacked PRs; anything else waits for the merge | accepted |
 
 ## Inventory
 
@@ -111,7 +111,7 @@ The number is the one its ADR takes, when it has one.
 | 0045 | Warn a session nearing its `token_budget` from a PreToolUse hook in orchestrator-owned settings | 2026-09-16 | `2b161eb`, `75bccec`, `orchestrator/hooks/token_budget.py`, notes | yes | log only |
 | 0064 | A `parallel: true` task may get several sessions at once, which shard its work; it is never claimed | 2026-08, never claimed 2026-09-12 | `README.md:205`, `902654e`, `3b00625`, notes | partial | log only |
 | 0070 | A `delivery: pr` prerequisite is met only once its PR is merged into main, checked with `gh` and failing closed | 2026-09-25 | `edfed1d`, `docs/design.md:50`, `orchestrator/lib/tasks.py:325-345`, notes | yes | in [0071](0071-use-github-stacked-prs-for-stacked-work.md) |
-| 0071 | Stacked work uses GitHub's native stacked PRs (`stack:` key, one layer at a time, the engine never merges), not a custom shared stack branch | 2026-09-25, rules 2026-09-26 | `edfed1d`, `aad8860`, `7890fbc`, `cae500b`, `docs/design.md:51`, notes | yes | [0071](0071-use-github-stacked-prs-for-stacked-work.md) |
+| 0071 | A linear PR-on-PR dependency stacks automatically as a GitHub stacked PR; diamonds, forks and cross-project prerequisites wait for the merge; no `stack:` key, the engine never merges | 2026-09-25, rules 2026-09-26, automatic 2026-10-01 | `edfed1d`, `docs/design.md:50-51`, `orchestrator/lib/tasks.py` (`stack_base`), notes | yes | [0071](0071-use-github-stacked-prs-for-stacked-work.md) |
 
 ### Delivery, autonomy and rails
 
@@ -167,7 +167,7 @@ Selected for an ADR (the backfill may argue for adding or dropping one, in its P
 - 0068 bypass permissions with deny rules, and the delivery rails they enforce
 - 0052 one worktree per task; 0071 GitHub stacks for stacked work
 - 0048, the delivery rails, is folded into 0068 rather than written separately: the rails are what makes bypass mode acceptable
-- 0070, merge-gated prerequisites, is folded into 0071: stacks are the exception that makes waiting for the merge affordable
+- 0070, merge-gated prerequisites, is folded into 0071: automatic stacks are what makes waiting for the merge affordable
 
 Each ADR written must carry the strongest argument against the decision and a "Would we decide the same today?" line.
 When the answer is no, the ADR points to the follow-up that supersedes it.

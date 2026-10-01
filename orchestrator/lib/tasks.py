@@ -7,7 +7,6 @@ priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
 effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
 branch to resume in the task's worktree, lib/workspace.py),
 prerequisites (space-separated task basenames, `.md` suffix optional),
-stack (name of a GitHub stack the task is one layer of),
 not_before (YYYY-MM-DD or YYYY-MM-DDTHH:MM, local time: the task is not
 eligible before then; a date alone means local midnight),
 mode (autonomous|interactive, default autonomous: an interactive task needs the
@@ -109,10 +108,11 @@ ordinary queued work.
 
 Prerequisite gating: a task with a `prerequisites:` key is not eligible until
 every named prerequisite task is itself `status: done`, and, when that
-prerequisite is `delivery: pr`, its PR is merged (checked with `gh`), unless both
-tasks declare the same `stack:` (a pushed layer is enough there). Only the prerequisite's
-own status is read, never its own prerequisites, so this check never recurses
-and cycles cannot cause a loop.
+prerequisite is `delivery: pr`, its PR is merged (checked with `gh`), unless the
+task stacks on it (see `stack_base`: a linear PR-on-PR dependency becomes a
+layer of a GitHub stack, so an open PR is enough there). Only the
+prerequisite's own status and PR are read, never its own prerequisites, so this
+check never recurses and cycles cannot cause a loop.
 
 Priority inheritance: a blocker is at least as urgent as the most urgent thing
 waiting on it. A task's EFFECTIVE priority is the best of its own and of every
@@ -123,6 +123,7 @@ dependent is skipped every tick (unmet prerequisite) while its blocker waits
 behind unrelated tasks. Only the effective priority is used for ordering; the
 declared `priority:` in the file is never rewritten. See `_effective_priorities`.
 """
+import json
 import math
 import re
 import subprocess
@@ -285,72 +286,181 @@ def _is_done(root, name):
     return path.exists() and _frontmatter(path).get("status") == "done"
 
 
-PR_URL_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
-_MERGED_CACHE = {}
+PR_URL_RE = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+")
+_PR_CACHE = {}
+
+
+def _gh_json(args):
+    """Parsed JSON output of `gh <args>`, or None on any failure (no gh, no
+    network, unknown PR). Callers fail closed on None."""
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True,
+                           timeout=30)
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _pr_info(url):
+    """`{"state", "head"}` of the pull request at `url` (state OPEN, MERGED
+    or CLOSED, head its branch name), or None when gh cannot tell. Cached for
+    the life of the process: a tick is one process, and it must see one
+    answer per PR."""
+    if url not in _PR_CACHE:
+        data = _gh_json(["pr", "view", url, "--json", "state,headRefName"])
+        _PR_CACHE[url] = data and {"state": data.get("state"),
+                                   "head": data.get("headRefName")}
+    return _PR_CACHE[url]
 
 
 def _pr_merged(url):
-    """Whether the pull request at `url` is merged into its base, asked of
-    `gh`. Any failure (no gh, no network, unknown PR) is "not merged": fail
-    closed. Cached for the life of the process, only a positive answer is
-    final (an open PR may merge between two ticks, and each tick is a new
-    process)."""
-    if url in _MERGED_CACHE:
-        return _MERGED_CACHE[url]
-    try:
-        r = subprocess.run(
-            ["gh", "pr", "view", url, "--json", "state", "--jq", ".state"],
-            capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    merged = r.returncode == 0 and r.stdout.strip() == "MERGED"
-    if merged:
-        _MERGED_CACHE[url] = True
-    return merged
+    """Whether the pull request at `url` is merged. Unknown is "not merged":
+    fail closed."""
+    info = _pr_info(url)
+    return bool(info) and info["state"] == "MERGED"
+
+
+def _open_prs_on(repo, branch):
+    """`(url, head branch)` of the open PRs of `repo` (owner/name) whose base
+    is `branch`, or None when gh cannot tell."""
+    data = _gh_json(["pr", "list", "-R", repo, "--base", branch,
+                     "--state", "open", "--json", "url,headRefName"])
+    return None if data is None else [(d["url"], d["headRefName"])
+                                      for d in data]
 
 
 def _pr_urls(path):
     """Pull request URLs recorded in the task file, first one first."""
     try:
-        return PR_URL_RE.findall(path.read_text())
+        return [m.group(0) for m in PR_URL_RE.finditer(path.read_text())]
     except OSError:
         return []
 
 
-def _declared_stack(fm):
-    """The `stack:` name the task declares, or None."""
-    return (fm.get("stack") or "").strip() or None
+def _open_pr_prereqs(root, fm):
+    """The prerequisites that are done, `delivery: pr`, and whose PR is not
+    merged yet: the only ones a task may stack on. A merge-gated prerequisite
+    with no recorded PR URL is one too (the delivery contract was not
+    honored), and `stack_base` refuses to stack on it."""
+    out = []
+    for n in _prereq_names(fm):
+        if not _is_done(root, n):
+            continue
+        path = task_path(root, n)
+        if _declared_delivery(_frontmatter(path)) != "pr":
+            continue
+        urls = _pr_urls(path)
+        if urls and all(_pr_merged(u) for u in urls):
+            continue
+        out.append(n)
+    return out
 
 
-def _is_met(root, name, fm):
-    """Whether prerequisite `name` of the task with frontmatter `fm` is met.
-    It must be done first. Beyond that a `delivery: pr` prerequisite only
-    counts once its PR is merged into main, because a dependent started on an
-    open PR builds on an `origin/main` that lacks it. Exception: inside one
-    stack (same `stack:` value on both) a finished layer is enough, that is
-    the point of stacking. A merge-gated prerequisite with no recorded PR URL
-    is unmet (fail closed): the delivery contract was not honored."""
-    if not _is_done(root, name):
-        return False
+def _stacked_sibling(root, name, prereq):
+    """Another live `delivery: pr` task that stacks, or would stack first, on
+    `prereq`: a done one whose PR is not merged, one in progress, or a ready
+    one sorting before `name`. A stack is a chain, so a prerequisite takes one
+    layer above it; the order is by name so that every tick, and the launcher,
+    agree on it. Archived layers are covered by `stack_base`, which asks
+    GitHub for the PRs already based on the prerequisite's branch."""
+    me = _frontmatter(task_path(root, name)).get("status")
+    for other, fm in sorted(_all_frontmatter(root).items()):
+        if (other == name or prereq not in _prereq_names(fm)
+                or _declared_delivery(fm) != "pr"):
+            continue
+        status = fm.get("status")
+        if status == "done":
+            urls = _pr_urls(task_path(root, other))
+            if not (urls and all(_pr_merged(u) for u in urls)):
+                return other
+        if status == "in-progress" and me != "in-progress":
+            return other
+        if (status == "ready" and me == "ready" and other < name
+                and _could_stack_now(root, fm, prereq)):
+            return other
+    return None
+
+
+def _could_stack_now(root, fm, prereq):
+    """Whether a ready sibling would launch as the layer on `prereq`: every
+    other prerequisite met without stacking, autonomous, not deferred. A
+    sibling that cannot run must not hold the layer for one that can."""
+    others = [n for n in _prereq_names(fm) if n != prereq]
+    return (_declared_mode(fm) == MODE_AUTONOMOUS
+            and _declared_not_before(fm)[0] and not _deferred(fm, datetime.now())
+            and all(_is_done(root, n) for n in others)
+            and not set(_open_pr_prereqs(root, fm)) - {prereq})
+
+
+def stack_base(root, name):
+    """`(base, reason)` for task `name`: what it stacks on, or why its open-PR
+    prerequisite has to be merged first.
+
+    A task stacks on a prerequisite whose PR is still open when the
+    dependency is a straight line: exactly one open-PR prerequisite, both
+    tasks `delivery: pr` in the same project, that PR open, and no other layer
+    above it already. `base` is then `{"task", "url", "repo", "head"}`: the
+    launcher branches the task's worktree from `head`, and the session
+    adds its PR on top with `gh stack link`. Anything else waits for
+    the merge into main, because a GitHub stack is a single chain of PRs in
+    one repo: `reason` is "diamond" (two open-PR prerequisites, a layer has
+    one base), "fork" (another layer already sits on that PR), "other
+    project", "not a pr task", "no PR recorded", "PR not open" or "gh
+    unavailable". `(None, None)` when no prerequisite has an open PR."""
     path = task_path(root, name)
-    pfm = _frontmatter(path)
-    if _declared_delivery(pfm) != "pr":
-        return True
-    stack = _declared_stack(fm)
-    if stack and stack == _declared_stack(pfm):
-        return True
-    urls = _pr_urls(path)
-    return bool(urls) and all(_pr_merged(u) for u in urls)
+    fm = _frontmatter(path)
+    open_ = _open_pr_prereqs(root, fm)
+    if not open_:
+        return None, None
+    if len(open_) > 1:
+        return None, "diamond"
+    prereq = open_[0]
+    ppath = task_path(root, prereq)
+    if _declared_delivery(fm) != "pr":
+        return None, "not a pr task"
+    if fm.get("project", "default") != _frontmatter(ppath).get("project",
+                                                             "default"):
+        return None, "other project"
+    found = list(PR_URL_RE.finditer(ppath.read_text()))
+    if not found:
+        return None, "no PR recorded"
+    url, repo = found[-1].group(0), found[-1].group(1)
+    info = _pr_info(url)
+    if info is None:
+        return None, "gh unavailable"
+    if info["state"] != "OPEN" or not info["head"]:
+        return None, "PR not open"
+    if _stacked_sibling(root, name, prereq):
+        return None, "fork"
+    on_top = _open_prs_on(repo, info["head"])
+    if on_top is None:
+        return None, "gh unavailable"
+    # The task's own PR is no fork, even before its URL reaches the notes.
+    own = {"agent/" + name, fm.get("branch")}
+    if any(u not in _pr_urls(path) and h not in own for u, h in on_top):
+        return None, "fork"
+    return {"task": prereq, "url": url, "repo": repo,
+            "head": info["head"]}, None
 
 
-def _unmet_prerequisites(root, fm):
-    """Names of this task's declared prerequisites that are not met.
-    Resolution: basename -> tasks/<name>.md, else tasks/archive/<name>.md
-    (see `task_path`). A prerequisite file that does not exist counts as unmet
-    (fail closed), it never raises. See `_is_met` for what "met" means.
-    Only the prerequisite's own status is read here, not its prerequisites in
-    turn: no recursion happens, so a prerequisite cycle cannot loop."""
-    return [name for name in _prereq_names(fm) if not _is_met(root, name, fm)]
+def _unmet_prerequisites(root, fm, name):
+    """Names of the declared prerequisites of task `name` (frontmatter `fm`)
+    that are not met.
+    Met means done, and for a `delivery: pr` prerequisite also merged, unless
+    the task stacks on it (`stack_base`). Resolution: basename ->
+    tasks/<name>.md, else tasks/archive/<name>.md (see `task_path`). A
+    prerequisite file that does not exist counts as unmet (fail closed), it
+    never raises.
+    Only the prerequisite's own status and PR are read here, not its
+    prerequisites in turn: no recursion happens, so a prerequisite cycle
+    cannot loop."""
+    open_ = _open_pr_prereqs(root, fm)
+    stacked = None
+    if open_:
+        base, _ = stack_base(root, name)
+        stacked = base and base["task"]
+    return [n for n in _prereq_names(fm)
+            if not _is_done(root, n) or (n in open_ and n != stacked)]
 
 
 def _own_priority(fm):
@@ -558,8 +668,6 @@ def _ordered(root, projects, account, sched_class=None, today=None,
     today = today or now.date()
     effective = _effective_priorities(root)
     dated = _deadlines(_all_frontmatter(root), est_runs)
-    busy_stacks = {_declared_stack(f) for f in _all_frontmatter(root).values()
-                   if f.get("status") == "in-progress"} - {None}
     found = []
     for p in sorted((Path(root) / "tasks").glob("*.md")):
         if p.name == "TEMPLATE.md":
@@ -578,9 +686,7 @@ def _ordered(root, projects, account, sched_class=None, today=None,
         model = _declared_model(fm)
         if model is None:
             continue  # unknown model name, reported by misconfigured()
-        if _declared_stack(fm) in busy_stacks:
-            continue  # one layer of a stack at a time
-        if _unmet_prerequisites(root, fm):
+        if _unmet_prerequisites(root, fm, p.stem):
             continue  # a hard prerequisite is not done yet
         if not _declared_not_before(fm)[0]:
             continue  # unreadable resume time, reported by misconfigured()
@@ -656,7 +762,7 @@ def resolve(root, projects, account, ref, now=None):
                 if n == path.name]
     if problems:
         return None, [], "misconfigured: " + ", ".join(problems)
-    unmet = _unmet_prerequisites(root, fm)
+    unmet = _unmet_prerequisites(root, fm, name)
     if unmet:
         return None, unmet, None
     now = now or datetime.now()
@@ -720,7 +826,7 @@ def blocked(root, projects, account):
             continue
         if _declared_mode(fm) == MODE_INTERACTIVE:
             continue  # reported by interactive()
-        unmet = _unmet_prerequisites(root, fm)
+        unmet = _unmet_prerequisites(root, fm, p.stem)
         if unmet:
             out.append((p.name, unmet))
     return out
@@ -758,7 +864,7 @@ def interactive(root, projects, today=None):
         else:
             cls, deadline = CLASS_STANDARD, 0
         found.append(((cls, deadline, rank, fm.get("created", "9999"), p.name),
-                      (p.name, names[rank], _unmet_prerequisites(root, fm),
+                      (p.name, names[rank], _unmet_prerequisites(root, fm, p.stem),
                        due)))
     return [t for _, t in sorted(found, key=lambda x: x[0])]
 

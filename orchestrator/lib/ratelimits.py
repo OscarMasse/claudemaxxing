@@ -29,9 +29,20 @@ Noise rules (the owner's decisions of 2026-09-25):
   averaging, and is reported.
 - `p90_daily_usd` scales with the weekly cap, at the ratio the seed fixed.
 
-At night no reading arrives (the status line only renders in interactive
-sessions): the engine keeps the latest derived caps and its own measurement
-since. `lib/quota.py` stays the guard against the real wall. The per-model
+Headless sessions report too (since 2026-10-01): run.sh launches with
+`--output-format stream-json --verbose`, whose output carries
+`rate_limit_event` lines, and `ratelimits.py headless` converts the last one
+to the status line shape (`used_percentage` = `utilization` x 100) and
+records it the same way. Every row carries its `origin` (`statusline` or
+`headless`; rows before that date have none and are status line ones). So
+night sessions now feed the derivation; between sessions the engine keeps
+the latest derived caps and its own measurement since. `utilization` comes
+with two decimals that are always a whole percent (0.77, 0.79, 0.02 in the
+captured outputs), the same precision as the status line, so the noise
+thresholds above stay as they are. A status other than `allowed`
+(`allowed_warning`, `rejected`) is logged to runs.out; `rejected` is also
+recorded in `lib/quota.py`, a structured refusal signal next to its stderr
+text match. `lib/quota.py` stays the guard against the real wall. The per-model
 (Fable) weekly figure is not in the status line data, and usage from other
 devices or claude.ai is invisible to the engine and skews the ratio.
 
@@ -147,7 +158,67 @@ def _same(row, readings):
     return seen == {k: (pct, resets.isoformat()) for k, (pct, resets) in readings.items()}
 
 
-def record(acct, state_dir, payload, now, entries=None):
+def from_stream(lines):
+    """(status line payload, [rate_limit_info]) from stream-json output lines.
+
+    The payload holds the last `rate_limit_event`'s `unifiedWindows` in the
+    status line shape `parse` reads; the list holds every event's info, for
+    the status log. Lines that are not JSON objects are skipped.
+    """
+    infos = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "rate_limit_event":
+            info = obj.get("rate_limit_info")
+            if isinstance(info, dict):
+                infos.append(info)
+    limits = {}
+    windows = (infos[-1].get("unifiedWindows") or {}) if infos else {}
+    for key, *_ in WINDOWS:
+        w = windows.get(key) or {}
+        util, resets = w.get("utilization"), w.get("resetsAt")
+        if isinstance(util, (int, float)) and isinstance(resets, (int, float)):
+            # round: 0.29 * 100 is 28.999999999999996 in floating point.
+            limits[key] = {"used_percentage": round(util * 100, 2),
+                           "resets_at": resets}
+    return {"rate_limits": limits}, infos
+
+
+def headless(acct, state_dir, model, stream_path, now, entries=None):
+    """Record a headless session's reading; return log lines for runs.out.
+
+    A `rejected` event also marks `model` out of quota until its
+    `resetsAt`, unless the stderr match (run.sh, just before) already did.
+    """
+    from lib import quota
+    try:
+        lines = Path(stream_path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    payload, infos = from_stream(lines)
+    log = []
+    for info in infos:
+        status = info.get("status")
+        if status and status != "allowed":
+            log.append(f"rate limit status={status} type={info.get('rateLimitType')} "
+                       f"utilization={info.get('utilization')} model={model}")
+    rejected = next((i for i in reversed(infos) if i.get("status") == "rejected"), None)
+    if rejected and model not in quota.blocked(Path(state_dir), now):
+        resets = rejected.get("resetsAt")
+        until = (datetime.fromtimestamp(resets, timezone.utc).astimezone(now.tzinfo)
+                 if isinstance(resets, (int, float)) else None)
+        entry = quota.record_fallback(Path(state_dir), model, now, until=until,
+                                      scope=str(rejected.get("rateLimitType") or "unknown"))
+        log.append(f"quota exhausted model={model} scope={entry['scope']} "
+                   f"until={entry['until']} (rate_limit_event)")
+    record(acct, state_dir, payload, now, entries=entries, origin="headless")
+    return log
+
+
+def record(acct, state_dir, payload, now, entries=None, origin="statusline"):
     """Append one reading unless the last one is under a minute old or equal.
 
     `entries` (tests) replaces the transcript scan. The throttle and the
@@ -161,7 +232,10 @@ def record(acct, state_dir, payload, now, entries=None):
     Path(state_dir).mkdir(parents=True, exist_ok=True)
     with open(Path(state_dir) / LOCK, "w") as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # A status line skips a busy lock (another one is writing); a
+            # headless reading arrives once per session and waits its turn.
+            fcntl.flock(lock, fcntl.LOCK_EX if origin == "headless"
+                        else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return None
         last = next((r for r in reversed(load(state_dir)) if not r.get("seed")), None)
@@ -172,7 +246,7 @@ def record(acct, state_dir, payload, now, entries=None):
         if entries is None:
             entries = transcripts.entries(acct["claude_config_dir"],
                                           since=min(starts.values()))
-        row = {"ts": now.isoformat()}
+        row = {"ts": now.isoformat(), "origin": origin}
         for key, (pct, resets) in readings.items():
             usd = sum(e[2] for e in entries if starts[key] <= e[0] <= now)
             row[key] = {"used_percentage": pct, "resets_at": resets.isoformat(),
@@ -274,6 +348,17 @@ def _main(argv):
             state_dir.mkdir(parents=True, exist_ok=True)
             (state_dir / ERROR).write_text(
                 f"{datetime.now(timezone.utc).isoformat()} {type(e).__name__}: {e}\n")
+        return 0
+    if cmd == "headless":
+        # Called by run.sh after a session: a failure is reported, never
+        # fatal - the ledger line and the digest still have to be written.
+        model, stream_path = argv[3], argv[4]
+        try:
+            for line in headless(_account(account), state_dir, model, stream_path,
+                                 datetime.now().astimezone()):
+                print(line)
+        except Exception as e:  # noqa: BLE001 - run.sh must go on
+            print(f"ratelimits headless: {type(e).__name__}: {e}")
         return 0
     if cmd == "seed":
         weekly, window, p90, at = argv[3:7]

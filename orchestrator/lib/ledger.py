@@ -6,7 +6,9 @@ measured burn rates and cost stats never bleed across subscriptions.
 
   ledger.py record <state_dir> <result.json> <mode> <task> <model> <effort> \
                    <slice_min> <exit> <account> [est_usd]
-      Parse a `claude -p --output-format json` result, append one line to
+      Parse a `claude -p --output-format stream-json --verbose` output (its
+      final `{"type": "result"}` line; a single `--output-format json`
+      object reads the same), append one line to
       <state_dir>/costs.jsonl, and print the session's result text (for runs.out).
 
   ledger.py fields <result.json>
@@ -44,6 +46,36 @@ REQUIRED_KEYS = ("ts", "account", "mode", "task", "model", "effort",
                  "slice_min", "exit", "est_usd")
 
 
+def load_result(result_path):
+    """The session's result object from a run.sh output file.
+
+    run.sh launches with `--output-format stream-json --verbose` so the
+    `rate_limit_event` lines survive (lib/ratelimits.py); the final
+    `{"type": "result"}` line carries exactly the object `--output-format
+    json` used to print alone, so the ledger fields are unchanged. A file
+    holding that single object (older runs, tests) still reads.
+    Raises OSError or json.JSONDecodeError as json.loads would.
+    """
+    text = Path(result_path).read_text()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    result = None
+    for line in text.splitlines():
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "result":
+            result = obj
+    if result is None:
+        raise json.JSONDecodeError("no result line", text, 0)
+    return result
+
+
 def record(state_dir, result_path, mode, task, model, effort, slice_min,
            exit_code, account, est_usd=0):
     entry = {
@@ -57,7 +89,7 @@ def record(state_dir, result_path, mode, task, model, effort, slice_min,
     }
     text = ""
     try:
-        data = json.loads(Path(result_path).read_text())
+        data = load_result(result_path)
         entry["cost_usd"] = data.get("total_cost_usd")
         entry["num_turns"] = data.get("num_turns")
         entry["duration_ms"] = data.get("duration_ms")
@@ -79,10 +111,10 @@ def record(state_dir, result_path, mode, task, model, effort, slice_min,
 
 
 def result_fields(result_path):
-    """(cost_usd, duration_min) from a `claude -p --output-format json` result
-    file. Missing or unparseable data reads as (0.0, 0)."""
+    """(cost_usd, duration_min) from a run.sh result file (load_result).
+    Missing or unparseable data reads as (0.0, 0)."""
     try:
-        data = json.loads(Path(result_path).read_text())
+        data = load_result(result_path)
     except (OSError, json.JSONDecodeError):
         return 0.0, 0
     cost = data.get("total_cost_usd") or 0.0

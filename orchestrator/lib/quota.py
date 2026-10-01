@@ -126,9 +126,14 @@ def record(state, family, text, now, default_tz="UTC"):
     return entry
 
 
-def record_fallback(state, family, now, until=None):
-    """Note an exhaustion with no parseable reset time: block for one window."""
-    entry = {"scope": "unknown", "until": (until or now + FALLBACK).isoformat(),
+def record_fallback(state, family, now, until=None, scope="unknown"):
+    """Note an exhaustion with no parseable reset time: block for one window.
+
+    Also the entry point of the structured signal: a headless session's
+    `rate_limit_event` with status `rejected` (lib/ratelimits.py headless)
+    passes its own `resetsAt` and `rateLimitType`.
+    """
+    entry = {"scope": scope, "until": (until or now + FALLBACK).isoformat(),
              "seen": now.isoformat()}
     data = _read(state)
     data[family] = entry

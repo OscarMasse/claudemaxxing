@@ -53,8 +53,8 @@ The number is the one the ADR will take.
 | 0014 | Weight each night's share of the weekly surplus by a back-loading ratio, flat by default; the last night absorbs the whole burn-down | 2026-09-07, flat default 2026-09-08 | `7924fe2`, `00d9735`, `b90f4fe`, `README.md:179-183`, `orchestrator/config.yaml:93-101` | yes |
 | 0015 | Measure consumption from Claude Code's own transcripts instead of ccusage | 2026-09-09 | `0386c2c`, `README.md:169` | yes |
 | 0016 | Budget in USD at list price, not in tokens; token-era keys are refused, not converted | 2026-09-12 | `abdfdf3`, `0804eb5`, `892039b`, `aec5217`, `README.md:137-140` | yes |
-| 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them | 2026-09-25 | `28d672a`, `93a9d6e`, `README.md:141-164`, notes | yes |
-| 0018 | Observe quota exhaustion per model family from the limit message instead of predicting it | 2026-09-09 | `0386c2c`, `README.md:171-175` | yes |
+| 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them; headless sessions record the same readings from their stream-json `rate_limit_event` lines, tagged by origin | 2026-09-25, headless 2026-10-01 | `28d672a`, `93a9d6e`, `README.md:141-164`, `orchestrator/lib/ratelimits.py`, notes | yes |
+| 0018 | Observe quota exhaustion per model family from the limit message instead of predicting it; a `rejected` `rate_limit_event` is a second, structured signal | 2026-09-09, structured 2026-10-01 | `0386c2c`, `README.md:171-175`, `orchestrator/lib/ratelimits.py` | yes |
 | 0019 | Learn a session's cost per (task, model) as the max of its recent sessions, with a p75 cold-start prior | 2026-09-08, max 2026-09-12 | `f638845`, `892039b`, `README.md:206-208`, `orchestrator/config.yaml:102-108` | yes |
 | 0020 | Append every session's result to a cost ledger that feeds the next decision and the digest | 2026-08 | `README.md:203-204`, notes | partial |
 | 0021 | A hard per-session cost ceiling (`--max-budget-usd`) as runaway protection, not as pacing | 2026-08 | `README.md:226-228`, `orchestrator/config.yaml:115-119`, notes | yes |

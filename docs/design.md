@@ -137,7 +137,9 @@ The caps are not configured, they are derived (`orchestrator/lib/ratelimits.py`)
 Claude Code hands the status line command `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage`, `resets_at`) on Pro and Max accounts, the same data as `/usage`.
 The recorder appends each reading to `state/<account>/rate_limits.jsonl` with the engine's own USD over the reading's period, at most one row a minute and only when a value changed, and `cap = engine_usd / (used_percentage / 100)`.
 Only readings at 10% of the week or 20% of the window and above count (they bound the whole-percent rounding error to 5%), a day's usable readings reduce to their median, and a day median more than 15% away from the cap in use is a limit change that replaces it outright; `p90_daily_usd` scales with the weekly cap.
-At night no reading arrives, so the engine carries the latest derived caps forward; `gate.py status` prints each cap with its source (`reading`, `history`, `seed`) and age, and the digest relays it.
+Headless sessions report too: `run.sh` launches with `--output-format stream-json --verbose` and records the session's last `rate_limit_event` (`utilization` x 100, a whole percent like the status line) as a row tagged `origin: headless`, next to the status line's `origin: statusline`.
+A `rejected` event also marks the model out of quota until its `resetsAt` when the stderr message did not already.
+Between readings the engine carries the latest derived caps forward; `gate.py status` prints each cap with its source (`reading`, `history`, `seed`) and age, and the digest relays it.
 Hook it from the account's status line script with `BACKLOG_ROOT` set (a status line does not inherit the launchd environment), detached so the transcript scan (about a second) never delays the status line:
 
 ```python

@@ -249,7 +249,9 @@ KEEP_AWAKE="$ORCH_DIR/platform/${PLATFORM:-none}/keep-awake.sh"
 if [ ! -x "$KEEP_AWAKE" ]; then KEEP_AWAKE=""; fi
 
 # The prompt goes through stdin: --add-dir is variadic and would swallow a
-# positional prompt argument. JSON output feeds the per-account cost ledger.
+# positional prompt argument. The output feeds the per-account cost ledger
+# (its final `result` line) and the rate-limit history (its
+# `rate_limit_event` lines, which `--output-format json` would drop).
 OUT_JSON="$STATE/result.$SLOT.json"
 # stderr goes to a per-slot file first, then into the shared runs.out. It used
 # to append straight to runs.out, which meant a session's own error text could
@@ -266,7 +268,7 @@ if ! SESSION_CWD="$(python3 lib/workspace.py session-cwd)"; then
 fi
 printf '%s' "$PROMPT" | ( cd "$SESSION_CWD" && ${KEEP_AWAKE:+"$KEEP_AWAKE"} \
   python3 "$ORCH_DIR/lib/with_timeout.py" "$TIMEOUT_S" -- \
-  "$CLAUDE_BIN" -p --output-format json --model "$MODEL" --effort "$EFFORT" \
+  "$CLAUDE_BIN" -p --output-format stream-json --verbose --model "$MODEL" --effort "$EFFORT" \
   --max-budget-usd "$MAX_USD" \
   --permission-mode bypassPermissions \
   --settings "$ORCH_DIR/session-settings.json" \
@@ -285,6 +287,10 @@ if [ "$CODE" -ne 0 ]; then
     >> "$STATE_ROOT/runs.out" 2>&1
 fi
 rm -f "$ERR_FILE"
+# A real rate-limit reading from this session (lib/ratelimits.py headless),
+# and a structured refusal signal when the event says `rejected`.
+python3 lib/ratelimits.py headless "$ACCOUNT" "$MODEL" "$OUT_JSON" \
+  >> "$STATE_ROOT/runs.out" 2>&1
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
   "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_USD" \

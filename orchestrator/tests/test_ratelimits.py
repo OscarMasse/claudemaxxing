@@ -388,6 +388,15 @@ class TestHeadless(unittest.TestCase):
         self.assertIn("status=allowed_warning", log[0])
         self.assertFalse((self.state / "exhausted.json").exists())
 
+    def test_reading_older_than_the_last_row_is_kept(self):
+        p = payload(week_pct=30, week_resets=WEEK_RESET)
+        ratelimits.record(self.acct, self.state, p, T0, entries=[])
+        older = payload(week_pct=29, week_resets=WEEK_RESET)
+        row = ratelimits.record(self.acct, self.state, older, T0 - timedelta(minutes=30),
+                                entries=[], origin="headless")
+        self.assertIsNotNone(row)
+        self.assertEqual(len(ratelimits.load(self.state)), 2)
+
     def test_status_line_rows_are_tagged_statusline(self):
         p = payload(week_pct=30, week_resets=WEEK_RESET)
         row = ratelimits.record(self.acct, self.state, p, T0, entries=[])

@@ -2,7 +2,7 @@
 # launchd entrypoint: one tick = one decision per account, maybe several runs.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 # Backlog root: env (set by the launchd plist), else the file install.sh
 # records, resolved by lib/config.py (which exits non-zero, naming both, when
 # neither is set). Exported so gate.py and run.sh use the same root.

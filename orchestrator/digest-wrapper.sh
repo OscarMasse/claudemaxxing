@@ -6,7 +6,7 @@
 # kickstart it through the platform hook.
 set -u
 # Homebrew first: python3 must be 3.14, not the macOS system 3.9.
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 cd "$(dirname "$0")" || exit 1
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.

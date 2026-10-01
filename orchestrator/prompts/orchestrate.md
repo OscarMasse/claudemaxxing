@@ -62,6 +62,8 @@ Procedure:
      including fixes from his review. Mark it ready (`gh pr ready <n>`) only when the
      task's verification has passed and the PR only waits for his review or merge.
      A slice that resumes work on a ready PR puts it back to draft (`gh pr ready --undo <n>`).
+     Merging is always the owner's: the agent never merges a PR (`gh pr merge`, auto-merge,
+     the API equivalents are denied to every session).
      Push with the explicit HTTPS URL: `git push https://github.com/<owner>/<repo>.git
      <branch>` (SSH remotes have no key in a headless session). Only a `pr` session
      may push: the launcher denies `git push` outright for `branch` and `local`

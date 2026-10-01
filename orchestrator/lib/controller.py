@@ -221,7 +221,7 @@ def decide(cfg, now, usage, idle_min):
         # plus the burn-down always cover the surplus first. Keeping a regime
         # that never fires only added config, code and a way to surprise the
         # owner mid-workday. Daytime runs are manual (`run.sh`) now.
-        return Decision("skip", "day: daytime runs are manual only", 0, "day")
+        return Decision("skip", "day: daytime runs need manual.sh", 0, "day")
 
     reserve = float(cfg["p90_daily_usd"]) * days_remaining
     available = cap - week - reserve

@@ -250,7 +250,7 @@ class TestManual(unittest.TestCase):
         env = dict(os.environ, ORCH_USAGE_JSON=str(fx), ORCH_DOCKER_BIN="")
         r = subprocess.run(["python3", str(ORCH / "gate.py"), "tick"], cwd=ORCH,
                            env=env, capture_output=True, text=True)
-        self.assertEqual(r.stdout.strip(), "SKIP personal day: daytime runs are manual only",
+        self.assertEqual(r.stdout.strip(), "SKIP personal day: daytime runs need manual.sh",
                          r.stdout + r.stderr)
         self.assertTrue(lock.exists())
         self.assertEqual(self.status("a"), "ready")

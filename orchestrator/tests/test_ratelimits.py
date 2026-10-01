@@ -329,10 +329,6 @@ class TestReviewFixes(unittest.TestCase):
             self.assertEqual(rows, [EARLY_SEED, good])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 FIXTURE = ORCH / "tests" / "fixtures" / "stream_json_session.jsonl"
 
 
@@ -359,28 +355,35 @@ class TestHeadless(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_from_stream_converts_to_status_line_shape(self):
-        payload, infos = ratelimits.from_stream(FIXTURE.read_text().splitlines())
+        payload, infos, at = ratelimits.from_stream(FIXTURE.read_text().splitlines())
         self.assertEqual(payload["rate_limits"], {
             "seven_day": {"used_percentage": 79.0, "resets_at": 1790913600},
-            "five_hour": {"used_percentage": 0.0, "resets_at": 1790895600}})
+            "five_hour": {"used_percentage": 1.0, "resets_at": 1790895600}})
         self.assertEqual([i["status"] for i in infos], ["allowed_warning"])
+        # The last line before the event, not the session's end.
+        self.assertEqual(at, datetime(2026, 10, 1, 18, 11, 0, 389000, tzinfo=UTC))
 
     def test_percentages_are_rounded_not_float_noise(self):
         line = json.dumps({"type": "rate_limit_event", "rate_limit_info": {
             "status": "allowed", "unifiedWindows": {
                 "five_hour": {"utilization": 0.29, "resetsAt": 1}}}})
-        payload, _ = ratelimits.from_stream([line])
+        payload, _, at = ratelimits.from_stream([line])
+        self.assertIsNone(at)
         self.assertEqual(payload["rate_limits"]["five_hour"]["used_percentage"], 29.0)
 
     def test_headless_records_tagged_reading_and_logs_warning(self):
+        event_at = datetime(2026, 10, 1, 18, 11, 0, 389000, tzinfo=UTC)
+        entries = [(event_at - timedelta(hours=1), "m", 3.0, 0),
+                   (event_at + timedelta(seconds=1), "m", 50.0, 0)]  # after the event
         log = ratelimits.headless(self.acct, self.state, "opus", FIXTURE, self.now,
-                                  entries=[(self.now - timedelta(hours=1), "m", 3.0, 0)])
+                                  entries=entries)
         rows = ratelimits.load(self.state)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["origin"], "headless")
+        self.assertEqual(rows[0]["ts"], event_at.isoformat())
         self.assertEqual(rows[0]["seven_day"]["used_percentage"], 79.0)
         self.assertEqual(rows[0]["seven_day"]["engine_usd"], 3.0)
-        self.assertEqual(rows[0]["five_hour"]["used_percentage"], 0.0)
+        self.assertEqual(rows[0]["five_hour"]["used_percentage"], 1.0)
         self.assertEqual(len(log), 1)
         self.assertIn("status=allowed_warning", log[0])
         self.assertFalse((self.state / "exhausted.json").exists())
@@ -418,3 +421,6 @@ class TestHeadless(unittest.TestCase):
         self.assertEqual(ratelimits.headless(self.acct, self.state, "opus", plain,
                                              self.now, entries=[]), [])
         self.assertEqual(ratelimits.load(self.state), [])
+
+if __name__ == "__main__":
+    unittest.main()

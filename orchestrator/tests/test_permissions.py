@@ -59,6 +59,7 @@ IRREVERSIBLE = [
     "cat /Users/o/.ssh/id_ed25519",
 ]
 MERGES = [
+    "rtk gh -R o/r pr merge 12 --auto",
     "gh pr merge 12", "gh pr merge 12 --auto --squash", "gh pr merge --rebase 12",
     "rtk gh pr merge 12", "gh -R o/r pr merge 12", "gh --repo o/r pr merge 12",
     "gh pr merge 12 -R o/r", "gh stack merge",
@@ -68,7 +69,10 @@ MERGES = [
     "gh api graphql -f query='mutation{mergePullRequest(input:{})}'",
 ]
 PR_ALLOWED = [
-    "gh pr create --draft --title t", "gh pr ready 12", "gh pr ready --undo 12",
+    "gh pr create --draft --title t",
+    "gh pr create --title 'Fix merge conflict handling' --body 'merge'",
+    "gh pr view 12 --json mergeable,mergeStateStatus", "gh pr checks 12",
+    "gh pr ready 12", "gh pr ready --undo 12",
     "git push https://github.com/o/r.git agent/x",
 ]
 ALWAYS_ALLOWED = [

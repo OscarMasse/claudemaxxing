@@ -81,7 +81,7 @@ def merge_rules():
     (`.../pulls/<n>/merge`, any method: a read of it is refused too, accepted)
     and the auto-merge / merge GraphQL mutations, whatever the repo settings."""
     cmds = [f"{g}{sub}*" for g in GH_PREFIXES
-            for sub in ("pr merge", "pr*merge", "stack merge")]
+            for sub in ("pr merge", "stack merge")]
     cmds += ["gh api*pulls/*/merge*", "gh api*enablePullRequestAutoMerge*",
              "gh api*mergePullRequest*"]
     return _with_rtk(cmds)

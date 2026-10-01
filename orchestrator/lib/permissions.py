@@ -74,6 +74,19 @@ def gh_write_rules():
     return _with_rtk(cmds)
 
 
+def merge_rules():
+    """Merging a PR, every session, `pr` included: Oscar reviews and tests each
+    agent PR and merging stays his gesture only. Covers `gh pr merge` in all its
+    forms (`--auto`, `--rebase`, `-R`), `gh stack merge`, the REST merge endpoint
+    (`.../pulls/<n>/merge`, any method: a read of it is refused too, accepted)
+    and the auto-merge / merge GraphQL mutations, whatever the repo settings."""
+    cmds = [f"{g}{sub}*" for g in GH_PREFIXES
+            for sub in ("pr merge", "pr*merge", "stack merge")]
+    cmds += ["gh api*pulls/*/merge*", "gh api*enablePullRequestAutoMerge*",
+             "gh api*mergePullRequest*"]
+    return _with_rtk(cmds)
+
+
 def irreversible_rules():
     """History rewriting on a remote and filter-branch. Denied to every session,
     `pr` included: a pushed branch is the owner's review surface.
@@ -142,7 +155,7 @@ def deny_rules(delivery, readonly_dirs=()):
     rules = []
     if delivery != "pr":
         rules += push_rules() + gh_write_rules()
-    rules += irreversible_rules()
+    rules += merge_rules() + irreversible_rules()
     bash = [f"Bash({c})" for c in rules]
     out = bash + credential_rules()
     for d in readonly_dirs:

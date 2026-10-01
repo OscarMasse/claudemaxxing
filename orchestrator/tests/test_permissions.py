@@ -28,7 +28,6 @@ GH_WRITES = [
     "rtk gh pr comment 12 --body hi",
     "gh -R o/r pr comment 12 --body hi",
     "gh pr review 12 --approve",
-    "gh pr merge 12",
     "gh pr edit 12 --title t",
     "gh pr close 12",
     "gh issue comment 3 --body hi",
@@ -59,6 +58,19 @@ IRREVERSIBLE = [
     "cat ~/.config/backlog-agents/github-token",
     "cat /Users/o/.ssh/id_ed25519",
 ]
+MERGES = [
+    "gh pr merge 12", "gh pr merge 12 --auto --squash", "gh pr merge --rebase 12",
+    "rtk gh pr merge 12", "gh -R o/r pr merge 12", "gh --repo o/r pr merge 12",
+    "gh pr merge 12 -R o/r", "gh stack merge",
+    "gh api -X PUT repos/o/r/pulls/12/merge",
+    "rtk gh api --method=PUT repos/o/r/pulls/12/merge -f merge_method=squash",
+    "gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{})}'",
+    "gh api graphql -f query='mutation{mergePullRequest(input:{})}'",
+]
+PR_ALLOWED = [
+    "gh pr create --draft --title t", "gh pr ready 12", "gh pr ready --undo 12",
+    "git push https://github.com/o/r.git agent/x",
+]
 ALWAYS_ALLOWED = [
     "git reset --hard HEAD~1",
     "git push --follow-tags https://github.com/o/r.git agent/x",
@@ -81,6 +93,15 @@ class TestDenyRules(unittest.TestCase):
             self.assertFalse(denied(rules, cmd), cmd)
         for cmd in IRREVERSIBLE:
             self.assertTrue(denied(rules, cmd), cmd)
+
+    def test_every_delivery_denies_merges(self):
+        for delivery in ("pr", "branch", "local", ""):
+            rules = permissions.deny_rules(delivery)
+            for cmd in MERGES:
+                self.assertTrue(denied(rules, cmd), f"{delivery!r}: {cmd}")
+        rules = permissions.deny_rules("pr")
+        for cmd in PR_ALLOWED:
+            self.assertFalse(denied(rules, cmd), cmd)
 
     def test_credential_files_denied_to_read_tool(self):
         for delivery in ("pr", "local"):

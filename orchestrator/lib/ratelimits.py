@@ -33,7 +33,7 @@ Headless sessions report too (since 2026-10-01): run.sh launches with
 `--output-format stream-json --verbose`, whose output carries
 `rate_limit_event` lines, and `ratelimits.py headless` converts the last one
 to the status line shape (`used_percentage` = `utilization` x 100) and
-records it the same way. Every row carries its `origin` (`statusline` or
+records it the same way, stamped at the event's own time (`from_stream`). Every row carries its `origin` (`statusline` or
 `headless`; rows before that date have none and are status line ones). So
 night sessions now feed the derivation; between sessions the engine keeps
 the latest derived caps and its own measurement since. `utilization` comes
@@ -159,22 +159,37 @@ def _same(row, readings):
 
 
 def from_stream(lines):
-    """(status line payload, [rate_limit_info]) from stream-json output lines.
+    """(status line payload, [rate_limit_info], at) from stream-json lines.
 
     The payload holds the last `rate_limit_event`'s `unifiedWindows` in the
     status line shape `parse` reads; the list holds every event's info, for
-    the status log. Lines that are not JSON objects are skipped.
+    the status log. Earlier events are older views of the same windows, so
+    only the last one becomes a row. `at` is when that event was emitted:
+    events carry no timestamp, and Claude Code emits them on an API response,
+    not at the end (a captured three-tool session had one, after its first
+    response), so it is the `timestamp` of the last line before it, or None.
+    Pairing the percentage with the USD at session end instead would inflate
+    the cap by everything the session spent after the event.
+    Lines that are not JSON objects are skipped.
     """
-    infos = []
+    infos, at, last_ts = [], None, None
     for line in lines:
         try:
             obj = json.loads(line)
         except ValueError:
             continue
-        if isinstance(obj, dict) and obj.get("type") == "rate_limit_event":
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("type") == "rate_limit_event":
             info = obj.get("rate_limit_info")
             if isinstance(info, dict):
                 infos.append(info)
+                at = last_ts
+        elif isinstance(obj.get("timestamp"), str):
+            try:
+                last_ts = _ts(obj["timestamp"])
+            except ValueError:
+                pass
     limits = {}
     windows = (infos[-1].get("unifiedWindows") or {}) if infos else {}
     for key, *_ in WINDOWS:
@@ -184,21 +199,23 @@ def from_stream(lines):
             # round: 0.29 * 100 is 28.999999999999996 in floating point.
             limits[key] = {"used_percentage": round(util * 100, 2),
                            "resets_at": resets}
-    return {"rate_limits": limits}, infos
+    return {"rate_limits": limits}, infos, at
 
 
 def headless(acct, state_dir, model, stream_path, now, entries=None):
     """Record a headless session's reading; return log lines for runs.out.
 
-    A `rejected` event also marks `model` out of quota until its
-    `resetsAt`, unless the stderr match (run.sh, just before) already did.
+    The row is stamped at the event's own time (from_stream), `now` when the
+    output gives none. A `rejected` event also marks `model` out of quota
+    until its `resetsAt`, unless the stderr match (run.sh, just before)
+    already did.
     """
     from lib import quota
     try:
         lines = Path(stream_path).read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
-    payload, infos = from_stream(lines)
+    payload, infos, at = from_stream(lines)
     log = []
     for info in infos:
         status = info.get("status")
@@ -214,7 +231,8 @@ def headless(acct, state_dir, model, stream_path, now, entries=None):
                                       scope=str(rejected.get("rateLimitType") or "unknown"))
         log.append(f"quota exhausted model={model} scope={entry['scope']} "
                    f"until={entry['until']} (rate_limit_event)")
-    record(acct, state_dir, payload, now, entries=entries, origin="headless")
+    record(acct, state_dir, payload, at if at and at <= now else now,
+           entries=entries, origin="headless")
     return log
 
 

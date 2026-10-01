@@ -223,10 +223,6 @@ class TestLearning(unittest.TestCase):
             self.assertAlmostEqual(e["cost_usd"], 3.1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestStreamJsonResult(unittest.TestCase):
     """run.sh writes stream-json; the ledger reads its final result line."""
 
@@ -259,3 +255,6 @@ class TestStreamJsonResult(unittest.TestCase):
             row = json.loads((Path(d) / "costs.jsonl").read_text())
             self.assertEqual(row["reason"], "invalid_json")
             self.assertEqual(ledger.result_fields(path), (0.0, 0))
+
+if __name__ == "__main__":
+    unittest.main()

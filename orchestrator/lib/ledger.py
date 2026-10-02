@@ -77,7 +77,7 @@ def load_result(result_path):
 
 
 def record(state_dir, result_path, mode, task, model, effort, slice_min,
-           exit_code, account, est_usd=0):
+           exit_code, account, est_usd=0, engine="", prompt_sha=""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "account": account,
@@ -86,6 +86,9 @@ def record(state_dir, result_path, mode, task, model, effort, slice_min,
         # What the gatekeeper predicted this session would cost, in USD. Kept
         # so the estimate can be scored against the outcome (see accuracy()).
         "est_usd": float(est_usd or 0),
+        # Which engine produced the row: short SHA (+ "-dirty") and a hash of
+        # the rendered prompt. Rows before 2026-10-02 lack both: read as "unknown".
+        "engine": engine or "unknown", "prompt_sha": prompt_sha or "unknown",
     }
     text = ""
     try:
@@ -283,7 +286,7 @@ def outcome_histogram(runs_log):
 
 if __name__ == "__main__":
     if len(sys.argv) >= 11 and sys.argv[1] == "record":
-        print(record(*sys.argv[2:12]))
+        print(record(*sys.argv[2:14]))
     elif len(sys.argv) == 3 and sys.argv[1] == "fields":
         cost, minutes = result_fields(sys.argv[2])
         print(f"{cost} {minutes}")

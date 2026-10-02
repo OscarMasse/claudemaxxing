@@ -74,6 +74,20 @@ class TestLedger(unittest.TestCase):
             self.assertEqual(entry["task"], "tasks/a.md")
             self.assertAlmostEqual(entry["cost_usd"], 0.42)
 
+    def test_engine_and_prompt_sha_recorded_and_old_rows_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            (state / "costs.jsonl").write_text(
+                json.dumps({"task": "a.md", "cost_usd": 0.5}) + "\n")
+            ledger.record(state, state / "missing.json", "orchestrate", "a.md",
+                          "sonnet", "low", 15, 0, "work", 0, "abc1234", "f00")
+            rows = [json.loads(x) for x in
+                    (state / "costs.jsonl").read_text().splitlines()]
+            self.assertEqual(rows[1]["engine"], "abc1234")
+            self.assertEqual(rows[1]["prompt_sha"], "f00")
+            self.assertNotIn("engine", rows[0])
+            self.assertEqual(ledger.stats(state)["a.md"]["runs"], 2)
+
     def test_parse_failure_row_has_reason_and_exit(self):
         with tempfile.TemporaryDirectory() as d:
             bad = Path(d) / "result.json"

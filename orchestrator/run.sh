@@ -243,6 +243,10 @@ fi
 # session-settings.json): the hook reads the task's raw `token_budget:` value
 # from the environment and is a no-op without one (digest, auto-pick).
 export ORCH_DIR
+# Engine version stamped into the ledger: short SHA, "-dirty" when uncommitted.
+ENGINE="$(git -C "$ORCH_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$ORCH_DIR" status --porcelain 2>/dev/null)" ]; then ENGINE="$ENGINE-dirty"; fi
+PROMPT_SHA="$(printf '%s' "$PROMPT" | shasum -a 256 | cut -c1-12)"
 ORCH_TOKEN_BUDGET=""
 if [ -n "$TASK_FILE" ] && [ -f "$TASK_FILE" ]; then
   ORCH_TOKEN_BUDGET="$(sed -n '2,/^---$/s/^token_budget:[[:space:]]*//p' "$TASK_FILE" | head -1)"
@@ -304,7 +308,7 @@ python3 lib/ratelimits.py headless "$ACCOUNT" "$MODEL" "$OUT_JSON" \
   >> "$STATE_ROOT/runs.out" 2>&1
 
 python3 lib/ledger.py record "$STATE" "$OUT_JSON" "$MODE" "${TASK_FILE:-auto}" \
-  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_USD" \
+  "$MODEL" "$EFFORT" "$SLICE_MIN" "$CODE" "$ACCOUNT" "$EST_USD" "$ENGINE" "$PROMPT_SHA" \
   >> "$STATE_ROOT/runs.out" 2>&1
 # Cost and duration for the digest journal's mechanical line, read from the
 # result JSON before it is deleted.

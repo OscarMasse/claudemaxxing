@@ -1098,5 +1098,80 @@ class TestGateDuties(unittest.TestCase):
         self.assertIn("filler task=tidy.md", out)
 
 
+    def snapshot_state(self):
+        """(relative path, sha256) of every file under the backlog root."""
+        import hashlib
+        return sorted((str(f.relative_to(self.root)),
+                       hashlib.sha256(f.read_bytes()).hexdigest())
+                      for f in self.root.rglob("*") if f.is_file())
+
+    def preview_sessions(self, out):
+        return [l.split() for l in out.splitlines() if l.startswith("  wave=")]
+
+    def test_preview_lists_waves_and_a_stop_reason(self):
+        self.cost(2)
+        for n in "abc":
+            self.task(f"{n}.md")
+        self.task("sync.md", "duty: nightly\n")
+        out = run_gate(self.root, self.env, arg="preview").stdout
+        self.assertIn("account=personal preview at=2026-08-11T02:30:00+02:00", out)
+        self.assertIn("regime=night", out)
+        self.assertIn("class=duty", out)
+        self.assertIn("class=queue", out)
+        self.assertIn("(default)", out)
+        self.assertIn("stop: budget exhausted", out)
+        self.assertIn("c.md: budget exhausted", out)
+
+    def test_preview_changes_nothing(self):
+        self.cost(2)
+        self.task("a.md")
+        self.task("sync.md", "duty: nightly\n")
+        seed_accounts(self.root)
+        before = self.snapshot_state()
+        for _ in range(2):
+            r = run_gate(self.root, self.env, arg="preview", seed=False)
+            self.assertIn("wave=1", r.stdout, r.stdout + r.stderr)
+            self.assertEqual(self.snapshot_state(), before)
+        self.assertFalse((self.root / "orchestrator" / "state"
+                          / "gatekeeper.log").exists())
+
+    def test_preview_first_wave_is_what_tick_launches(self):
+        self.cost(1)
+        self.task("a.md")
+        self.task("b.md", "model: opus\n")
+        self.task("c.md", "priority: low\n")
+        self.task("sync.md", "duty: nightly\n")
+        self.task("tidy.md", "filler: true\n")
+        seed_accounts(self.root)
+        out = run_gate(self.root, self.env, arg="preview", seed=False).stdout
+        first = [(w[1], w[3], w[4], w[2]) for w in self.preview_sessions(out)
+                 if w[0] == "wave=1"]
+        ticked = [l.split() for l in
+                  run_gate(self.root, self.env, seed=False).stdout.splitlines()
+                  if l.startswith("RUN")]
+        self.assertTrue(first)
+        self.assertEqual([f[0] for f in first], [r[3] for r in ticked])
+        self.assertEqual([f[1:] for f in first],
+                         [("model=" + r[4], "effort=" + r[5], "project=" + r[6])
+                          for r in ticked])
+
+    def test_preview_by_day_evaluates_the_next_night_start(self):
+        self.task("a.md")
+        env = dict(self.env, ORCH_NOW="2026-08-11T15:00:00+02:00")
+        out = run_gate(self.root, env, arg="preview").stdout
+        self.assertIn("preview at=2026-08-12T02:00:00+02:00", out)
+        self.assertIn("wave=1", out)
+        late = dict(self.env, ORCH_NOW="2026-08-11T00:28:00+02:00")
+        out = run_gate(self.root, late, arg="preview").stdout
+        self.assertIn("preview at=2026-08-11T02:00:00+02:00", out)
+
+    def test_preview_reports_unmet_prerequisites(self):
+        self.task("a.md")
+        self.task("b.md", "prerequisites: [a]\n")
+        out = run_gate(self.root, self.env, arg="preview").stdout
+        self.assertIn("not scheduled:", out)
+        self.assertIn("b.md: prerequisite unmet", out)
+
+
 if __name__ == "__main__":
     unittest.main()

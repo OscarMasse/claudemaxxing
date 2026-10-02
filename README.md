@@ -71,6 +71,8 @@ The seed gives the budget its first caps: your weekly and 5-hour limits and a he
 Any plausible figures do to start; the status line hook described in the full setup replaces them with measured ones once enough of the week has been used to read the ratio.
 The account name must match an `accounts` entry of your config.
 The dry run prints the plan and launches nothing.
+To see what the next night would run if it started now, use `orchestrator/gate.py preview`: per account, the ordered sessions (wave, task, model, class, estimated USD, running total) and the reason it stops.
+It is budget-ordered rather than a timeline, assumes each task runs once, and writes nothing.
 When it looks right, register the nightly loop and the 07:37 digest job:
 
 ```bash

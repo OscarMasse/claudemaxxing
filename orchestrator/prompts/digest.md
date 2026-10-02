@@ -46,6 +46,10 @@ Procedure:
      source is not `reading`, and call out every `cap_change` marked "limit change"
      as a limit change ("seed superseded" is the first real calibration).
      An `uncalibrated` account or a `rate_limits_error` line goes to Questions.
+   - `## Engine` - one line naming the engine version the night ran on: run
+     `python3 {{ORCH_DIR}}/lib/ledger.py engines {{BACKLOG_ROOT}}/orchestrator/state <ISO time 12 hours ago>`
+     and print its output. When it lists two or more versions, say plainly that
+     the night straddled versions. `unknown` means rows from before stamping.
    - `## Runs` - the raw journal, UNCHANGED, moved to the bottom of the file as the
      source record the sections above were built from.
    Keep the whole file readable in under ten minutes. If a section is empty

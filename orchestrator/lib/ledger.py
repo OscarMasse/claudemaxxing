@@ -11,6 +11,13 @@ measured burn rates and cost stats never bleed across subscriptions.
       object reads the same), append one line to
       <state_dir>/costs.jsonl, and print the session's result text (for runs.out).
 
+  ledger.py compare <state_root> <engine-a> <engine-b>
+      Per task and overall: run count, median USD and duration for each engine,
+      over state/costs.jsonl and state/<account>/costs.jsonl. Descriptive only.
+
+  ledger.py engines <state_root> <since-iso>
+      Distinct engine versions of rows since a timestamp (digest line).
+
   ledger.py fields <result.json>
       Print "<cost_usd> <duration_min>" from a result file, for run.sh's
       mechanical digest journal line (needed before the result file is
@@ -255,6 +262,84 @@ def session_costs(state_dir, window=RATE_WINDOW):
     return {k: max(runs) for k, runs in recent.items()}
 
 
+def _all_rows(state_root):
+    """Rows of state/costs.jsonl and every state/<account>/costs.jsonl."""
+    root = Path(state_root)
+    dirs = [root] + sorted(d for d in root.iterdir() if d.is_dir()) if root.is_dir() else []
+    for d in dirs:
+        yield from _entries(d)
+
+
+MIN_RUNS = 3  # per side; below this a median says nothing
+
+
+def _median(values):
+    values = sorted(values)
+    n = len(values)
+    if not n:
+        return None
+    return values[n // 2] if n % 2 else (values[n // 2 - 1] + values[n // 2]) / 2
+
+
+def compare(state_root, engine_a, engine_b):
+    """Descriptive comparison of two engine versions over real ledger rows.
+
+    Returns {task_or_"ALL": {engine: {runs, median_usd, median_min}}}. Rows
+    without an `engine` read as "unknown". Not a controlled experiment."""
+    groups = {}
+    for e in _all_rows(state_root):
+        eng = e.get("engine") or "unknown"
+        if eng not in (engine_a, engine_b):
+            continue
+        usd = _entry_usd(e)
+        mins = (e.get("duration_ms") or 0) / 60000
+        for key in (e.get("task", "?"), "ALL"):
+            groups.setdefault(key, {}).setdefault(eng, []).append((usd, mins))
+    out = {}
+    for key, per in groups.items():
+        out[key] = {}
+        for eng in (engine_a, engine_b):
+            rows = per.get(eng, [])
+            out[key][eng] = {"runs": len(rows),
+                             "median_usd": _median([r[0] for r in rows]),
+                             "median_min": _median([r[1] for r in rows])}
+    return out
+
+
+def format_compare(result, engine_a, engine_b):
+    lines = []
+    for key in sorted(result, key=lambda k: (k != "ALL", k)):
+        a, b = result[key][engine_a], result[key][engine_b]
+        cells = []
+        for eng, m in ((engine_a, a), (engine_b, b)):
+            usd = "-" if m["median_usd"] is None else f"${m['median_usd']:.2f}"
+            mins = "-" if m["median_min"] is None else f"{m['median_min']:.1f}min"
+            cells.append(f"{eng}: runs={m['runs']} median={usd} {mins}")
+        note = ""
+        if min(a["runs"], b["runs"]) < MIN_RUNS:
+            note = f"  (too few runs: need {MIN_RUNS} per side)"
+        lines.append(f"{key}: " + " | ".join(cells) + note)
+    return "\n".join(lines) or "no rows for either engine"
+
+
+def engines_since(state_root, since):
+    """Distinct engine versions of rows at or after `since` (tz-aware
+    datetime), for the digest. Rows without one read as "unknown"."""
+    seen = []
+    for e in _all_rows(state_root):
+        try:
+            when = datetime.fromisoformat(e.get("ts", ""))
+        except ValueError:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        if when >= since:
+            eng = e.get("engine") or "unknown"
+            if eng not in seen:
+                seen.append(eng)
+    return seen
+
+
 # The controlled vocabulary of `stopped=` in the agent lines of runs.log
 # (prompts/orchestrate.md step 9). There is no "killed": a session cut off by
 # run.sh's timeout never reaches step 9, so only the launcher line records it.
@@ -287,12 +372,20 @@ def outcome_histogram(runs_log):
 if __name__ == "__main__":
     if len(sys.argv) >= 11 and sys.argv[1] == "record":
         print(record(*sys.argv[2:14]))
+    elif len(sys.argv) == 5 and sys.argv[1] == "compare":
+        print(format_compare(compare(sys.argv[2], sys.argv[3], sys.argv[4]),
+                             sys.argv[3], sys.argv[4]))
+    elif len(sys.argv) == 4 and sys.argv[1] == "engines":
+        print(" ".join(engines_since(sys.argv[2],
+                                     datetime.fromisoformat(sys.argv[3]))) or "none")
     elif len(sys.argv) == 3 and sys.argv[1] == "fields":
         cost, minutes = result_fields(sys.argv[2])
         print(f"{cost} {minutes}")
     else:
         print("usage: ledger.py record <state_dir> <json> <mode> <task> <model> "
               "<effort> <slice> <exit> <account> [est_usd]\n"
+              "       ledger.py compare <state_root> <engine-a> <engine-b>\n"
+              "       ledger.py engines <state_root> <since-iso>\n"
               "       ledger.py fields <result.json>", file=sys.stderr)
         sys.exit(2)
 

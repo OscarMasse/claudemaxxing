@@ -7,6 +7,9 @@
                      (plus a global "SKIP paused" when the kill switch is set)
   gate.py status  -> human-readable per-account quota summary for the digest
   gate.py plan    -> dry projection of the remaining nights' USD allocations
+  gate.py preview -> dry run of the night that would start now: per account,
+                     the ordered sessions it would launch, wave by wave, and
+                     why it stops. Writes nothing (no log, no state).
 
 Every budget figure is USD at Anthropic list price (lib/transcripts.py), the
 weighting the account's limit applies. Money is printed with two decimals.
@@ -273,6 +276,74 @@ def calibrated(p, acct, now):
     return merged, derived
 
 
+def select_picks(candidates, measured, default_cost, budget):
+    """The budget loop of one tick, shared by `tick_account` and `preview` so
+    the two cannot drift apart. Pure: returns the candidates it accepts, in
+    order, each stamped with its `est_usd`.
+
+    What a session costs is a property of the work, not of the slice it was
+    allotted: sessions do not fill their slice (measured median utilisation
+    here: 3%), so both the measured figure and the cold-start default are per
+    SESSION. One default, not one per model: the learned figure is keyed on
+    (task, model), and a per-model prior is not supported by the data (opus
+    and fable sessions measured CHEAPER than sonnet ones). 2.85 is the p75 of
+    `cost_usd` over the 131 orchestrate sessions in the ledger on 2026-09-12
+    (median 1.46, p90 4.29, max 13.65)."""
+    picked = []
+    for cand in candidates:
+        est_burn = measured.get((cand["path"], cand["model"]), default_cost)
+        cand["est_source"] = ("measured" if (cand["path"], cand["model"]) in measured
+                              else "default")
+        # Budget rules per scheduling class. A duty is mandatory: charged
+        # to the budget, never gated by it. A queue task is exempt when it
+        # is the tick's first session, or a task heavier than a whole night
+        # could never start at all. A filler is pure surplus: no exemption,
+        # it only ever runs on budget that is already there.
+        exempt = cand["sched"] == "duty" or (
+            not picked and cand["sched"] != "filler")
+        if not exempt and est_burn > budget:
+            break
+        cand["est_usd"] = float(est_burn)
+        picked.append(cand)
+        budget -= est_burn
+    return picked
+
+
+def wave_candidates(p, projs, acct, now, d, free, state, served, ladder,
+                    out_of_quota, fable_running):
+    """The ordered launch candidates of one tick (before the budget loop).
+    Shared by `tick_account` and `preview`. Pure: reads, never writes."""
+    name = acct["name"]
+    keys = period_keys(acct, now)
+    # How many of this tick's slots the strongest model may take. It is a
+    # pacing tool, unlike max_parallel_sessions: the binding constraint on
+    # a Fable night is the account's Fable limit, not wall-clock time, and
+    # four Fable sessions racing each other exhaust it in under two hours
+    # (measured 2026-09-09), leaving nothing for the rest of the night and
+    # no slot for the cheaper models that were nowhere near their own
+    # limit. Serialising them costs almost nothing - a night fits only
+    # three or four sessions per slot anyway - and keeps the other slots
+    # doing useful work. It applies in the pre-reset burn-down as well:
+    # the wall it would run into there is the same one.
+    # Sessions launched by earlier ticks count too (`fable_running`): the
+    # constraint is on what runs concurrently, not on what one tick launches.
+    fable_slots = int(regime_key(acct, d.regime, "max_fable_slots", 1))
+    # The per-model rules go INTO the selection rather than filtering its
+    # output: cutting the queue to `free` first and dropping the models
+    # that cannot launch second leaves slots empty whenever the queue
+    # head is heavy in one model (2026-09-12: opus, fable, fable, sonnet
+    # with four free slots launched two, all night).
+    model_slots = {family: 0 for family in out_of_quota}
+    model_slots.setdefault("fable", max(fable_slots - fable_running, 0))
+    candidates = tasks.launch_order(p["root"], projs, name, count=free,
+                                    done=served,
+                                    period_keys=keys,
+                                    model_slots=model_slots,
+                                    exclude=ladder,
+                                    today=now.date(), now=now)
+    return candidates
+
+
 def tick_account(p, acct, projs):
     """One scheduling decision for one account. Returns the account's idle
     minutes (for the presence-gated notifications)."""
@@ -349,73 +420,19 @@ def tick_account(p, acct, projs):
         # afford is answered once, by the budget, below. Several models in one
         # night is the normal case; `max_fable_slots` paces the one model with
         # its own separate limit.
-        keys = period_keys(acct, now)
-        # How many of this tick's slots the strongest model may take. It is a
-        # pacing tool, unlike max_parallel_sessions: the binding constraint on
-        # a Fable night is the account's Fable limit, not wall-clock time, and
-        # four Fable sessions racing each other exhaust it in under two hours
-        # (measured 2026-09-09), leaving nothing for the rest of the night and
-        # no slot for the cheaper models that were nowhere near their own
-        # limit. Serialising them costs almost nothing - a night fits only
-        # three or four sessions per slot anyway - and keeps the other slots
-        # doing useful work. It applies in the pre-reset burn-down as well:
-        # the wall it would run into there is the same one.
-        # Sessions launched by earlier ticks count too: the constraint is on
-        # what runs concurrently, not on what one tick launches.
-        fable_slots = int(regime_key(acct, d.regime, "max_fable_slots", 1))
         fable_running = running_models(state).count("fable")
-        # The per-model rules go INTO the selection rather than filtering its
-        # output: cutting the queue to `free` first and dropping the models
-        # that cannot launch second leaves slots empty whenever the queue
-        # head is heavy in one model (2026-09-12: opus, fable, fable, sonnet
-        # with four free slots launched two, all night).
-        model_slots = {family: 0 for family in out_of_quota}
-        model_slots.setdefault("fable", max(fable_slots - fable_running, 0))
         # A task whose last session tonight left most of a longer slice
         # unused is not relaunched into a shorter one (stalls.ladder_blocked).
         ladder = stalls.ladder_blocked(state, now, d.slice_min)
         if ladder:
             log(p, f"account={name} not relaunched into a shorter slice "
                    f"({d.slice_min}min): {sorted(ladder)}")
-        candidates = tasks.launch_order(p["root"], projs, name, count=free,
-                                        done=duties_served(state),
-                                        period_keys=keys,
-                                        model_slots=model_slots,
-                                        exclude=ladder,
-                                        today=now.date(), now=now)
-        # What a session costs is a property of the work, not of the slice it
-        # was allotted: sessions do not fill their slice (measured median
-        # utilisation here: 3%), so both the measured figure and the cold-start
-        # default are per SESSION. This used to be a per-minute rate multiplied
-        # by the slice, which was accidentally right for a task with ledger
-        # history (the divide and the multiply cancelled) and ~30x too high for
-        # one without - 400k/min x 50min = 20M against a measured median of
-        # 726k. That single wrong number capped most nights at one session,
-        # since every candidate after the first was gated on it.
-        # One default, not one per model: the measurement says session cost is
-        # driven by the task, which is why the learned figure is keyed on
-        # (task, model). A per-model prior is not supported by the data here
-        # (opus and fable sessions measured CHEAPER than sonnet ones), so
-        # inventing three numbers would only look more precise than it is.
-        # 2.85 is the p75 of `cost_usd` over the 131 orchestrate sessions in
-        # the ledger on 2026-09-12 (median 1.46, p90 4.29, max 13.65).
-        measured = ledger.session_costs(state)
-        default_cost = float(acct.get("est_session_usd", 2.85))
-        budget = d.budget_usd
-        for cand in candidates:
-            est_burn = measured.get((cand["path"], cand["model"]), default_cost)
-            # Budget rules per scheduling class. A duty is mandatory: charged
-            # to the budget, never gated by it. A queue task is exempt when it
-            # is the tick's first session, or a task heavier than a whole night
-            # could never start at all. A filler is pure surplus: no exemption,
-            # it only ever runs on budget that is already there.
-            exempt = cand["sched"] == "duty" or (
-                not picked and cand["sched"] != "filler")
-            if not exempt and est_burn > budget:
-                break
-            cand["est_usd"] = float(est_burn)
-            picked.append(cand)
-            budget -= est_burn
+        candidates = wave_candidates(p, projs, acct, now, d, free, state,
+                                     duties_served(state), ladder, out_of_quota,
+                                     fable_running)
+        picked = select_picks(
+            candidates, ledger.session_costs(state),
+            float(acct.get("est_session_usd", 2.85)), d.budget_usd)
     log(p, f"account={name} {d.action} reason={d.reason!r} slice={d.slice_min} "
            f"regime={d.regime} week=${snap['week_usd']:.2f} "
            f"idle={idle} free_slots={free} "
@@ -725,6 +742,109 @@ def plan(p):
             pool -= share
 
 
+PREVIEW_MAX_WAVES = 200  # safety net; every wave consumes a task, so it is never hit
+
+
+def preview_instant(acct, now):
+    """The instant the previewed night is evaluated at: `now` inside the
+    night window, otherwise the next night_start strictly after `now`."""
+    if night_start_dt(acct, now):
+        return now
+    h, m = str(acct["night_start"]).split(":")
+    start = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+    return start if start > now else start + timedelta(days=1)
+
+
+def preview_account(p, acct, projs):
+    """Dry run of one account's night, as if it started now. Strictly
+    read-only: it reuses `wave_candidates` and `select_picks` (the code
+    `tick_account` runs) but never logs, claims, records or notifies."""
+    name = acct["name"]
+    problem = config.misconfigured_account(acct)
+    if problem:
+        print(f"account={name} misconfigured: {problem}")
+        return
+    now = now_from_env(acct)
+    acct, _derived = calibrated(p, acct, now)
+    if acct is None:
+        print(f"account={name} uncalibrated: {UNCALIBRATED}")
+        return
+    at = preview_instant(acct, now)
+    state = p["state"] / name
+    snap = usage.snapshot(acct, now)
+    if at != now:
+        snap["block"] = None  # the open window will be long over by then
+    snap["spent_tonight"] = 0
+    # idle=None: the activity lock is treated as idle, the night starts clean.
+    d = controller.decide(acct, at, snap, None)
+    print(f"account={name} preview at={at.isoformat()} (now={now.isoformat()}) "
+          f"regime={d.regime} budget_usd={d.budget_usd:.2f}")
+    print("  assumptions: budget-ordered, not a timeline (no slice lengths, no "
+          "last cold start); sessions running now are ignored; each task runs "
+          "once, while a real night relaunches a task a session hands back "
+          "`ready`")
+    if d.action != "run":
+        print(f"  stop: {d.reason}")
+        return
+    cap_slots = min(int(regime_key(acct, d.regime, "max_parallel_sessions", 4)),
+                    MAX_SLOTS)
+    out_of_quota = quota.blocked(state, now)
+    for family, until in sorted(out_of_quota.items()):
+        print(f"  out_of_quota model={family} until={until.isoformat()}")
+    measured = ledger.session_costs(state)
+    default_cost = float(acct.get("est_session_usd", 2.85))
+    served = dict(duties_served(state))
+    done_names = set()
+    remaining = d.budget_usd
+    total = 0.0
+    stop = "queue empty"
+    for wave in range(1, PREVIEW_MAX_WAVES + 1):
+        if remaining <= 0:
+            stop = "budget exhausted"
+            break
+        candidates = wave_candidates(p, projs, acct, at, d, cap_slots, state,
+                                     served, done_names, out_of_quota, 0)
+        picked = select_picks(candidates, measured, default_cost, remaining)
+        if not picked:
+            stop = "queue empty" if not candidates else "budget exhausted"
+            break
+        for t in picked:
+            total += t["est_usd"]
+            remaining -= t["est_usd"]
+            done_names.add(Path(t["path"]).name)
+            if t["sched"] in ("duty", "filler"):
+                served[t["path"]] = t["period_key"]
+            print(f"  wave={wave} {t['path']} project={t['project']} "
+                  f"model={t['model']} effort={t['effort']} "
+                  f"class={t['sched'] or 'queue'} est_usd={t['est_usd']:.2f} "
+                  f"({t['est_source']}) total={total:.2f}")
+    else:
+        stop = f"wave cap {PREVIEW_MAX_WAVES}"
+    if d.budget_usd == float("inf"):
+        print(f"  total_usd={total:.2f} of unlimited")
+    else:
+        print(f"  total_usd={total:.2f} of {d.budget_usd:.2f}")
+    print(f"  stop: {stop}")
+    left = {Path(t["path"]).name for t in wave_candidates(
+        p, projs, acct, at, d, 1000, state, served, done_names, out_of_quota, 0)}
+    skipped = []
+    for fname, unmet in tasks.blocked(p["root"], projs, name):
+        skipped.append(f"{fname}: prerequisite unmet ({' '.join(unmet)})")
+    for fname in sorted(left):
+        skipped.append(f"{fname}: {stop}")
+    if skipped:
+        print("  not scheduled:")
+        for line in skipped:
+            print(f"    {line}")
+
+
+def preview(p):
+    cfg = config.load(p["config"])
+    projs = config.projects(cfg)
+    for acct in config.accounts(cfg):
+        preview_account(p, acct, projs)
+
+
 def stacks_cmd(p):
     from lib import stacks
     lines = stacks.render(stacks.collect(p["root"]))
@@ -744,6 +864,8 @@ def main():
         status(p)
     elif cmd == "plan":
         plan(p)
+    elif cmd == "preview":
+        preview(p)
     elif cmd == "stacks":
         stacks_cmd(p)
     else:

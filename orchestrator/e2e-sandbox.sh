@@ -94,7 +94,7 @@ for _ in $(seq 1 100); do
   [ -f "$SANDBOX/orchestrator/state/runs.log" ] && [ -z "$(ls "$SANDBOX"/orchestrator/state/max/RUNNING.* 2>/dev/null)" ] && break
   sleep 0.2
 done
-grep -o 'tasks/[a-z]*\.md' "$SANDBOX/orchestrator/state/runs.log" | sort | sed 's/^/launched /'
+grep -o ' task=[^ ]*\.md' "$SANDBOX/orchestrator/state/runs.log" | sed 's/^ task=//' | sort -u | sed 's/^/launched /'
 echo
 echo "== duty period consumed =="
 cat "$SANDBOX/orchestrator/state/max/duties.json"

@@ -164,6 +164,16 @@ class TestCompare(unittest.TestCase):
             self.assertEqual(ledger.engines_since(root, datetime(2026, 8, 1, tzinfo=timezone.utc)),
                              ["unknown", "aaa", "bbb"])
 
+    def test_engines_cli_accepts_naive_and_aware_since(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._rows(root)
+            for since in ("2026-09-15T00:00:00", "2026-09-15T00:00:00+00:00"):
+                r = subprocess.run([sys.executable, "lib/ledger.py", "engines", str(root), since],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.split(), ["bbb"])
+
 
 class TestLearning(unittest.TestCase):
     """The feedback loop: what a night cost, and how good the estimates were."""

@@ -75,8 +75,27 @@ def list_stacks():
     return rows
 
 
+def _leftovers(docker, project):
+    """IDs of containers still carrying the compose label of `project`, or
+    None when docker cannot answer."""
+    try:
+        r = subprocess.run([docker, "ps", "-aq", "--filter",
+                            f"label=com.docker.compose.project={project}"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.split()
+
+
 def down(project):
-    """`docker compose -p <project> down --remove-orphans`. True on success."""
+    """`docker compose -p <project> down --remove-orphans`, then `docker rm -f`
+    on any container of the project that `down` left behind (a one-off
+    `compose run` container is not part of the project's services, so `down`
+    exits 0 and leaves it). Volumes are never removed. True only when no
+    container of the project remains, so a stack that survives is reported
+    as a failure instead of a success on every tick."""
     docker = _docker()
     if not docker:
         return False
@@ -86,7 +105,17 @@ def down(project):
                            capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return r.returncode == 0
+    if r.returncode != 0:
+        return False
+    left = _leftovers(docker, project)
+    if left:
+        try:
+            subprocess.run([docker, "rm", "-f", *left],
+                           capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        left = _leftovers(docker, project)
+    return left == []
 
 
 def sweep(project_dirs):

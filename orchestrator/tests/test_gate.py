@@ -712,6 +712,7 @@ class TestGateJanitor(unittest.TestCase):
         stub = self.root / "docker"
         stub.write_text(
             "#!/bin/sh\n"
+            "if [ \"$1 $2\" = 'ps -aq' ]; then exit 0; fi\n"
             "if [ \"$1\" = ps ]; then "
             f"printf 'proj-a\\t{proj}/.agent-worktrees/proj-a\\n'; exit 0; fi\n"
             f"echo \"$@\" >> {self.calls}\n")

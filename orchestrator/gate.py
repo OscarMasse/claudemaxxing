@@ -788,7 +788,7 @@ def preview_account(p, acct, projs):
         return
     cap_slots = min(int(regime_key(acct, d.regime, "max_parallel_sessions", 4)),
                     MAX_SLOTS)
-    out_of_quota = quota.blocked(state, now)
+    out_of_quota = quota.blocked(state, at)
     for family, until in sorted(out_of_quota.items()):
         print(f"  out_of_quota model={family} until={until.isoformat()}")
     measured = ledger.session_costs(state)

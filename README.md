@@ -116,6 +116,18 @@ And selection is done in pure Python before any model is launched, so a night wa
 The reasoning behind each rule, the scheduling classes, the budget controller, and the FAQ live in [docs/design.md](docs/design.md).
 This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a verifier, addressing the completion-without-testing failure mode described in Anthropic's [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents).
 
+## The cost ledger
+
+Every session appends one JSON row to `state/<account>/costs.jsonl` (older rows also sit in `state/costs.jsonl`): task, model, effort, cost in USD, duration.
+Two fields say which version of the engine produced the row.
+`engine` is the short git SHA of the claudemaxxing working tree at launch, with `-dirty` when it had uncommitted changes.
+`prompt_sha` is a short hash of the exact rendered prompt the session received.
+Rows written before these fields existed read as `unknown`.
+
+`python3 orchestrator/lib/ledger.py compare <state_root> <engine-a> <engine-b>` prints, per task and overall, the run count, median USD and median duration of each engine, and says so when either side has fewer than 3 runs.
+It is a descriptive read of real runs, not a controlled experiment: tasks differ, the model is nondeterministic and the codebase moves.
+The morning digest names the engine the night ran on and flags a night that straddled two versions.
+
 ## Safety and limits
 
 - **The burn-down runs open bar.**

@@ -130,6 +130,41 @@ def entry(ts="2026-08-12T02:30:00+00:00", usd=1.0, **kw):
     return e
 
 
+class TestCompare(unittest.TestCase):
+    def _rows(self, root):
+        (root / "acct").mkdir()
+        old = {"ts": "2026-09-01T00:00:00+00:00", "task": "t", "cost_usd": 1.0,
+               "duration_ms": 60000}
+        rows = [old, dict(old, engine="aaa", cost_usd=2.0),
+                dict(old, engine="aaa", cost_usd=4.0),
+                dict(old, engine="aaa", cost_usd=3.0),
+                dict(old, engine="bbb", ts="2026-10-02T01:00:00+00:00")]
+        (root / "costs.jsonl").write_text(json.dumps(rows[0]) + "\nnot json\n")
+        (root / "acct" / "costs.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in rows[1:]) + "\n")
+
+    def test_mixed_old_and_new_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._rows(root)
+            res = ledger.compare(root, "aaa", "unknown")
+            self.assertEqual(res["ALL"]["aaa"]["runs"], 3)
+            self.assertEqual(res["ALL"]["aaa"]["median_usd"], 3.0)
+            self.assertEqual(res["t"]["unknown"]["runs"], 1)
+            out = ledger.format_compare(res, "aaa", "unknown")
+            self.assertIn("too few runs", out)
+            self.assertEqual(ledger.compare(root, "x", "y"), {})
+
+    def test_engines_since(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._rows(root)
+            since = datetime(2026, 9, 15, tzinfo=timezone.utc)
+            self.assertEqual(ledger.engines_since(root, since), ["bbb"])
+            self.assertEqual(ledger.engines_since(root, datetime(2026, 8, 1, tzinfo=timezone.utc)),
+                             ["unknown", "aaa", "bbb"])
+
+
 class TestLearning(unittest.TestCase):
     """The feedback loop: what a night cost, and how good the estimates were."""
 

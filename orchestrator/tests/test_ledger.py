@@ -169,7 +169,7 @@ class TestCompare(unittest.TestCase):
             root = Path(d)
             self._rows(root)
             for since in ("2026-09-15T00:00:00", "2026-09-15T00:00:00+00:00"):
-                r = subprocess.run([sys.executable, "lib/ledger.py", "engines", str(root), since],
+                r = subprocess.run([sys.executable, str(LEDGER_PY), "engines", str(root), since],
                                    capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertEqual(r.stdout.split(), ["bbb"])

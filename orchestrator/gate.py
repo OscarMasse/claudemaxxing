@@ -268,15 +268,11 @@ def calibrated(p, acct, now):
     None) when the history has no seed. The controller stays pure: it reads
     the caps off the account dict like any other key."""
     state = p["state"] / acct["name"]
+    now = now.astimezone(ZoneInfo(acct["reset_tz"]))  # naive is local time
     since = now - ratelimits.REGIME_SPAN - transcripts.WINDOW
     rows = [e for e in transcripts.entries(acct["claude_config_dir"], since=since)
             if e[0] <= now]
-    refusals = []
-    for entry in quota.history(state).values():
-        try:
-            refusals.append(datetime.fromisoformat(entry["seen"]))
-        except (KeyError, TypeError, ValueError):
-            continue
+    refusals = quota.refusals(state)
     derived = ratelimits.caps(ratelimits.load(state), now, acct["reset_tz"],
                               blocks=transcripts.blocks(rows), refusals=refusals)
     if derived is None:

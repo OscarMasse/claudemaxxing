@@ -49,15 +49,17 @@ devices or claude.ai is invisible to the engine and skews the ratio.
 
 Lower bound from completed windows (2026-10-03): a 5h block of the engine's
 own spend (lib/transcripts.blocks) that ended with no quota refusal recorded
-in its span (lib/quota.py history, any family) proves the window cap was at
+in its span (lib/quota.py refusals, any family) proves the window cap was at
 least that block's USD. Readings cannot see this: on 2026-09-30 daytime
 readings inflated by usage the engine cannot see (another device, claude.ai)
 derived $52.85 while the night window 01:06-06:06 had absorbed $96.5 without
 a refusal. The highest such block of the last REGIME_SPAN raises
 `window_cap_usd` (source `lower_bound`, reported as a cap change); it decays
-with REGIME_SPAN, so a real limit cut is still followed after a week. The
-refusal record keeps only the latest one per family, so an older refusal can
-be missed; the bound still stays below spend the account actually allowed.
+with REGIME_SPAN, so a real limit cut is still followed after a week. Known
+blind spot: an engine block opens at the engine's first token, so usage from
+another device that opened the account window earlier can make one engine
+block straddle two account windows and overstate the bound; the REGIME_SPAN
+decay bounds how long such an error lasts.
 Peak hours were checked and ruled out: the weekday peak-hour 5h throttle of
 March 2026 was removed for Claude Code on Pro and Max on 2026-05-06
 (https://usagemeter.app/en/blog/claude-ai-peak-hours-surge-pricing-explained),

@@ -35,6 +35,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 STATE_FILE = "exhausted.json"
+# Every refusal ever recorded, one JSON line each: STATE_FILE keeps only the
+# latest per family, and lib/ratelimits.py needs all of them to tell which
+# past 5h windows hit the wall.
+LOG_FILE = "exhausted.jsonl"
 
 # Both forms the account uses:
 #   "You've hit your session limit \u00b7 resets 4:20am (Europe/Warsaw)"
@@ -101,6 +105,35 @@ def _read(state):
         return {}
 
 
+def _log(state, family, entry):
+    state.mkdir(parents=True, exist_ok=True)
+    with open(state / LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(dict(entry, family=family)) + "\n")
+
+
+def refusals(state):
+    """When each recorded refusal was seen (aware datetimes), from the log and
+    the latest-per-family file (which predates the log)."""
+    seen = [e.get("seen") for e in _read(state).values() if isinstance(e, dict)]
+    try:
+        for line in (state / LOG_FILE).read_text(encoding="utf-8").splitlines():
+            try:
+                seen.append(json.loads(line).get("seen"))
+            except (ValueError, AttributeError):
+                continue
+    except OSError:
+        pass
+    out = []
+    for s in seen:
+        try:
+            ts = datetime.fromisoformat(s)
+        except (TypeError, ValueError):
+            continue
+        if ts.tzinfo is not None:
+            out.append(ts)
+    return out
+
+
 def _write(state, data):
     state.mkdir(parents=True, exist_ok=True)
     tmp = state / (STATE_FILE + ".tmp")
@@ -123,6 +156,7 @@ def record(state, family, text, now, default_tz="UTC"):
     data = _read(state)
     data[family] = entry
     _write(state, data)
+    _log(state, family, entry)
     return entry
 
 
@@ -138,6 +172,7 @@ def record_fallback(state, family, now, until=None, scope="unknown"):
     data = _read(state)
     data[family] = entry
     _write(state, data)
+    _log(state, family, entry)
     return entry
 
 

@@ -20,6 +20,19 @@ WEEKLY_MSG = ("Error: You've hit your weekly limit · "
               "resets Sep 11 at 6am (Europe/Warsaw)")
 
 
+class TestRefusals(unittest.TestCase):
+    def test_every_refusal_is_kept_not_only_the_latest(self):
+        tz = ZoneInfo("Europe/Warsaw")
+        first = datetime(2026, 9, 30, 2, 0, tzinfo=tz)
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            quota.record_fallback(state, "opus", first)
+            quota.record_fallback(state, "opus", first + timedelta(days=1))
+            self.assertEqual(len(quota.history(state)), 1)
+            self.assertIn(first, quota.refusals(state))
+            self.assertIn(first + timedelta(days=1), quota.refusals(state))
+
+
 class TestParse(unittest.TestCase):
     def test_session_limit(self):
         scope, reset = quota.parse(SESSION_MSG, NOW)

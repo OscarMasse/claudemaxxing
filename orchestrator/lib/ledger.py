@@ -377,7 +377,8 @@ if __name__ == "__main__":
                              sys.argv[3], sys.argv[4]))
     elif len(sys.argv) == 4 and sys.argv[1] == "engines":
         print(" ".join(engines_since(sys.argv[2],
-                                     datetime.fromisoformat(sys.argv[3]))) or "none")
+                                     datetime.fromisoformat(sys.argv[3])
+                                     .astimezone())) or "none")
     elif len(sys.argv) == 3 and sys.argv[1] == "fields":
         cost, minutes = result_fields(sys.argv[2])
         print(f"{cost} {minutes}")

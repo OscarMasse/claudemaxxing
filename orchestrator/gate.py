@@ -40,7 +40,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (activity, config, controller, janitor, ledger, quota,  # noqa: E402
-                 ratelimits, stalls, tasks, usage, workspace)
+                 ratelimits, stalls, tasks, transcripts, usage, workspace)
 
 LOCK_TTL_S = 4.5 * 3600
 MAX_SLOTS = 8  # run.sh allocates RUNNING.1..8; a higher ceiling cannot be used
@@ -267,8 +267,18 @@ def calibrated(p, acct, now):
     """(account with its derived caps merged in, the derivation), or (None,
     None) when the history has no seed. The controller stays pure: it reads
     the caps off the account dict like any other key."""
-    derived = ratelimits.caps(ratelimits.load(p["state"] / acct["name"]), now,
-                              acct["reset_tz"])
+    state = p["state"] / acct["name"]
+    since = now - ratelimits.REGIME_SPAN - transcripts.WINDOW
+    rows = [e for e in transcripts.entries(acct["claude_config_dir"], since=since)
+            if e[0] <= now]
+    refusals = []
+    for entry in quota.history(state).values():
+        try:
+            refusals.append(datetime.fromisoformat(entry["seen"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    derived = ratelimits.caps(ratelimits.load(state), now, acct["reset_tz"],
+                              blocks=transcripts.blocks(rows), refusals=refusals)
     if derived is None:
         return None, None
     merged = dict(acct, **{k: derived[k] for k in

@@ -134,6 +134,56 @@ class TestCaps(unittest.TestCase):
         self.assertEqual(d["as_of"], last)
 
 
+class TestLowerBound(unittest.TestCase):
+    START = T0 - timedelta(hours=8)
+    BLOCK = {"start": START, "end": START + timedelta(hours=5), "usd": 96.5}
+    NOW = T0
+
+    def window(self, refusals=(), now=NOW, rows=()):
+        c = ratelimits.caps([EARLY_SEED] + list(rows), now, TZ,
+                            blocks=[self.BLOCK], refusals=list(refusals))
+        return c["window_cap_usd"], c["detail"]["window_cap_usd"], c
+
+    def test_block_over_cap_without_refusal_raises_it(self):
+        cap, d, c = self.window()
+        self.assertEqual(cap, 96.5)
+        self.assertEqual(d["source"], "lower_bound")
+        self.assertEqual(d["as_of"], self.START)
+        why = [x["why"] for x in ratelimits.recent_changes(c, self.NOW)]
+        self.assertIn("lower bound, window 2026-09-24 04:00-09:00", why)
+
+    def test_refusal_inside_block_invalidates_it(self):
+        cap, d, _c = self.window(refusals=[self.START + timedelta(hours=2)])
+        self.assertEqual(cap, 58.0)
+        self.assertEqual(d["source"], "seed")
+
+    def test_refusal_outside_block_does_not(self):
+        cap, _d, _c = self.window(refusals=[self.START + timedelta(hours=6)])
+        self.assertEqual(cap, 96.5)
+
+    def test_bound_expires_after_regime_span(self):
+        now = self.BLOCK["end"] + ratelimits.REGIME_SPAN
+        cap, _d, _c = self.window(now=now)
+        self.assertEqual(cap, 58.0)
+
+    def test_open_block_is_not_evidence(self):
+        cap, _d, _c = self.window(now=self.START + timedelta(hours=4))
+        self.assertEqual(cap, 58.0)
+
+    def test_bound_under_cap_changes_nothing(self):
+        rows = [{"ts": T0.isoformat(),
+                 "five_hour": win(50, T0 + timedelta(hours=2), 100.0)}]
+        cap, d, _c = self.window(rows=rows, now=T0 + timedelta(minutes=5))
+        self.assertEqual(cap, 200.0)
+        self.assertEqual(d["source"], "reading")
+
+    def test_rows_after_now_are_ignored(self):
+        rows = [{"ts": (T0 + timedelta(days=1)).isoformat(),
+                 "five_hour": win(50, T0 + timedelta(days=1, hours=2), 100.0)}]
+        cap, _d, _c = self.window(rows=rows)
+        self.assertEqual(cap, 96.5)
+
+
 class TestSeed(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

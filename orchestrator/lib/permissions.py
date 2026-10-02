@@ -82,7 +82,9 @@ def merge_rules():
     and the auto-merge / merge GraphQL mutations, whatever the repo settings."""
     cmds = [f"{g}{sub}*" for g in GH_PREFIXES
             for sub in ("pr merge", "stack merge")]
-    cmds += ["gh api*pulls/*/merge*", "gh api*enablePullRequestAutoMerge*",
+    cmds += [f"gh {g}* merge*" for g in ("pr -R", "pr --repo", "pr --repo=", "-R", "--repo")
+             if g.startswith("pr")]
+    cmds += ["gh -R?* pr merge*", "gh api*pulls/*/merge*", "gh api*enablePullRequestAutoMerge*",
              "gh api*mergePullRequest*"]
     return _with_rtk(cmds)
 

@@ -59,6 +59,8 @@ IRREVERSIBLE = [
     "cat /Users/o/.ssh/id_ed25519",
 ]
 MERGES = [
+    "gh pr -R o/r merge 5", "gh pr --repo o/r merge 5", "rtk gh pr --repo=o/r merge 5",
+    "gh -Ro/r pr merge 5",
     "rtk gh -R o/r pr merge 12 --auto",
     "gh pr merge 12", "gh pr merge 12 --auto --squash", "gh pr merge --rebase 12",
     "rtk gh pr merge 12", "gh -R o/r pr merge 12", "gh --repo o/r pr merge 12",

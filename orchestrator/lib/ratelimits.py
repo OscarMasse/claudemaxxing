@@ -47,6 +47,22 @@ text match. `lib/quota.py` stays the guard against the real wall. The per-model
 (Fable) weekly figure is not in the status line data, and usage from other
 devices or claude.ai is invisible to the engine and skews the ratio.
 
+Lower bound from completed windows (2026-10-03): a 5h block of the engine's
+own spend (lib/transcripts.blocks) that ended with no quota refusal recorded
+in its span (lib/quota.py history, any family) proves the window cap was at
+least that block's USD. Readings cannot see this: on 2026-09-30 daytime
+readings inflated by usage the engine cannot see (another device, claude.ai)
+derived $52.85 while the night window 01:06-06:06 had absorbed $96.5 without
+a refusal. The highest such block of the last REGIME_SPAN raises
+`window_cap_usd` (source `lower_bound`, reported as a cap change); it decays
+with REGIME_SPAN, so a real limit cut is still followed after a week. The
+refusal record keeps only the latest one per family, so an older refusal can
+be missed; the bound still stays below spend the account actually allowed.
+Peak hours were checked and ruled out: the weekday peak-hour 5h throttle of
+March 2026 was removed for Claude Code on Pro and Max on 2026-05-06
+(https://usagemeter.app/en/blog/claude-ai-peak-hours-surge-pricing-explained),
+so daytime readings do not under-estimate the night cap for that reason.
+
 Bootstrap: the history is seeded once (`ratelimits.py seed`) with hand
 readings; the first usable real reading supersedes the seed.
 """
@@ -308,22 +324,53 @@ def _fold(rows, key, min_pct, seed_cap, seed_ts, now, tz):
     return {"cap": cap, "source": source, "as_of": as_of.astimezone(tz), "changes": changes}
 
 
-def caps(rows, now, tz):
+def lower_bound(blocks, refusals, now):
+    """The highest-USD 5h block that is over, ended less than REGIME_SPAN ago,
+    and saw no quota refusal (`refusals`: datetimes) in [start, end); or None.
+    """
+    best = None
+    for b in blocks or ():
+        if not (b["end"] <= now and now - b["end"] < REGIME_SPAN):
+            continue
+        if any(b["start"] <= r < b["end"] for r in refusals or ()):
+            continue
+        if best is None or b["usd"] > best["usd"]:
+            best = b
+    return best
+
+
+def _apply_bound(d, bound, tz):
+    if bound is None or bound["usd"] <= d["cap"]:
+        return
+    start, end = bound["start"].astimezone(tz), bound["end"].astimezone(tz)
+    d["changes"].append({"cap": None, "day": end.date().isoformat(),
+                         "from": d["cap"], "to": bound["usd"],
+                         "why": f"lower bound, window {start:%Y-%m-%d %H:%M}-{end:%H:%M}"})
+    d.update(cap=bound["usd"], source="lower_bound", as_of=start)
+
+
+def caps(rows, now, tz, blocks=None, refusals=None):
     """The caps in use, or None when the history has no seed.
 
     Returns {"weekly_cap_usd", "window_cap_usd", "p90_daily_usd": float,
     "detail": {cap key: {"cap", "source", "as_of", "changes"}}}; `source` is
     `reading` (the latest usable reading's period is still open), `history`
-    (the latest one is from an earlier period) or `seed`.
+    (the latest one is from an earlier period), `seed`, or `lower_bound`
+    (window cap only: a completed 5h block in `blocks` spent more without a
+    refusal in `refusals`, see lower_bound). Rows stamped after `now` are
+    ignored, so a replay at a past instant sees the history of that instant.
     """
     s = next((r for r in rows if r.get("seed")), None)
     if s is None:
         return None
     tz = ZoneInfo(str(tz))
     now = now.astimezone(tz)  # a naive now is local time, as in the controller
+    rows = [r for r in rows if r.get("seed") or _ts(r["ts"]) <= now]
     out = {"detail": {}, "tz": str(tz)}
     for key, _length, min_pct, cap_key in WINDOWS:
         d = _fold(rows, key, min_pct, float(s[cap_key]), _ts(s["ts"]), now, tz)
+        if cap_key == "window_cap_usd":
+            _apply_bound(d, lower_bound(blocks, refusals, now), tz)
         for c in d["changes"]:
             c["cap"] = cap_key
         out[cap_key] = d["cap"]

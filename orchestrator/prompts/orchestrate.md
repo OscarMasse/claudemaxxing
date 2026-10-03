@@ -84,7 +84,13 @@ Procedure:
    nobody else. So `delivery: pr` with `autonomy: private` is legitimate and you must
    push - the belief that a PR needs approval is exactly what made earlier sessions
    leave finished work sitting in a worktree.
-   Local-only rails (non-negotiable): a task with `delivery: local` (every task of a
+   Job `pr` tasks (project with `local_only_default` and `pr_optin`): the push and the
+   PR go through the owner's keyring login, never a `GH_TOKEN`. Open the PR as a draft.
+   The PR body follows the target repo's PR template exactly (CI rejects anything else),
+   and the task is not done until the PR's CI checks on the description and the commit
+   header pass. Only `gh pr create`, `gh pr edit` and `gh pr ready` are allowed on `gh`;
+   comments, reviews and other mutations are denied.
+   Local-only rails (non-negotiable): a task with `delivery: local` (the default of a
    project that sets `local_only_default: true`) must produce NO external side
    effects. Pushes, mutating `gh` calls, force pushes and credential reads are
    denied by the launcher (`lib/permissions.py`); a refusal is the rail, not a

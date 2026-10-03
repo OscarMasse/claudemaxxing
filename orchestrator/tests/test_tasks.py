@@ -7,9 +7,11 @@ from pathlib import Path
 from lib import tasks
 
 
-def proj(name, account, rank=100, local_only_default=False, expedite=False):
+def proj(name, account, rank=100, local_only_default=False, expedite=False,
+         pr_optin=False):
     return {"name": name, "account": account, "dirs": [], "rank": rank,
-            "expedite": expedite, "local_only_default": local_only_default}
+            "expedite": expedite, "local_only_default": local_only_default,
+            "pr_optin": pr_optin}
 
 
 PROJECTS = {
@@ -134,6 +136,19 @@ class TestPick(unittest.TestCase):
         write_task(self.root, "w.md", project="work", status="ready",
                    priority="high", delivery="local")
         self.assertTrue(self.pick(account="employer")["path"].endswith("w.md"))
+
+    def test_pr_optin_project_honours_pr_but_still_refuses_branch(self):
+        projs = dict(PROJECTS, work=proj("work", "employer", rank=10,
+                                         local_only_default=True, pr_optin=True))
+        write_task(self.root, "w.md", project="work", status="ready",
+                   priority="high", delivery="pr")
+        self.assertTrue(self.pick(account="employer", projects=projs)["path"]
+                        .endswith("w.md"))
+        self.assertEqual(tasks.misconfigured(self.root, projs), [])
+        write_task(self.root, "w.md", project="work", status="ready",
+                   priority="high", delivery="branch")
+        self.assertEqual(tasks.misconfigured(self.root, projs),
+                         [("w.md", "delivery=branch in local-only project work")])
 
     def test_a_leftover_local_only_key_is_not_obeyed_but_refused(self):
         write_task(self.root, "old.md", project="side-projects", status="ready",

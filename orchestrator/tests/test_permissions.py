@@ -100,6 +100,14 @@ class TestDenyRules(unittest.TestCase):
         for cmd in IRREVERSIBLE:
             self.assertTrue(denied(rules, cmd), cmd)
 
+    def test_employer_pr_allows_push_and_own_pr_only(self):
+        rules = permissions.deny_rules("pr", employer=True)
+        for cmd in PUSHES + ["gh pr create --draft", "gh pr edit 3", "gh pr ready 3"] + GH_READS:
+            self.assertFalse(denied(rules, cmd), cmd)
+        for cmd in ["gh pr comment 3", "gh pr review 3", "gh repo delete x",
+                    "gh api -X DELETE repos/a/b", "gh issue create"] + MERGES + IRREVERSIBLE:
+            self.assertTrue(denied(rules, cmd), cmd)
+
     def test_every_delivery_denies_merges(self):
         for delivery in ("pr", "branch", "local", ""):
             rules = permissions.deny_rules(delivery)

@@ -108,7 +108,8 @@ MAX_USD="$(cfg account "$ACCOUNT" max_session_usd 15)"
 # `gh` (pr create etc.); GIT_ASKPASS answers git's HTTPS prompts. Push targets
 # are HTTPS URLs; protect main with pre-push hooks or branch protection.
 # Only for a known project that may publish: a `local_only_default` project
-# (the employer's repos) never pushes, and the PAT cannot see its org either -
+# (the employer's repos) never gets it, whatever its delivery: a `pr` task there
+# pushes through the owner's keyring login, and the PAT cannot see its org -
 # exporting it there made every read-only `gh` call return an empty list
 # instead of falling back to the owner's keyring login (2026-09-17). Digest
 # and auto-pick sessions carry no project and never push, so they get none.
@@ -215,8 +216,12 @@ esac
 # (digest and auto modes carry no delivery and never publish either), force
 # pushes, filter-branch and credential reads for every session, and writes
 # under each read-only optional dir.
+EMPLOYER_FLAG=""
+if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" = "true" ]; then
+  EMPLOYER_FLAG="--employer"
+fi
 # Fail closed: a broken builder must not launch a session without its rails.
-if ! RULES="$(python3 lib/permissions.py "$DELIVERY" $READONLY_DIRS)" || [ -z "$RULES" ]; then
+if ! RULES="$(python3 lib/permissions.py "$DELIVERY" $EMPLOYER_FLAG $READONLY_DIRS)" || [ -z "$RULES" ]; then
   echo "$(date '+%F %T') permissions builder failed, not launching" >&2
   exit 1
 fi

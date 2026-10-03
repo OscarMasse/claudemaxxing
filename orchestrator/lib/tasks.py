@@ -257,13 +257,18 @@ def _declared_delivery(fm):
 
 def _breaches_local_floor(delivery, proj):
     """True when the task's delivery mode breaches its project's local-only
-    floor. `local_only_default: true` marks a project whose work must never
-    leave the machine (the employer's repos), so `branch` and `pr` are both
-    refused there. `branch` is refused too, not just `pr`: it commits locally
+    floor. `local_only_default: true` marks a project whose work stays on the
+    machine unless a task opts in: `pr` is honoured only when the project also
+    sets `pr_optin: true` (the employer's repos, via the owner's keyring login),
+    and `branch` is refused there either way: it commits locally
     like `local` does, but it does not carry the rest of the strictly-local
     rails (read-only `gh`, no external call of any kind), so accepting it
     would silently relax them."""
-    return bool(proj["local_only_default"]) and delivery != "local"
+    if not proj["local_only_default"]:
+        return False
+    if delivery == "pr":
+        return not proj.get("pr_optin", False)
+    return delivery != "local"
 
 
 def _prereq_names(fm):

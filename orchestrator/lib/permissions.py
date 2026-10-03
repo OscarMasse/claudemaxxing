@@ -14,7 +14,7 @@ enumerates its known spellings:
   `gh -R owner/repo pr comment`);
 - flags placed after the positional arguments (`git push origin b --force`).
 
-Usage: python3 lib/permissions.py <delivery> [<readonly_dir>...]
+Usage: python3 lib/permissions.py <delivery> [--employer] [<readonly_dir>...]
 (one rule per line; an empty delivery means the deliveryless digest/auto
 modes; each readonly dir gets readonly_rules)
 """
@@ -62,10 +62,18 @@ def push_rules():
     return _with_rtk([f"{g}push*" for g in GIT_PREFIXES])
 
 
-def gh_write_rules():
+# What a `pr` session of a local-only (employer) project may still do: open and
+# update its own draft PR. Everything else stays denied there, because the
+# session runs on the owner's broad keyring login (no scoped token on lumapps).
+EMPLOYER_PR_ALLOWED = ("pr create", "pr edit", "pr ready")
+
+
+def gh_write_rules(allow=()):
     """Mutating GitHub calls. Denied to every session that is not `pr`:
-    a comment posted by a local task lands on a real repo under the owner's name."""
-    cmds = [f"{g}{sub}*" for g in GH_PREFIXES for sub in GH_MUTATING]
+    a comment posted by a local task lands on a real repo under the owner's name.
+    `allow` lists mutating subcommands to leave out (see EMPLOYER_PR_ALLOWED)."""
+    cmds = [f"{g}{sub}*" for g in GH_PREFIXES for sub in GH_MUTATING
+            if sub not in allow]
     for flag in METHOD_FLAGS:
         for method in WRITE_METHODS:
             for spelled in (method, method.lower()):
@@ -153,10 +161,14 @@ def readonly_rules(path):
     return rules + [f"Bash({c})" for c in _with_rtk(cmds)]
 
 
-def deny_rules(delivery, readonly_dirs=()):
+def deny_rules(delivery, readonly_dirs=(), employer=False):
+    """`employer` marks a session of a local-only project: its `pr` delivery
+    keeps push and `gh pr create/edit/ready` but not the other mutating gh calls."""
     rules = []
     if delivery != "pr":
         rules += push_rules() + gh_write_rules()
+    elif employer:
+        rules += gh_write_rules(allow=EMPLOYER_PR_ALLOWED)
     rules += merge_rules() + irreversible_rules()
     bash = [f"Bash({c})" for c in rules]
     out = bash + credential_rules()
@@ -166,5 +178,7 @@ def deny_rules(delivery, readonly_dirs=()):
 
 
 if __name__ == "__main__":
-    print("\n".join(deny_rules(sys.argv[1] if len(sys.argv) > 1 else "",
-                                sys.argv[2:])))
+    args = sys.argv[1:]
+    employer = "--employer" in args
+    args = [a for a in args if a != "--employer"]
+    print("\n".join(deny_rules(args[0] if args else "", args[1:], employer)))

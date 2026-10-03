@@ -305,7 +305,7 @@ def accounts(cfg):
 # ignored: a misspelled `class: expedit` or a leftover `priority: 5` would
 # otherwise change the launch order silently.
 PROJECT_KEYS = ("name", "account", "dirs", "optional_dirs", "rank", "class",
-                "local_only_default", "workdir")
+                "local_only_default", "pr_optin", "workdir")
 # `optional_dirs` are repos a task of the project only sometimes needs (webapp's
 # ~1 GB big-assets checkout): a task names the ones it writes to with
 # `uses: [<basename>, ...]` and gets a worktree of each (lib/workspace.py);
@@ -370,6 +370,7 @@ def projects(cfg):
             "rank": rank,
             "expedite": cls == "expedite",
             "local_only_default": bool(p.get("local_only_default", False)),
+            "pr_optin": bool(p.get("pr_optin", False)),
             "workdir": workdir,
         }
     return out

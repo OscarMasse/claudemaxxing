@@ -168,6 +168,10 @@ reset_tz = "Europe/Warsaw"
 #                      FLOOR, not a default: every task here must declare
 #                      `delivery: local`, and one declaring `branch` or `pr`
 #                      is reported as misconfigured rather than downgraded.
+#   pr_optin           optional, with local_only_default: lets a task declare
+#                      `delivery: pr` (push + draft PR through the owner's
+#                      keyring login; the agent PAT is never exported there).
+#                      `branch` stays refused.
 [[projects]]
 name = "side-projects"
 account = "personal"

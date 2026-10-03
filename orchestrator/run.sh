@@ -120,6 +120,11 @@ if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" != "true" ] \
   export GH_TOKEN
   export GIT_ASKPASS="$HOME/.config/backlog-agents/git-askpass.sh"
 fi
+# A local-only project's session must fall back to the keyring login even when
+# the launching shell carries a token of its own.
+if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" = "true" ]; then
+  unset GH_TOKEN GITHUB_TOKEN GIT_ASKPASS
+fi
 
 # Directories the session may write to (--add-dir): the picked task's project
 # dirs, or every project dir of this account when no task was pre-selected.

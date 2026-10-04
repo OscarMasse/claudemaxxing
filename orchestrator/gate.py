@@ -277,7 +277,9 @@ def calibrated(p, acct, now):
                               blocks=transcripts.blocks(rows), refusals=refusals)
     if derived is None:
         return None, None
-    derived["direct"] = ratelimits.direct(ratelimits.load(state), rows, now, derived)
+    history = ratelimits.load(state)
+    derived["direct"] = ratelimits.direct(history, rows, now, derived)
+    derived["reading_ages"] = ratelimits.reading_ages(history, now)
     merged = dict(acct, **{k: derived[k] for k in
                            ("weekly_cap_usd", "window_cap_usd", "p90_daily_usd")})
     return merged, derived
@@ -296,14 +298,22 @@ def snapshot(acct, now, derived):
     snap = usage.snapshot(acct, now)
     snap["ledger_week_usd"] = snap["week_usd"]
     found = derived.get("direct", {})
+    ages = derived.get("reading_ages", {})
+
+    def estimate(pct, key):
+        figure = {"pct": pct, "source": "estimate"}
+        if key in ages:
+            figure["age_h"] = ages[key]
+        return figure
+
     pace = {}
     week = found.get("seven_day")
     if week:
         snap["week_usd"] = week["usd_equiv"]
         pace["week"] = week
     else:
-        pace["week"] = {"pct": snap["week_usd"] / acct["weekly_cap_usd"] * 100,
-                        "source": "estimate"}
+        pace["week"] = estimate(snap["week_usd"] / acct["weekly_cap_usd"] * 100,
+                                "seven_day")
     window, block = found.get("five_hour"), snap.get("block")
     if window:
         # The account's window, not the engine's block: usage the engine
@@ -313,8 +323,8 @@ def snapshot(acct, now, derived):
                              start=window["resets_at"] - transcripts.WINDOW)
         pace["window"] = window
     elif block and block.get("active"):
-        pace["window"] = {"pct": block["usd"] / acct["window_cap_usd"] * 100,
-                          "source": "estimate"}
+        pace["window"] = estimate(block["usd"] / acct["window_cap_usd"] * 100,
+                                  "five_hour")
     snap["pace"] = pace
     return snap
 
@@ -633,7 +643,8 @@ def caps_lines(derived, now):
 
 
 def pace_label(figure):
-    """`<pct> source=<reading|extrapolated|estimate> [reading_age_h=<h>]`."""
+    """`<pct> source=<reading|extrapolated|estimate> [reading_age_h=<h>]`;
+    on an estimate the age is the latest (stale) reading's, absent if none."""
     if figure is None:
         return "none"
     out = f"{figure['pct']:.1f} source={figure['source']}"

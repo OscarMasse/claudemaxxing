@@ -443,6 +443,24 @@ def direct(rows, entries, now, derived):
     return out
 
 
+def reading_ages(rows, now):
+    """{key: hours since the latest reading of that window}, any period, for
+    labelling a fallback estimate: a stale reading and no reading at all are
+    not the same situation. Rows stamped after `now` are ignored."""
+    out = {}
+    for row in rows:
+        if row.get("seed"):
+            continue
+        ts = _ts(row["ts"])
+        if ts > now:
+            continue
+        for key, *_ in WINDOWS:
+            if key in row:
+                age = (now - ts).total_seconds() / 3600
+                out[key] = min(out.get(key, age), age)
+    return out
+
+
 def _root():
     """The backlog root, resolved exactly as gate.py resolves it."""
     return config.backlog_root()

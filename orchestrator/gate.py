@@ -690,10 +690,13 @@ def status(p):
         reset = controller.next_reset(acct, now)
         days = (reset - now).total_seconds() / 86400
         cap = acct["weekly_cap_usd"]
-        reserve = acct["p90_daily_usd"] * days
+        equiv = controller.reserve_days(acct, now)
+        reserve = controller.reserve(acct, now)
         available = controller.surplus(acct, now, snap["week_usd"])
         print(f"week_usd={snap['week_usd']:.2f} ledger_week_usd={snap['ledger_week_usd']:.2f}")
         print(f"cap={cap:.2f} reserve={reserve:.2f} available={available:.2f}")
+        workdays = ",".join(acct.get("workdays") or controller.WEEKDAYS)
+        print(f"reserve_days={days:.2f} workday_equiv={equiv:.2f} workdays={workdays}")
         for line in caps_lines(derived, now):
             print(line)
         # The two `/usage` bars: the live reading first, the estimate (ledger

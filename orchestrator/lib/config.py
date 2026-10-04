@@ -185,6 +185,10 @@ def resolve_path(root=None):
 # instead of silently changing a schedule.
 SECTIONS = ("accounts", "projects")
 LIST_KEYS = ("dirs", "optional_dirs")
+# String arrays allowed at the top level and in an account entry (the
+# account value wins over the top-level default, like a scalar).
+ACCOUNT_LIST_KEYS = ("workdays",)
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _SCALARS = (bool, int, float, str)
 
 
@@ -202,9 +206,34 @@ def _check_scalar(where, key, value):
                          f"{type(value).__name__}, write it as a quoted string")
 
 
+def _check_reserve_key(where, key, value):
+    """The workday-weighted reserve keys (lib/controller.py reserve_days)."""
+    if key == "workdays":
+        if not (isinstance(value, list)
+                and all(isinstance(v, str) for v in value)):
+            raise ValueError(f"config: {where} key 'workdays' must be an "
+                             f"array of weekday names")
+        unknown = [v for v in value if v not in WEEKDAYS]
+        if unknown:
+            raise ValueError(f"config: {where} key 'workdays' has unknown "
+                             f"weekday {unknown[0]!r}, expected one of "
+                             f"{', '.join(WEEKDAYS)}")
+    elif key == "offday_reserve_ratio":
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not 0 <= value <= 1):
+            raise ValueError(f"config: {where} key 'offday_reserve_ratio' "
+                             f"must be a number in [0, 1], got {value!r}")
+
+
 def _check_entry(section, entry):
     where = f"[[{section}]] entry {entry.get('name', '?')!r}"
     for key, value in entry.items():
+        if key in ACCOUNT_LIST_KEYS and section == "accounts":
+            _check_reserve_key(where, key, value)
+            continue
+        if key == "offday_reserve_ratio":
+            _check_reserve_key(where, key, value)
+            continue
         if key in LIST_KEYS and section == "projects":
             if not (isinstance(value, list)
                     and all(isinstance(v, str) for v in value)):
@@ -226,6 +255,8 @@ def validate(cfg):
                                  f"([[{key}]])")
             for entry in value:
                 _check_entry(key, entry)
+        elif key in ACCOUNT_LIST_KEYS or key == "offday_reserve_ratio":
+            _check_reserve_key("top-level", key, value)
         else:
             _check_scalar("top-level", key, value)
     for key in SECTIONS:
@@ -276,8 +307,9 @@ def misconfigured_account(acct):
 
 
 def scalars(cfg):
-    """The top-level scalar keys (everything that is not a section)."""
-    return {k: v for k, v in cfg.items() if not isinstance(v, list)}
+    """The top-level account defaults: every key that is not a section."""
+    return {k: v for k, v in cfg.items()
+            if not isinstance(v, list) or k in ACCOUNT_LIST_KEYS}
 
 
 def accounts(cfg):

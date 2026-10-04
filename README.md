@@ -28,6 +28,7 @@ In the morning you read a digest and review pull requests.
 
 - **Nights are budget-safe.**
   The engine reads your real consumption from Claude Code's own transcripts and keeps a heavy day's worth in reserve for every day left before the reset.
+  Set `workdays` (and `offday_reserve_ratio`, default 0.25) in the config so days off hold only a share of that reserve.
   Sessions only get the surplus.
 - **Mornings are yours.**
   No session opens a quota window that would run past the morning guard (plus a short tolerance), and your own recent activity on the account blocks night launches.

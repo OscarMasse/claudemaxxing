@@ -104,6 +104,29 @@ class TestRejectedShapes(unittest.TestCase):
         self.assert_refused("reset_time = 05:59:00\n" + MINIMAL,
                             "'reset_time' has type time")
 
+    def test_unknown_workday_refused(self):
+        self.assert_refused('workdays = ["mon", "sat", "fry"]\n' + MINIMAL,
+                            "unknown weekday 'fry'")
+
+    def test_non_string_workdays_refused(self):
+        self.assert_refused("workdays = [1]\n" + MINIMAL, "weekday names")
+
+    def test_offday_ratio_out_of_range_refused(self):
+        self.assert_refused("offday_reserve_ratio = 1.5\n" + MINIMAL, r"in \[0, 1\]")
+        self.assert_refused('offday_reserve_ratio = "low"\n' + MINIMAL, r"in \[0, 1\]")
+        self.assert_refused('[[accounts]]\nname = "a"\noffday_reserve_ratio = -0.1\n'
+                            '[[projects]]\nname = "p"\naccount = "a"\n', r"in \[0, 1\]")
+
+    def test_workdays_merge_into_accounts(self):
+        cfg = config.load(write_cfg(
+            'workdays = ["mon", "tue"]\noffday_reserve_ratio = 0\n'
+            '[[accounts]]\nname = "a"\n[[accounts]]\nname = "b"\n'
+            'workdays = ["sun"]\n[[projects]]\nname = "p"\naccount = "a"\n'))
+        a, b = config.accounts(cfg)
+        self.assertEqual(a["workdays"], ["mon", "tue"])
+        self.assertEqual(a["offday_reserve_ratio"], 0)
+        self.assertEqual(b["workdays"], ["sun"])
+
     def test_syntax_error_is_value_error(self):
         self.assert_refused("dry_run = \n" + MINIMAL, "config: ")
 

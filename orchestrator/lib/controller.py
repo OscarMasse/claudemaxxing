@@ -14,8 +14,10 @@ when it ran on raw token counts; only the unit changed.
 import math
 
 from collections import namedtuple
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+
+from lib import config
 
 # No `model` field: the model a session runs is the one its task declares
 # (lib/tasks.py), never a property of the tick. The regime decides whether
@@ -47,14 +49,49 @@ def prev_reset(cfg, now):
     return next_reset(cfg, now) - timedelta(days=7)
 
 
+WEEKDAYS = config.WEEKDAYS
+DEFAULT_OFFDAY_RESERVE_RATIO = 0.25
+
+
+def reserve_days(cfg, now):
+    """Workday-equivalents left before the next reset: the time to the reset,
+    cut at local midnights in the reset timezone, each piece weighted 1.0 on
+    a workday and `offday_reserve_ratio` on any other day (fractions of 24h,
+    so the partial current day and the partial reset day are prorated).
+    Without a `workdays` key every day weighs 1.0 and this is exactly the
+    calendar days remaining (docs/adr/0073)."""
+    reset = next_reset(cfg, now)
+    workdays = cfg.get("workdays")
+    if workdays is None:
+        return (reset - now).total_seconds() / 86400.0
+    work = {WEEKDAYS.index(d) for d in workdays}
+    off = float(cfg.get("offday_reserve_ratio", DEFAULT_OFFDAY_RESERVE_RATIO))
+    tz = ZoneInfo(cfg["reset_tz"])
+    cursor = now.astimezone(tz)
+    total = 0.0
+    while cursor < reset:
+        midnight = datetime.combine(cursor.date() + timedelta(days=1), time(0), tz)
+        end = min(midnight, reset)
+        weight = 1.0 if cursor.weekday() in work else off
+        total += weight * (end - cursor).total_seconds() / 86400.0
+        cursor = end
+    return total
+
+
+def reserve(cfg, now):
+    """USD held back for the owner's own usage until the next reset. The one
+    place that turns `p90_daily_usd` into a reserve: surplus(), decide() and
+    the status print all call it."""
+    return float(cfg["p90_daily_usd"]) * reserve_days(cfg, now)
+
+
 def surplus(cfg, now, week_usd):
     """USD the background system may spend this week: the weekly cap minus
     what is consumed minus the decaying daily reserve that protects the owner's
     own usage. Same quantity `decide()` calls `available`, exposed so the digest
     and the planner report exactly what the decision was made on."""
     cap = float(cfg["weekly_cap_usd"])
-    days_remaining = (next_reset(cfg, now) - now).total_seconds() / 86400.0
-    return cap - float(week_usd) - float(cfg["p90_daily_usd"]) * days_remaining
+    return cap - float(week_usd) - reserve(cfg, now)
 
 
 def _nights_remaining(cfg, now):
@@ -176,7 +213,6 @@ def decide(cfg, now, usage, idle_min):
     reset = next_reset(cfg, now)
     cap = float(cfg["weekly_cap_usd"])
     week = float(usage["week_usd"])
-    days_remaining = (reset - now).total_seconds() / 86400.0
     block = usage.get("block")
     idle = float("inf") if idle_min is None else idle_min
 
@@ -223,12 +259,12 @@ def decide(cfg, now, usage, idle_min):
         # owner mid-workday. Daytime runs are manual (`run.sh`) now.
         return Decision("skip", "day: daytime runs need manual.sh", 0, "day")
 
-    reserve = float(cfg["p90_daily_usd"]) * days_remaining
-    available = cap - week - reserve
+    held = reserve(cfg, now)
+    available = cap - week - held
 
     if available <= 0:
         return Decision("skip",
-                        f"available={available:.2f} <= 0 (reserve={reserve:.2f})",
+                        f"available={available:.2f} <= 0 (reserve={held:.2f})",
                         0, "night")
 
     if idle < float(cfg["activity_idle_night_min"]):

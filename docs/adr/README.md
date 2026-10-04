@@ -18,6 +18,7 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) | Run headless sessions in bypass mode, with deny rules as the only enforced limits | accepted (retroactive) |
 | [0071](0071-use-github-stacked-prs-for-stacked-work.md) | Stack linear PR-on-PR dependencies as GitHub stacked PRs; anything else waits for the merge | accepted |
 | [0072](0072-pace-on-the-live-usage-percentage.md) | Pace on the live `/usage` percentage; the derived cap is only a fallback | accepted |
+| [0073](0073-weight-the-reserve-by-workday.md) | Weight the daily reserve by workday; off days keep a share | accepted |
 
 ## Inventory
 
@@ -67,6 +68,7 @@ The number is the one its ADR takes, when it has one.
 | 0017 | Derive the weekly and window caps from status-line rate-limit readings instead of configuring them; headless sessions record the same readings from their stream-json `rate_limit_event` lines, tagged by origin | 2026-09-25, headless 2026-10-01 | `28d672a`, `93a9d6e`, `README.md:141-164`, `orchestrator/lib/ratelimits.py`, notes | yes | log only |
 | 0018 | Observe quota exhaustion per model family from the limit message instead of predicting it; a `rejected` `rate_limit_event` is a second, structured signal | 2026-09-09, structured 2026-10-01 | `0386c2c`, `README.md:171-175`, `orchestrator/lib/ratelimits.py` | yes | log only |
 | 0072 | Pace on the live `used_percentage` (reading, then extrapolated with the engine spend since) within a staleness bound; ledger USD over the derived cap only as fallback; every figure labelled with its source | 2026-10-03 | `orchestrator/lib/ratelimits.py` (`direct`), `orchestrator/gate.py` (`snapshot`), notes | yes | [0072](0072-pace-on-the-live-usage-percentage.md) |
+| 0073 | Reserve weighted per local day: 1.0 on `workdays`, `offday_reserve_ratio` (default 0.25) otherwise; no `workdays` = calendar days | 2026-10-05 | `orchestrator/lib/controller.py` (`reserve`), backlog task | yes | [0073](0073-weight-the-reserve-by-workday.md) |
 | 0019 | Learn a session's cost per (task, model) as the max of its recent sessions, with a p75 cold-start prior | 2026-09-08, max 2026-09-12 | `f638845`, `892039b`, `README.md:206-208`, `orchestrator/config.yaml:102-108` | yes | log only |
 | 0020 | Append every session's result to a cost ledger that feeds the next decision and the digest | 2026-08 | `README.md:203-204`, notes | partial | log only |
 | 0021 | A hard per-session cost ceiling (`--max-budget-usd`) as runaway protection, not as pacing | 2026-08 | `README.md:226-228`, `orchestrator/config.yaml:115-119`, notes | yes | log only |

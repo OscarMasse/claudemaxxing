@@ -52,6 +52,14 @@ digest_time = "07:37"
 # the last night can absorb (ceil(hours / 5) quota windows), which is what the
 # per-night plan hoards for it.
 prereset_burn_hours = 8
+# Days that count fully in the reserve protecting your own usage (a heavy
+# day, p90_daily_usd, held back per day left before the reset). Any other
+# day holds only offday_reserve_ratio (in [0, 1], default 0.25) of it, so
+# nights before a day off get more of the surplus. Weekday names mon..sun;
+# also settable per account. Absent = every day is a workday (calendar
+# days, the historical behaviour). See docs/adr/0073.
+# workdays = ["mon", "tue", "wed", "thu", "fri"]
+# offday_reserve_ratio = 0.25
 # Activity lock threshold (minutes since the last interactive session write on
 # the account being scheduled; each account has its own idle clock). Night
 # regime only: the pre-reset burn-down ignores it.

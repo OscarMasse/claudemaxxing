@@ -623,8 +623,20 @@ class TestGate(unittest.TestCase):
     def test_status_falls_back_to_the_estimate_on_a_stale_reading(self):
         self.write_reading("2026-08-09T00:20:00+00:00", 9.0)
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("usage_week_pct=40.0 source=estimate", r.stdout)
+        self.assertIn("usage_week_pct=40.0 source=estimate reading_age_h=48.2", r.stdout)
         self.assertIn("week_usd=40.00", r.stdout)
+
+    def test_status_paces_the_window_on_a_fresh_reading(self):
+        # No engine block open, yet the account window is 60% used elsewhere:
+        # the reading opens it, with the account's own reset.
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / ratelimits.HISTORY).write_text(json.dumps({
+            "ts": "2026-08-11T00:20:00+00:00", "five_hour": {
+                "used_percentage": 60.0, "resets_at": "2026-08-11T02:00:00+00:00",
+                "engine_usd": 0.0}}) + "\n")
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("usage_window_pct=60.0 source=reading reading_age_h=0.2", r.stdout)
 
     def test_a_retired_token_key_makes_the_account_misconfigured(self):
         # No conversion factor exists between the old unit and dollars, so a

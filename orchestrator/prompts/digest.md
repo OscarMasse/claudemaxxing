@@ -37,8 +37,11 @@ Procedure:
      date by which the owner must act. Omit the section when there are none.
    - `## Done` - tasks completed autonomously, drawn from the journal bullets.
    - `## Quota` - the gate.py status output, one block per account. Budgets are
-     in USD at list price. Keep the `usage_week_pct` and `usage_window_pct` lines
-     verbatim and the per-task `cost` lines from each account's ledger (runs, USD,
+     in USD at list price. Open each account's block with the `usage_week_pct`
+     and `usage_window_pct` lines verbatim: they are the direct `/usage` figures
+     when their `source` is `reading` or `extrapolated` (say the reading's age),
+     and an estimate when it is `estimate` (label it "estimate, no fresh
+     reading"). Keep the per-task `cost` lines from each account's ledger (runs, USD,
      tokens - they inform planning), and every `cap ...` and `cap_change ...`
      line verbatim: the caps are derived from the status line's rate-limit
      readings, and their `source` (reading / history / seed) and `age_h` say how

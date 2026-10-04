@@ -590,7 +590,7 @@ class TestGate(unittest.TestCase):
         # The digest puts these next to the real /usage bars so the owner can
         # correct the caps when the calibration drifts. No open window: none.
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("usage_week_pct=40.0", r.stdout)
+        self.assertIn("usage_week_pct=40.0 source=estimate", r.stdout)
         self.assertIn("usage_window_pct=none", r.stdout)
         fx = self.root / "window.json"
         fx.write_text(json.dumps({
@@ -599,7 +599,32 @@ class TestGate(unittest.TestCase):
                       "end": "2026-08-11T05:00:00+02:00", "usd": 3.0,
                       "by_family": {"sonnet": 3.0}}}))
         r = run_gate(self.root, {"ORCH_USAGE_JSON": str(fx)}, arg="status")
-        self.assertIn("usage_window_pct=20.0", r.stdout)  # 3 / 15
+        self.assertIn("usage_window_pct=20.0 source=estimate", r.stdout)  # 3 / 15
+
+    def write_reading(self, ts, pct, resets="2026-08-12T03:59:00+00:00"):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        with open(state / ratelimits.HISTORY, "a") as f:
+            f.write(json.dumps({"ts": ts, "seven_day": {
+                "used_percentage": pct, "resets_at": resets, "engine_usd": 1.0}}) + "\n")
+
+    def test_status_paces_on_a_fresh_reading_even_under_ten_percent(self):
+        # The ledger says 40% (40 / 100); /usage says 9: the reading wins,
+        # and the budget is computed from its remaining share.
+        self.write_reading("2026-08-11T00:20:00+00:00", 9.0)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("usage_week_pct=9.0 source=reading reading_age_h=0.2", r.stdout)
+        self.assertIn("week_usd=9.00 ledger_week_usd=40.00", r.stdout)
+        # cap 100 - 9 - reserve: the night budget runs on that available.
+        reserve = float(r.stdout.split("reserve=")[1].split()[0])
+        available = float(r.stdout.split("available=")[1].split()[0])
+        self.assertAlmostEqual(available, 100 - 9 - reserve, places=1)
+
+    def test_status_falls_back_to_the_estimate_on_a_stale_reading(self):
+        self.write_reading("2026-08-09T00:20:00+00:00", 9.0)
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("usage_week_pct=40.0 source=estimate", r.stdout)
+        self.assertIn("week_usd=40.00", r.stdout)
 
     def test_a_retired_token_key_makes_the_account_misconfigured(self):
         # No conversion factor exists between the old unit and dollars, so a

@@ -484,3 +484,46 @@ class TestHeadless(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDirect(unittest.TestCase):
+    """The live percentage drives pacing; the cap only covers the delta."""
+    DERIVED = {"weekly_cap_usd": 1000.0, "window_cap_usd": 100.0}
+
+    def test_a_fresh_reading_under_ten_percent_is_used_as_is(self):
+        rows = [SEED, weekly(T0 - timedelta(minutes=5), 9.0, 50.0)]
+        d = ratelimits.direct(rows, [], T0, self.DERIVED)["seven_day"]
+        self.assertEqual((d["pct"], d["source"]), (9.0, "reading"))
+        self.assertAlmostEqual(d["usd_equiv"], 90.0)
+        self.assertAlmostEqual(d["age_h"], 5 / 60)
+
+    def test_engine_spend_since_the_reading_is_extrapolated_over_the_cap(self):
+        rows = [weekly(T0 - timedelta(hours=2), 9.0, 50.0)]
+        entries = [(T0 - timedelta(hours=3), "m", 99.0, 0),  # before: ignored
+                   (T0 - timedelta(hours=1), "m", 20.0, 0)]
+        d = ratelimits.direct(rows, entries, T0, self.DERIVED)["seven_day"]
+        self.assertEqual(d["source"], "extrapolated")
+        self.assertAlmostEqual(d["pct"], 11.0)  # 9 + 20 / 1000
+
+    def test_the_latest_reading_wins_whatever_the_file_order(self):
+        rows = [weekly(T0 - timedelta(hours=1), 12.0, 1.0),
+                weekly(T0 - timedelta(hours=3), 30.0, 1.0)]
+        self.assertEqual(ratelimits.direct(rows, [], T0, self.DERIVED)
+                         ["seven_day"]["pct"], 12.0)
+
+    def test_a_stale_closed_or_future_reading_falls_back(self):
+        stale = weekly(T0 - ratelimits.STALE_AFTER["seven_day"] - timedelta(minutes=1),
+                       9.0, 1.0)
+        closed = weekly(T0 - timedelta(hours=1), 9.0, 1.0, resets=T0)
+        future = weekly(T0 + timedelta(minutes=1), 9.0, 1.0)
+        for row in (stale, closed, future):
+            self.assertEqual(ratelimits.direct([row], [], T0, self.DERIVED), {})
+
+    def test_the_window_reading_is_bounded_to_five_hours(self):
+        resets = T0 + timedelta(hours=1)
+        row = {"ts": (T0 - timedelta(hours=4)).isoformat(),
+               "five_hour": win(30.0, resets, 1.0)}
+        d = ratelimits.direct([row], [], T0, self.DERIVED)["five_hour"]
+        self.assertEqual((d["pct"], d["usd_equiv"], d["resets_at"]), (30.0, 30.0, resets))
+        late = T0 + timedelta(hours=1, minutes=1)
+        self.assertEqual(ratelimits.direct([row], [], late, self.DERIVED), {})

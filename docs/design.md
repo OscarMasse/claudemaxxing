@@ -142,6 +142,13 @@ Only readings at 10% of the week or 20% of the window and above count (they boun
 Headless sessions report too: `run.sh` launches with `--output-format stream-json --verbose` and records the session's last `rate_limit_event` (`utilization` x 100, a whole percent like the status line) as a row tagged `origin: headless`, next to the status line's `origin: statusline`.
 A `rejected` event also marks the model out of quota until its `resetsAt` when the stderr message did not already.
 Between readings the engine carries the latest derived caps forward; `gate.py status` prints each cap with its source (`reading`, `history`, `seed`) and age, and the digest relays it.
+**The live percentage comes first** ([ADR 0072](adr/0072-pace-on-the-live-usage-percentage.md)).
+Pacing runs on the latest `used_percentage` of each window when a reading of the open period is fresh (5h window: 5 hours; week: 1 day), whatever its value: the noise rules above only gate cap derivation.
+Between readings it is extrapolated with the engine's own spend since, `pct = pct_reading + usd_since / cap`, so the derived cap only covers the delta.
+The controller sees it as `week_usd = pct x weekly_cap` (and the same for the 5h window, with the account's own window bounds), so the reserve, `available` and the night budget all run on the measured share.
+With no fresh reading, the ledger USD over the derived cap is the fallback.
+`gate.py status` prints `usage_week_pct` and `usage_window_pct` with `source=reading|extrapolated|estimate` and the reading age, and `week_usd` next to the raw `ledger_week_usd`.
+A `cap_change` line's `to` is that day's median, while the cap in use is the median of its regime's days, so later days of a regime move the cap without a line of their own; the next change's `from` shows where it drifted.
 Hook it from the account's status line script with `BACKLOG_ROOT` set (a status line does not inherit the launchd environment), detached so the transcript scan (about a second) never delays the status line:
 
 ```python

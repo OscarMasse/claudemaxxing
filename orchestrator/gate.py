@@ -277,9 +277,46 @@ def calibrated(p, acct, now):
                               blocks=transcripts.blocks(rows), refusals=refusals)
     if derived is None:
         return None, None
+    derived["direct"] = ratelimits.direct(ratelimits.load(state), rows, now, derived)
     merged = dict(acct, **{k: derived[k] for k in
                            ("weekly_cap_usd", "window_cap_usd", "p90_daily_usd")})
     return merged, derived
+
+
+def snapshot(acct, now, derived):
+    """usage.snapshot with the live `/usage` percentages in charge.
+
+    Precedence (owner's decision of 2026-10-03): a direct reading, or its
+    extrapolation (ratelimits.direct), replaces the ledger's week and window
+    USD by the same percentage of the derived cap, so every downstream figure
+    (reserve, available, night budget, window headroom) runs on the measured
+    share. The ledger figure over the cap is only the fallback. The ledger
+    week stays in `ledger_week_usd`, and `pace` carries each figure's source.
+    """
+    snap = usage.snapshot(acct, now)
+    snap["ledger_week_usd"] = snap["week_usd"]
+    found = derived.get("direct", {})
+    pace = {}
+    week = found.get("seven_day")
+    if week:
+        snap["week_usd"] = week["usd_equiv"]
+        pace["week"] = week
+    else:
+        pace["week"] = {"pct": snap["week_usd"] / acct["weekly_cap_usd"] * 100,
+                        "source": "estimate"}
+    window, block = found.get("five_hour"), snap.get("block")
+    if window:
+        # The account's window, not the engine's block: usage the engine
+        # cannot see may have opened it, and its reset is the one that counts.
+        snap["block"] = dict(block or {"by_family": {}}, active=True,
+                             usd=window["usd_equiv"], end=window["resets_at"],
+                             start=window["resets_at"] - transcripts.WINDOW)
+        pace["window"] = window
+    elif block and block.get("active"):
+        pace["window"] = {"pct": block["usd"] / acct["window_cap_usd"] * 100,
+                          "source": "estimate"}
+    snap["pace"] = pace
+    return snap
 
 
 def select_picks(candidates, measured, default_cost, budget):
@@ -363,13 +400,13 @@ def tick_account(p, acct, projs):
         print(f"SKIP {name} misconfigured: {problem}")
         return None
     now = now_from_env(acct)
-    acct, _derived = calibrated(p, acct, now)
+    acct, derived = calibrated(p, acct, now)
     if acct is None:
         log(p, f"account={name} uncalibrated: {UNCALIBRATED}")
         print(f"SKIP {name} uncalibrated")
         return None
     idle = idle_for_account(acct)
-    snap = usage.snapshot(acct, now)
+    snap = snapshot(acct, now, derived)
     state = p["state"] / name
     # The night allocator needs to know what tonight already cost, so its
     # budget is a remainder rather than a fresh grant on every tick.
@@ -587,8 +624,21 @@ def caps_lines(derived, now):
     out.append(f"cap p90_daily_usd={derived['p90_daily_usd']:.2f} "
                f"(scaled with weekly_cap_usd)")
     for c in ratelimits.recent_changes(derived, now):
+        # `to` is that day's median; the cap in use is the median of the
+        # regime's days, so later days of the same regime move it without a
+        # change line (the next change's `from` shows where it drifted).
         out.append(f"cap_change {c['cap']} on={c['day']} from={c['from']:.2f} "
                    f"to={c['to']:.2f} ({c['why']})")
+    return out
+
+
+def pace_label(figure):
+    """`<pct> source=<reading|extrapolated|estimate> [reading_age_h=<h>]`."""
+    if figure is None:
+        return "none"
+    out = f"{figure['pct']:.1f} source={figure['source']}"
+    if "age_h" in figure:
+        out += f" reading_age_h={figure['age_h']:.1f}"
     return out
 
 
@@ -625,22 +675,20 @@ def status(p):
             print(f"account={name} uncalibrated: {UNCALIBRATED}")
             continue
         idle = idle_for_account(acct)
-        snap = usage.snapshot(acct, now)
+        snap = snapshot(acct, now, derived)
         reset = controller.next_reset(acct, now)
         days = (reset - now).total_seconds() / 86400
         cap = acct["weekly_cap_usd"]
         reserve = acct["p90_daily_usd"] * days
         available = controller.surplus(acct, now, snap["week_usd"])
-        print(f"week_usd={snap['week_usd']:.2f}")
+        print(f"week_usd={snap['week_usd']:.2f} ledger_week_usd={snap['ledger_week_usd']:.2f}")
         print(f"cap={cap:.2f} reserve={reserve:.2f} available={available:.2f}")
         for line in caps_lines(derived, now):
             print(line)
-        # The engine's view of the two `/usage` bars against the derived caps.
-        block = snap.get("block")
-        window_pct = (f"{block['usd'] / acct['window_cap_usd'] * 100:.1f}"
-                      if block and block.get("active") else "none")
-        print(f"usage_week_pct={snap['week_usd'] / cap * 100:.1f}")
-        print(f"usage_window_pct={window_pct}")
+        # The two `/usage` bars: the live reading first, the estimate (ledger
+        # USD over the derived cap) only when no fresh reading exists.
+        print(f"usage_week_pct={pace_label(snap['pace'].get('week'))}")
+        print(f"usage_window_pct={pace_label(snap['pace'].get('window'))}")
         err = p["state"] / name / ratelimits.ERROR
         if err.is_file():
             print(f"rate_limits_error {err.read_text().strip()}")
@@ -727,11 +775,11 @@ def plan(p):
             print(f"account={name} misconfigured: {problem}")
             continue
         now = now_from_env(acct)
-        acct, _derived = calibrated(p, acct, now)
+        acct, derived = calibrated(p, acct, now)
         if acct is None:
             print(f"account={name} uncalibrated: {UNCALIBRATED}")
             continue
-        snap = usage.snapshot(acct, now)
+        snap = snapshot(acct, now, derived)
         reset = controller.next_reset(acct, now)
         left = controller.nights_remaining(acct, now, night_start_dt(acct, now) is not None)
         print(f"account={name} nights_remaining={left} reset={reset.isoformat()}")
@@ -771,13 +819,13 @@ def preview_account(p, acct, projs):
         print(f"account={name} misconfigured: {problem}")
         return
     now = now_from_env(acct)
-    acct, _derived = calibrated(p, acct, now)
+    acct, derived = calibrated(p, acct, now)
     if acct is None:
         print(f"account={name} uncalibrated: {UNCALIBRATED}")
         return
     at = preview_instant(acct, now)
     state = p["state"] / name
-    snap = usage.snapshot(acct, now)
+    snap = snapshot(acct, now, derived)
     if at != now:
         snap["block"] = None  # the open window will be long over by then
     snap["spent_tonight"] = 0

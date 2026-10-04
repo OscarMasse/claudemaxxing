@@ -288,3 +288,43 @@ class TestSurplus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkdayReserve(unittest.TestCase):
+    """controller.reserve(): off days hold only `offday_reserve_ratio` of a
+    heavy day, so the reserve right after a Friday reset is ~5.5 days, not 7.
+    Oct 2026: Oct 2 = Friday, Oct 5 = Monday."""
+    FRI = dict(CFG, reset_weekday=4, p90_daily_usd=100)
+    WORK = dict(FRI, workdays=["mon", "tue", "wed", "thu", "fri"],
+                offday_reserve_ratio=0.25)
+
+    def test_friday_after_reset_counts_weekend_at_ratio(self):
+        now = datetime(2026, 10, 2, 6, 0, tzinfo=TZ)
+        # Fri rest 0.75 + Sat/Sun 2 * 0.25 + Mon-Thu 4 + next Fri ~0.25 (to 05:59).
+        self.assertAlmostEqual(controller.reserve(self.WORK, now), 100 * 5.5,
+                               delta=0.1)
+        self.assertAlmostEqual(controller.reserve(self.FRI, now), 100 * 7,
+                               delta=0.1)
+
+    def test_monday_unchanged_when_all_days_left_are_workdays(self):
+        now = datetime(2026, 10, 5, 1, 0, tzinfo=TZ)
+        self.assertAlmostEqual(controller.reserve(self.WORK, now),
+                               controller.reserve(self.FRI, now), delta=0.01)
+
+    def test_default_is_calendar_days_exactly(self):
+        for now in (datetime(2026, 10, 2, 6, 0, tzinfo=TZ),
+                    datetime(2026, 10, 4, 13, 17, tzinfo=TZ),
+                    datetime(2026, 10, 24, 12, 0, tzinfo=TZ)):  # DST week
+            days = (controller.next_reset(self.FRI, now) - now).total_seconds() / 86400
+            self.assertEqual(controller.reserve(self.FRI, now), 100 * days)
+
+    def test_surplus_and_decide_use_the_weighted_reserve(self):
+        now = datetime(2026, 10, 3, 3, 0, tzinfo=TZ)  # Saturday night
+        cfg = dict(self.WORK, weekly_cap_usd=1000)
+        held = controller.reserve(cfg, now)
+        self.assertLess(held, controller.reserve(dict(cfg, workdays=None), now))
+        self.assertEqual(controller.surplus(cfg, now, 100), 1000 - 100 - held)
+        d = controller.decide(dict(cfg, weekly_cap_usd=held), now,
+                              usage(week=1), idle_min=None)
+        self.assertEqual(d.action, "skip")
+        self.assertIn(f"reserve={held:.2f}", d.reason)

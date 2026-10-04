@@ -213,6 +213,9 @@ def _check_reserve_key(where, key, value):
                 and all(isinstance(v, str) for v in value)):
             raise ValueError(f"config: {where} key 'workdays' must be an "
                              f"array of weekday names")
+        if not value:
+            raise ValueError(f"config: {where} key 'workdays' is empty; omit "
+                             f"it to count every day as a workday")
         unknown = [v for v in value if v not in WEEKDAYS]
         if unknown:
             raise ValueError(f"config: {where} key 'workdays' has unknown "
@@ -231,7 +234,7 @@ def _check_entry(section, entry):
         if key in ACCOUNT_LIST_KEYS and section == "accounts":
             _check_reserve_key(where, key, value)
             continue
-        if key == "offday_reserve_ratio":
+        if key == "offday_reserve_ratio" and section == "accounts":
             _check_reserve_key(where, key, value)
             continue
         if key in LIST_KEYS and section == "projects":

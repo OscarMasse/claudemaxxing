@@ -286,9 +286,6 @@ class TestSurplus(unittest.TestCase):
                                            idle_min=999).action, "skip")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestWorkdayReserve(unittest.TestCase):
     """controller.reserve(): off days hold only `offday_reserve_ratio` of a
@@ -318,6 +315,13 @@ class TestWorkdayReserve(unittest.TestCase):
             days = (controller.next_reset(self.FRI, now) - now).total_seconds() / 86400
             self.assertEqual(controller.reserve(self.FRI, now), 100 * days)
 
+    def test_dst_day_counts_its_25_hours(self):
+        now = datetime(2026, 10, 24, 12, 0, tzinfo=TZ)  # Sat, Sun has 25h
+        days = (controller.next_reset(self.FRI, now).astimezone(ZoneInfo("UTC"))
+                - now.astimezone(ZoneInfo("UTC"))).total_seconds() / 86400
+        everyday = dict(self.WORK, workdays=list(controller.WEEKDAYS))
+        self.assertAlmostEqual(controller.reserve_days(everyday, now), days)
+
     def test_surplus_and_decide_use_the_weighted_reserve(self):
         now = datetime(2026, 10, 3, 3, 0, tzinfo=TZ)  # Saturday night
         cfg = dict(self.WORK, weekly_cap_usd=1000)
@@ -328,3 +332,7 @@ class TestWorkdayReserve(unittest.TestCase):
                               usage(week=1), idle_min=None)
         self.assertEqual(d.action, "skip")
         self.assertIn(f"reserve={held:.2f}", d.reason)
+
+
+if __name__ == "__main__":
+    unittest.main()

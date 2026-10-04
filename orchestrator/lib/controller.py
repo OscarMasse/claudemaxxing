@@ -14,7 +14,7 @@ when it ran on raw token counts; only the unit changed.
 import math
 
 from collections import namedtuple
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from lib import config
@@ -73,7 +73,10 @@ def reserve_days(cfg, now):
         midnight = datetime.combine(cursor.date() + timedelta(days=1), time(0), tz)
         end = min(midnight, reset)
         weight = 1.0 if cursor.weekday() in work else off
-        total += weight * (end - cursor).total_seconds() / 86400.0
+        # Elapsed real time: same-tz aware datetimes subtract wall clock,
+        # which would drop or add an hour on a DST change day.
+        span = end.astimezone(timezone.utc) - cursor.astimezone(timezone.utc)
+        total += weight * span.total_seconds() / 86400.0
         cursor = end
     return total
 

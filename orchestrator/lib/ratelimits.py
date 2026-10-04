@@ -389,6 +389,60 @@ def recent_changes(derived, now):
             if (today - date.fromisoformat(c["day"])).days <= CHANGE_REPORT_AGE.days]
 
 
+# How old a reading may be and still drive pacing (lib/ratelimits.direct).
+# The 5h window: one window, and the reading must belong to the open one.
+# The week: one day. Extrapolation only adds the engine's own spend since the
+# reading; what it cannot see (the owner on another device, claude.ai) grows
+# with the reading's age, and one day of that is what the p90 daily reserve
+# already absorbs. Older than that, the cap estimate is no worse.
+STALE_AFTER = {"seven_day": timedelta(days=1), "five_hour": timedelta(hours=5)}
+# Engine spend since a reading below which it is reported as the reading itself.
+EXTRAPOLATE_MIN_USD = 0.01
+
+
+def direct(rows, entries, now, derived):
+    """The live `/usage` percentages, the primary pacing input.
+
+    Per window ("seven_day", "five_hour"): {"pct", "source", "age_h",
+    "usd_equiv"} from the latest reading of the still open period no older
+    than STALE_AFTER, whatever its percentage (the noise rules only apply to
+    cap derivation). Between readings it is extrapolated with the engine's
+    spend since (`entries`, (ts, model, usd, tokens)) over the derived cap:
+    `pct = pct_reading + usd_since / cap`, so the cap estimate only covers the
+    delta. `source` is `reading` or `extrapolated`; `usd_equiv` is the
+    percentage in the cap's USD, what the controller's arithmetic runs on;
+    `resets_at` is the period's end.
+    A window with no usable reading is absent: the caller falls back to the
+    ledger estimate. Rows stamped after `now` are ignored.
+    """
+    out = {}
+    for key, _length, _min_pct, cap_key in WINDOWS:
+        best = None
+        for row in rows:
+            w = row.get(key)
+            if row.get("seed") or not w:
+                continue
+            ts = _ts(row["ts"])
+            if ts > now or now - ts > STALE_AFTER[key] or _ts(w["resets_at"]) <= now:
+                continue
+            if best is None or ts > best[0]:
+                best = (ts, float(w["used_percentage"]), _ts(w["resets_at"]))
+        if best is None:
+            continue
+        ts, pct, resets = best
+        cap = float(derived[cap_key])
+        since = sum(e[2] for e in entries if ts < e[0] <= now)
+        if since >= EXTRAPOLATE_MIN_USD:
+            pct, source = pct + since / cap * 100.0, "extrapolated"
+        else:
+            source = "reading"
+        out[key] = {"pct": pct, "source": source,
+                    "age_h": (now - ts).total_seconds() / 3600,
+                    "usd_equiv": pct / 100.0 * cap,
+                    "resets_at": resets.astimezone(now.tzinfo)}
+    return out
+
+
 def _root():
     """The backlog root, resolved exactly as gate.py resolves it."""
     return config.backlog_root()

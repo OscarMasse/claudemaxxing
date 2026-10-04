@@ -142,7 +142,7 @@ The morning digest names the engine the night ran on and flags a night that stra
 - **Per-session cost cap.**
   Every session runs with `--max-budget-usd` (`max_session_usd`, which you set at about five times the observed maximum), so a runaway session dies instead of draining the week.
 - **Quota exhaustion is observed, not predicted.**
-  The budget paces the week from local estimates.
+  The budget paces the week on the live `/usage` percentage when a fresh reading exists, and on local estimates otherwise.
   Hitting a model's limit is recorded per model, and that model is not offered again until the stated reset.
 - **What an agent may push.**
   A `pr` task may push its branch and open a pull request.

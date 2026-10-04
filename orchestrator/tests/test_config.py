@@ -110,6 +110,7 @@ class TestRejectedShapes(unittest.TestCase):
 
     def test_non_string_workdays_refused(self):
         self.assert_refused("workdays = [1]\n" + MINIMAL, "weekday names")
+        self.assert_refused("workdays = []\n" + MINIMAL, "'workdays' is empty")
 
     def test_offday_ratio_out_of_range_refused(self):
         self.assert_refused("offday_reserve_ratio = 1.5\n" + MINIMAL, r"in \[0, 1\]")

@@ -692,12 +692,35 @@ class TestGate(unittest.TestCase):
         self.assertIn("out_of_quota model=fable until=2026-08-11T04:20:00+02:00",
                       r.stdout)
 
-    def test_status_shows_blocked_task_with_unmet_prerequisites(self):
+    def test_status_shows_ready_task_with_unmet_prerequisites_as_waiting(self):
         self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "prerequisites: dep\n---\n")
         r = run_gate(self.root, self.env, arg="status")
-        self.assertIn("blocked task=t1.md unmet=dep", r.stdout)
+        self.assertIn("waiting task=t1.md on=dep", r.stdout)
+        self.assertNotIn("\nblocked", "\n" + r.stdout)
+
+    def test_status_shows_blocked_task_with_unmet_prerequisites_as_waiting(self):
+        # Its owner question is not askable yet: it waits on a task first.
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: blocked\npriority: high\ncreated: 2026-08-01\n"
+                        "prerequisites: dep\n---\n")
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("waiting task=t1.md on=dep", r.stdout)
+        self.assertNotIn("blocked task=t1.md", r.stdout)
+
+    def test_status_shows_askable_blocked_task(self):
+        self.write_task("dep.md", "---\ntitle: D\nproject: side-projects\n"
+                        "status: done\ncreated: 2026-08-01\n---\n")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: blocked\npriority: high\ncreated: 2026-08-01\n"
+                        "prerequisites: dep\n---\n")
+        self.write_task("t2.md", "---\ntitle: Y\nproject: side-projects\n"
+                        "status: blocked\npriority: high\ncreated: 2026-08-01\n---\n")
+        r = run_gate(self.root, self.env, arg="status")
+        self.assertIn("blocked task=t1.md\n", r.stdout)
+        self.assertIn("blocked task=t2.md\n", r.stdout)
+        self.assertNotIn("waiting task=t1.md", r.stdout)
 
     def test_status_shows_orphaned_task(self):
         self.write_task("t2.md", "---\ntitle: X\nproject: typo\n"

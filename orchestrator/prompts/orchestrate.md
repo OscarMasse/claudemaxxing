@@ -124,6 +124,7 @@ Procedure:
 6. If you hit a decision only the owner can make: write the exact question in the task's
    `## Notes`, set `status: blocked`, append a line `- [ ] <task-file>: <question>` to
    {{BACKLOG_ROOT}}/NEEDS-HUMAN.md, then pick the NEXT eligible task and continue.
+   If the only thing you wait for is another task, set `ready` and add it to `prerequisites` instead.
 7. When the slice is nearly over (or the task's budget is spent): write a precise resume
    point in the task's `## Notes` (what is done, what is next, exact commands/files),
    set `status: ready` back if more work remains (or `done` if verification passed).

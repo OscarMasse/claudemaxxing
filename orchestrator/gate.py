@@ -714,8 +714,11 @@ def status(p):
             print(f"out_of_quota model={family} until={until.isoformat()}")
         for model_id in snap.get("unknown_models", []):
             print(f"unknown_model id={model_id} (counted, family unrecognized)")
-        for task_name, unmet in tasks.blocked(p["root"], projs, name):
-            print(f"blocked task={task_name} unmet={' '.join(unmet)}")
+        # `waiting` waits on other tasks, `blocked` on the owner (askable now).
+        for task_name, unmet in tasks.waiting(p["root"], projs, name):
+            print(f"waiting task={task_name} on={' '.join(unmet)}")
+        for task_name in tasks.owner_blocked(p["root"], projs, name):
+            print(f"blocked task={task_name}")
         # Tonight's allocation, so the digest can see the plan, not just the cap.
         # Outside the night, the upcoming one is already in _nights_remaining;
         # counting it twice would understate every allocation by a factor r.
@@ -896,7 +899,7 @@ def preview_account(p, acct, projs):
     left = {Path(t["path"]).name for t in wave_candidates(
         p, projs, acct, at, d, 1000, state, served, done_names, out_of_quota, 0)}
     skipped = []
-    for fname, unmet in tasks.blocked(p["root"], projs, name):
+    for fname, unmet in tasks.waiting(p["root"], projs, name, ("ready",)):
         skipped.append(f"{fname}: prerequisite unmet ({' '.join(unmet)})")
     for fname in sorted(left):
         skipped.append(f"{fname}: {stop}")

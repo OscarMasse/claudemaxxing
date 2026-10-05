@@ -824,27 +824,45 @@ def fillers(root, projects, account):
     return _ordered(root, projects, account, sched_class="filler")
 
 
-def blocked(root, projects, account):
-    """Ready tasks routed to `account` whose prerequisites are unmet: list of
-    (task filename, [unmet prerequisite names]). Pure observability for
-    gate.py status. Interactive tasks are left to `interactive`, which reports
-    their unmet prerequisites itself."""
+def waiting(root, projects, account, statuses=("ready", "blocked")):
+    """Tasks routed to `account`, with a status in `statuses`, whose
+    prerequisites are unmet: list of (task filename, [unmet prerequisite
+    names]). `waiting` is a derived label, never a stored status: a task waits
+    on other tasks, not on the owner, for as long as a prerequisite is unmet,
+    and that holds for a `blocked` task too (its owner question is not askable
+    yet). Pure observability for gate.py status. Ready interactive tasks are
+    left to `interactive`, which reports their unmet prerequisites itself."""
     out = []
-    for p in sorted((Path(root) / "tasks").glob("*.md")):
-        if p.name == "TEMPLATE.md":
-            continue
-        fm = _frontmatter(p)
-        if fm.get("status") != "ready":
-            continue
-        proj = projects.get(fm.get("project", "default"))
-        if proj is None or proj["account"] != account:
-            continue
-        if _declared_mode(fm) == MODE_INTERACTIVE:
+    for p, fm in _routed(root, projects, account, statuses):
+        if fm.get("status") == "ready" and _declared_mode(fm) == MODE_INTERACTIVE:
             continue  # reported by interactive()
         unmet = _unmet_prerequisites(root, fm, p.stem)
         if unmet:
             out.append((p.name, unmet))
     return out
+
+
+def owner_blocked(root, projects, account):
+    """`blocked` tasks routed to `account` whose prerequisites are all met:
+    list of task filenames. These are the owner questions askable now; a
+    blocked task with an unmet prerequisite is reported by `waiting` instead."""
+    return [p.name for p, fm in _routed(root, projects, account, ("blocked",))
+            if not _unmet_prerequisites(root, fm, p.stem)]
+
+
+def _routed(root, projects, account, statuses):
+    """(path, frontmatter) of every task routed to `account` whose status is
+    in `statuses`, in filename order."""
+    for p in sorted((Path(root) / "tasks").glob("*.md")):
+        if p.name == "TEMPLATE.md":
+            continue
+        fm = _frontmatter(p)
+        if fm.get("status") not in statuses:
+            continue
+        proj = projects.get(fm.get("project", "default"))
+        if proj is None or proj["account"] != account:
+            continue
+        yield p, fm
 
 
 def interactive(root, projects, today=None):

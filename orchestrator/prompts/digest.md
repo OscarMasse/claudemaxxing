@@ -27,6 +27,12 @@ Procedure:
      then every `dirty_worktree` line of the gate.py status output: a finished
      task's worktree the janitor kept (uncommitted changes, or its removal
      failed), for the owner to resolve (give its path and the reason).
+     Only askable questions belong here: drop a NEEDS-HUMAN.md item whose task
+     has a `waiting task=... on=...` line in the gate.py status output (its
+     question is not askable until those tasks finish), and add every
+     `blocked task=...` line whose task has no NEEDS-HUMAN.md item yet. End the
+     section with one `Waiting on tasks:` line listing each `waiting` task as
+     `name -> what it waits on`, or omit that line when there are none.
    - `## Stalled tasks` - every `stalled` and `detector_blocked` line of the
      gate.py status output, one bullet each with its reason and run count
      (`detector_blocked` lists only tasks still `blocked`).

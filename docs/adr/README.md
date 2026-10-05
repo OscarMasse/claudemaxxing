@@ -19,6 +19,7 @@ The format and the rules are set by [0001](0001-record-architecture-decisions.md
 | [0071](0071-use-github-stacked-prs-for-stacked-work.md) | Stack linear PR-on-PR dependencies as GitHub stacked PRs; anything else waits for the merge | accepted |
 | [0072](0072-pace-on-the-live-usage-percentage.md) | Pace on the live `/usage` percentage; the derived cap is only a fallback | accepted |
 | [0073](0073-weight-the-reserve-by-workday.md) | Weight the daily reserve by workday; off days keep a share | accepted |
+| [0074](0074-tell-waiting-on-a-task-from-blocked-on-the-owner.md) | Tell waiting on a task from blocked on the owner | accepted |
 
 ## Inventory
 

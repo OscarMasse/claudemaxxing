@@ -109,6 +109,7 @@ flowchart LR
 4. **Digest.**
    Every session journals into the day's digest as it exits.
    The morning job sorts it into done, to validate, and questions for you.
+   A question is listed only once it is askable: a `blocked` task waits on you, a task with an unmet prerequisite is `waiting` on another task, whatever its status (see [ADR 0074](docs/adr/0074-tell-waiting-on-a-task-from-blocked-on-the-owner.md)).
 
 Two ideas carry the design.
 Background work shares a quota with a human who must never notice it, so everything is paced from measured usage, not from a schedule.

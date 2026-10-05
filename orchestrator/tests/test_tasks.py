@@ -296,7 +296,7 @@ class TestPick(unittest.TestCase):
                    priority="high")
         write_task(self.root, "main.md", project="side-projects", status="ready",
                    priority="high", prerequisites="dep1 ghost")
-        blocked = tasks.blocked(self.root, PROJECTS, "personal")
+        blocked = tasks.waiting(self.root, PROJECTS, "personal")
         self.assertEqual(len(blocked), 1)
         name, unmet = blocked[0]
         self.assertEqual(name, "main.md")
@@ -305,7 +305,7 @@ class TestPick(unittest.TestCase):
     def test_blocked_empty_when_no_prerequisites_unmet(self):
         write_task(self.root, "a.md", project="side-projects", status="ready",
                    priority="high")
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"), [])
 
     def test_interactive_task_is_never_picked(self):
         write_task(self.root, "live.md", project="side-projects", status="ready",
@@ -387,14 +387,14 @@ class TestPick(unittest.TestCase):
     def test_blocked_excludes_interactive_tasks(self):
         write_task(self.root, "live.md", project="side-projects", status="ready",
                    mode="interactive", prerequisites="ghost")
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"), [])
 
     def test_orphaned_reports_unknown_project(self):
         write_task(self.root, "ghost.md", project="typo", status="ready")
         write_task(self.root, "ok.md", project="side-projects", status="ready")
         # It is unschedulable AND invisible to every account's blocked report.
         self.assertTrue(self.pick()["path"].endswith("ok.md"))
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"), [])
         self.assertEqual(tasks.orphaned(self.root, PROJECTS),
                          [("ghost.md", "typo")])
 
@@ -964,7 +964,7 @@ class TestArchive(unittest.TestCase):
         self.archive()
         self.assertTrue(tasks.pick(self.root, PROJECTS, "personal")["path"]
                         .endswith("main.md"))
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"), [])
 
     def test_archive_is_done_by_definition(self):
         (self.root / "tasks" / "archive").mkdir()
@@ -972,7 +972,7 @@ class TestArchive(unittest.TestCase):
                    status="ready")
         write_task(self.root, "main.md", project="side-projects", status="ready",
                    prerequisites="dep")
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"), [])
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"), [])
 
     def test_live_file_wins_over_archived_copy(self):
         """A task copied back out of the archive to be reopened is not done."""
@@ -983,7 +983,7 @@ class TestArchive(unittest.TestCase):
                    prerequisites="dep")
         self.assertEqual(tasks.task_path(self.root, "dep"),
                          self.root / "tasks" / "dep.md")
-        self.assertEqual(tasks.blocked(self.root, PROJECTS, "personal"),
+        self.assertEqual(tasks.waiting(self.root, PROJECTS, "personal"),
                          [("main.md", ["dep"])])
 
     def test_scheduler_never_lists_archived_tasks(self):

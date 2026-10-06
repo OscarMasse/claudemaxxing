@@ -98,6 +98,7 @@ class TestUpdate(UpdateCase):
         res = self.run_update()
         self.assertEqual(res.status, "refused")
         self.assertIn("fetch failed", res.reason)
+        self.assertTrue(res.retry)
 
     def test_candidate_that_cannot_load_config_refused(self):
         old = self.run_update().old

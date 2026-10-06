@@ -24,6 +24,7 @@ class Result:
     old: str = ""
     new: str = ""
     reason: str = ""
+    retry: bool = False  # transient failure: the night may try again
     subjects: list = field(default_factory=list)
 
     def line(self):
@@ -91,7 +92,9 @@ def update(repo, config_path, remote_url="origin", branch="main"):
         return refuse("checkout has uncommitted changes")
     f = _git(repo, "fetch", "--quiet", remote_url, branch)
     if f.returncode:
-        return refuse(f"fetch failed: {f.stderr.strip()[:200]}")
+        res = refuse(f"fetch failed: {f.stderr.strip()[:200]}")
+        res.retry = True
+        return res
     new = _out(repo, "rev-parse", "FETCH_HEAD")
     if not new:
         return refuse("fetch left no FETCH_HEAD")

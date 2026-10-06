@@ -39,7 +39,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import (activity, config, controller, janitor, ledger, quota,  # noqa: E402
+from lib import (activity, config, selfupdate, controller, janitor, ledger, quota,  # noqa: E402
                  ratelimits, stalls, tasks, transcripts, usage, workspace)
 
 LOCK_TTL_S = 4.5 * 3600
@@ -916,6 +916,51 @@ def preview(p):
         preview_account(p, acct, projs)
 
 
+def selfupdate_due(p, accts, now_of=now_from_env):
+    """Night key when the engine may try its nightly update now, else None.
+
+    Once per night, at the first tick inside a night window with no fresh
+    RUNNING lock on any account; a night with a session running retries on
+    the next tick, so one night runs on one engine version."""
+    for acct in accts:
+        start = night_start_dt(acct, now_of(acct))
+        if start is None:
+            continue
+        if any(active_slots(p, p["state"] / a["name"]) for a in accts):
+            return None
+        key = start.date().isoformat()
+        if selfupdate.tonight_marker(p["state"], key).exists():
+            return None
+        return key
+    return None
+
+
+def selfupdate_cmd(p):
+    """Print UPDATED when the engine fast-forwarded itself (the loop re-execs)."""
+    from lib import digest as digest_lib
+    cfg = config.load(p["config"])
+    accts = [a for a in config.accounts(cfg) if not config.misconfigured_account(a)]
+    key = selfupdate_due(p, accts)
+    if key is None:
+        return
+    p["state"].mkdir(parents=True, exist_ok=True)
+    selfupdate.tonight_marker(p["state"], key).write_text(key + "\n")
+    repo = Path(__file__).resolve().parent.parent
+    res = selfupdate.update(repo, p["config"])
+    log(p, res.line())
+    if res.status == "current":
+        return
+    path = digest_lib.digest_file(now_from_env(accts[0]),
+                                  str(cfg.get("digest_time", "07:37")), p["root"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(f"# Digest {path.stem}\n\n## Runs\n\n")
+    with path.open("a") as f:
+        f.write(f"- engine self-update: {res.line()}\n")
+    if res.status == "updated":
+        print("UPDATED")
+
+
 def stacks_cmd(p):
     from lib import stacks
     lines = stacks.render(stacks.collect(p["root"]))
@@ -937,6 +982,8 @@ def main():
         plan(p)
     elif cmd == "preview":
         preview(p)
+    elif cmd == "selfupdate":
+        selfupdate_cmd(p)
     elif cmd == "stacks":
         stacks_cmd(p)
     else:

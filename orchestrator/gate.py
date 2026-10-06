@@ -944,10 +944,13 @@ def selfupdate_cmd(p):
     if key is None:
         return
     p["state"].mkdir(parents=True, exist_ok=True)
-    selfupdate.tonight_marker(p["state"], key).write_text(key + "\n")
+    marker = selfupdate.tonight_marker(p["state"], key)
     repo = Path(__file__).resolve().parent.parent
     res = selfupdate.update(repo, p["config"])
     log(p, res.line())
+    if res.retry:
+        return  # a fetch failure is transient: the next tick tries again
+    marker.write_text(key + "\n")
     if res.status == "current":
         return
     path = digest_lib.digest_file(now_from_env(accts[0]),

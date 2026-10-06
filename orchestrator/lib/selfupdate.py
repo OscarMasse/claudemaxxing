@@ -1,6 +1,6 @@
 """Engine self-update: fast-forward the engine's own checkout to origin/main.
 
-Pull-based deployment, once per night (ADR 0074). The caller decides WHEN
+Pull-based deployment, once per night (ADR 0075). The caller decides WHEN
 (night regime, no RUNNING lock, not already tried tonight); this module decides
 WHETHER it is safe and does it: fetch, refuse unless a pure fast-forward on
 `main` of a clean checkout, validate the candidate by loading the live config

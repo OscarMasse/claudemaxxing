@@ -27,7 +27,7 @@ INTERVAL=300
 echo "$(date '+%F %T') gatekeeper-loop started pid $$" >> "$STATE_ROOT/gatekeeper.log"
 
 while true; do
-  # Nightly engine update (ADR 0074). bash reads a running script lazily, so a
+  # Nightly engine update (ADR 0075). bash reads a running script lazily, so a
   # fast-forward that rewrites this file must be followed by exec of the new
   # copy, never by another loop iteration of the old text.
   if [ "$(python3 gate.py selfupdate 2>> "$STATE_ROOT/gatekeeper.log")" = "UPDATED" ]; then

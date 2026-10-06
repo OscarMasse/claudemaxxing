@@ -6,3 +6,4 @@ __pycache__/
 /tasks/
 /digests/
 /reports/
+.serena/

@@ -7,6 +7,7 @@
 set -u
 # Homebrew first: python3 must be 3.14, not the macOS system 3.9.
 export PATH="${ORCH_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")" || exit 1
 # Resolved by lib/config.py (env, then the file install.sh records); exits
 # non-zero with a message naming both when neither says where the backlog is.
@@ -26,6 +27,12 @@ INTERVAL=300
 echo "$(date '+%F %T') gatekeeper-loop started pid $$" >> "$STATE_ROOT/gatekeeper.log"
 
 while true; do
+  # Nightly engine update (ADR 0074). bash reads a running script lazily, so a
+  # fast-forward that rewrites this file must be followed by exec of the new
+  # copy, never by another loop iteration of the old text.
+  if [ "$(python3 gate.py selfupdate 2>> "$STATE_ROOT/gatekeeper.log")" = "UPDATED" ]; then
+    exec /bin/bash "$SELF"
+  fi
   /bin/bash gatekeeper.sh
   sleep "$INTERVAL"
 done

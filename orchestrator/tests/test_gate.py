@@ -125,7 +125,7 @@ class TestGate(unittest.TestCase):
     def test_run_decision_and_log(self):
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout + r.stderr)
-        self.assertIn("t1.md sonnet low side-projects", r.stdout)
+        self.assertIn("t1.md sonnet medium side-projects", r.stdout)
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("account=personal", log)
         self.assertIn("night regime", log)
@@ -141,7 +141,7 @@ class TestGate(unittest.TestCase):
                         "model: fable\n---\n")
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
-        self.assertIn("t1.md fable low side-projects", r.stdout)
+        self.assertIn("t1.md fable medium side-projects", r.stdout)
 
     def test_daytime_tick_never_runs(self):
         env = dict(self.env, ORCH_NOW="2026-08-12T15:00:00+02:00")
@@ -339,7 +339,7 @@ class TestGate(unittest.TestCase):
         r = run_gate(self.root, self.env)
         self.assertTrue((self.root / "tasks" / "archive" / "dep.md").is_file())
         self.assertFalse((self.root / "tasks" / "dep.md").exists())
-        self.assertIn("t1.md sonnet low side-projects", r.stdout, r.stderr)
+        self.assertIn("t1.md sonnet medium side-projects", r.stdout, r.stderr)
         log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
         self.assertIn("archived task=dep.md to tasks/archive/", log)
 
@@ -359,7 +359,7 @@ class TestGate(unittest.TestCase):
             "scope": "session", "until": "2026-08-11T04:20:00+02:00"}}))
         r = run_gate(self.root, self.env)
         self.assertTrue(r.stdout.startswith("RUN personal 50"), r.stdout)
-        self.assertIn("t1.md sonnet low", r.stdout)
+        self.assertIn("t1.md sonnet medium", r.stdout)
 
     def test_expired_exhaustion_record_no_longer_blocks(self):
         state = self.root / "orchestrator" / "state" / "personal"
@@ -370,7 +370,7 @@ class TestGate(unittest.TestCase):
                         "status: ready\npriority: high\ncreated: 2026-08-01\n"
                         "model: fable\n---\n")
         r = run_gate(self.root, self.env)  # tick at 02:30, reset was 01:00
-        self.assertIn("t1.md fable low", r.stdout)
+        self.assertIn("t1.md fable medium", r.stdout)
 
     def test_fable_is_serialised_even_when_slots_and_budget_allow_more(self):
         # Fable's binding constraint is its own token limit, not wall-clock
@@ -933,9 +933,9 @@ class TestGateMultiAccount(unittest.TestCase):
         lines = self.lines(r)
         self.assertEqual(len(lines), 2, r.stdout + r.stderr)
         self.assertIn("RUN personal 50", lines[0])
-        self.assertIn("p.md sonnet low side-projects", lines[0])
+        self.assertIn("p.md sonnet medium side-projects", lines[0])
         self.assertIn("RUN work 50", lines[1])
-        self.assertIn("w.md sonnet low job", lines[1])
+        self.assertIn("w.md sonnet medium job", lines[1])
 
     def test_budget_isolation(self):
         # The work account's week is exhausted; personal still runs.

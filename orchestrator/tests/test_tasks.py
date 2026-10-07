@@ -55,7 +55,9 @@ class TestPick(unittest.TestCase):
         picked = self.pick()
         self.assertTrue(picked["path"].endswith("c.md"))
         self.assertEqual(picked["model"], "sonnet")
-        self.assertEqual(picked["effort"], "low")
+        # No `effort:` key: the engine default, medium (routing grid,
+        # 2026-10-07), not low.
+        self.assertEqual(picked["effort"], "medium")
         self.assertEqual(picked["project"], "side-projects")
 
     def test_project_routes_to_account(self):
@@ -425,6 +427,26 @@ class TestPick(unittest.TestCase):
         self.assertTrue(self.pick()["path"].endswith("ok.md"))
         self.assertEqual(tasks.misconfigured(self.root, PROJECTS),
                          [("ghost.md", "model=claude-fable-5")])
+
+    def test_unknown_effort_makes_the_task_unschedulable_and_reported(self):
+        # Same rule as `model:`: a typo used to surface only when
+        # `claude --effort` refused it at launch.
+        write_task(self.root, "ghost.md", project="side-projects",
+                   status="ready", priority="high", effort="bogus")
+        write_task(self.root, "ok.md", project="side-projects",
+                   status="ready", priority="low")
+        self.assertTrue(self.pick()["path"].endswith("ok.md"))
+        self.assertEqual(
+            tasks.misconfigured(self.root, PROJECTS),
+            [("ghost.md", "effort=bogus (expected one of low, medium, high, "
+                          "xhigh, max)")])
+
+    def test_every_effort_claude_accepts_is_schedulable(self):
+        for effort in ("low", "medium", "high", "xhigh", "max"):
+            write_task(self.root, "a.md", project="side-projects",
+                       status="ready", effort=effort)
+            self.assertEqual(self.pick()["effort"], effort)
+            self.assertEqual(tasks.misconfigured(self.root, PROJECTS), [])
 
     def test_absent_delivery_is_reported_not_guessed(self):
         write_task(self.root, "ghost.md", project="side-projects",

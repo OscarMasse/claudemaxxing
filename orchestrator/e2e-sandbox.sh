@@ -48,7 +48,7 @@ night_budget_ratio = 2.0
 est_session_usd = 2.5
 claude_bin = "$SANDBOX/claude-stub.sh"
 claude_model = "sonnet"
-claude_effort = "low"
+claude_effort = "medium"
 max_session_usd = 1
 
 [[accounts]]

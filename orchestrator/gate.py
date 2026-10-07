@@ -341,15 +341,15 @@ def select_picks(candidates, measured, default_cost, budget):
     allotted: sessions do not fill their slice (measured median utilisation
     here: 3%), so both the measured figure and the cold-start default are per
     SESSION. One default, not one per model: the learned figure is keyed on
-    (task, model), and a per-model prior is not supported by the data (opus
-    and fable sessions measured CHEAPER than sonnet ones). 2.85 is the p75 of
+    (task, model, effort), falling back to (task, model) (ledger.estimate),
+    and a per-model prior is not supported by the data (opus and fable
+    sessions measured CHEAPER than sonnet ones). 2.85 is the p75 of
     `cost_usd` over the 131 orchestrate sessions in the ledger on 2026-09-12
     (median 1.46, p90 4.29, max 13.65)."""
     picked = []
     for cand in candidates:
-        est_burn = measured.get((cand["path"], cand["model"]), default_cost)
-        cand["est_source"] = ("measured" if (cand["path"], cand["model"]) in measured
-                              else "default")
+        est_burn, cand["est_source"] = ledger.estimate(
+            measured, cand["path"], cand["model"], cand["effort"], default_cost)
         # Budget rules per scheduling class. A duty is mandatory: charged
         # to the budget, never gated by it. A queue task is exempt when it
         # is the tick's first session, or a task heavier than a whole night

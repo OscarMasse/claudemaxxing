@@ -93,7 +93,7 @@ The number is the one its ADR takes, when it has one.
 
 | No. | Decision | Date | Sources | Rationale | ADR |
 |---|---|---|---|---|---|
-| 0029 | A task's `model:` (and `effort:`) is what its session runs, with a config default when absent: no ceiling, no upgrade, no ordering between models | no night ceiling 2026-09-08, task's model 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes | log only |
+| 0029 | A task's `model:` (and `effort:`, one of low/medium/high/xhigh/max, default medium since 2026-10-07) is what its session runs, with a default when absent: no ceiling, no upgrade, no ordering between models | no night ceiling 2026-09-08, task's model 2026-09-11 | `6c32f0c`, `b90f4fe`, `README.md:130-131`, `orchestrator/config.yaml:113-114` | yes | log only |
 | 0030 | Serialize Fable with `max_fable_slots`, counted over running sessions and applied before the queue is cut | 2026-09-09, running count and pre-cut filter 2026-09-12 | `0386c2c`, `f01b3cc`, `2fb483d`, `README.md:168,176-177`, `orchestrator/config.yaml:78-91` | yes | log only |
 | 0031 | `max_parallel_sessions` is a machine safety ceiling; the budget decides how many sessions run | 2026-08, one machine ceiling 2026-09-07 | `7924fe2`, `README.md:167`, `orchestrator/config.yaml:73-77`, notes | yes | log only |
 

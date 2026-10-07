@@ -331,7 +331,7 @@ def accounts(cfg):
         merged["claude_config_dir"] = os.path.expanduser(str(merged["claude_config_dir"]))
         merged.setdefault("claude_bin", "claude")
         merged.setdefault("claude_model", "sonnet")
-        merged.setdefault("claude_effort", "low")
+        merged.setdefault("claude_effort", "medium")
         out.append(merged)
     return out
 

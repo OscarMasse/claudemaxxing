@@ -253,6 +253,55 @@ class TestLearning(unittest.TestCase):
             self.assertEqual(
                 ledger.session_costs(state)[("tasks/a.md", "sonnet")], 5.0)
 
+    def test_record_stores_the_task_status_left_by_the_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = Path(d) / "result.json"
+            result.write_text(json.dumps({"usage": {}, "result": ""}))
+            tasks_dir = Path(d) / "tasks"
+            (tasks_dir / "archive").mkdir(parents=True)
+            (tasks_dir / "a.md").write_text("---\nstatus: blocked\n---\n")
+            # A done task the archive TTL already moved still reads.
+            (tasks_dir / "archive" / "b.md").write_text("---\nstatus: done\n---\n")
+            state = Path(d) / "state"
+            for task in (tasks_dir / "a.md", tasks_dir / "b.md", "auto"):
+                ledger.record(state, result, "orchestrate", str(task),
+                              "sonnet", "medium", 10, 0, "personal")
+            ledger.record(state, result, "digest", str(tasks_dir / "a.md"),
+                          "sonnet", "medium", 10, 0, "personal")
+            rows = [json.loads(line) for line in
+                    (state / "costs.jsonl").read_text().splitlines()]
+            self.assertEqual([r.get("outcome") for r in rows],
+                             ["blocked", "done", None, None])
+
+    def test_rows_without_outcome_stay_valid(self):
+        # Rows written before `outcome` existed replay unchanged.
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "state"
+            jsonl(state, [entry(usd=1.0)])
+            self.assertEqual(ledger.stats(state)["tasks/a.md"]["runs"], 1)
+            self.assertAlmostEqual(
+                ledger.session_costs(state)[("tasks/a.md", "sonnet")], 1.0)
+
+    def test_estimate_prefers_the_same_effort_then_any_effort(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "state"
+            jsonl(state, [entry(usd=1.0, effort="low"),
+                          entry(usd=4.0, effort="high")])
+            m = ledger.session_costs(state)
+            self.assertEqual(
+                ledger.estimate(m, "tasks/a.md", "sonnet", "low", 2.85),
+                (1.0, "measured"))
+            self.assertEqual(
+                ledger.estimate(m, "tasks/a.md", "sonnet", "high", 2.85),
+                (4.0, "measured"))
+            # No medium history yet: the task's max on that model, any effort.
+            self.assertEqual(
+                ledger.estimate(m, "tasks/a.md", "sonnet", "medium", 2.85),
+                (4.0, "measured-any-effort"))
+            self.assertEqual(
+                ledger.estimate(m, "tasks/a.md", "opus", "medium", 2.85),
+                (2.85, "default"))
+
     def test_record_stores_the_launch_estimate(self):
         with tempfile.TemporaryDirectory() as d:
             result = Path(d) / "result.json"

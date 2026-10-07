@@ -83,7 +83,10 @@ def paths():
 def now_from_env(acct):
     raw = os.environ.get("ORCH_NOW")
     if raw:
-        return datetime.fromisoformat(raw)
+        # A naive ORCH_NOW is local time, as in lib/ratelimits: attach the
+        # local offset so it compares with the aware transcript timestamps.
+        now = datetime.fromisoformat(raw)
+        return now if now.tzinfo else now.astimezone()
     return datetime.now(ZoneInfo(acct["reset_tz"]))
 
 

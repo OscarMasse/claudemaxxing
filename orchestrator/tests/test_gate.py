@@ -1218,5 +1218,20 @@ class TestGateDuties(unittest.TestCase):
         self.assertIn("b.md: prerequisite unmet", out)
 
 
+class TestNowFromEnv(unittest.TestCase):
+    def test_naive_orch_now_is_local_aware(self):
+        # A naive ORCH_NOW used to crash `gate.py status` comparing it with
+        # aware transcript timestamps in usage.snapshot.
+        with mock.patch.dict(os.environ, {"ORCH_NOW": "2026-10-01T01:12:00"}):
+            now = gate.now_from_env({"reset_tz": "UTC"})
+        self.assertIsNotNone(now.tzinfo)
+        self.assertEqual(now.replace(tzinfo=None).isoformat(), "2026-10-01T01:12:00")
+
+    def test_aware_orch_now_is_kept(self):
+        with mock.patch.dict(os.environ, {"ORCH_NOW": "2026-10-01T01:12:00+02:00"}):
+            now = gate.now_from_env({"reset_tz": "UTC"})
+        self.assertEqual(now.isoformat(), "2026-10-01T01:12:00+02:00")
+
+
 if __name__ == "__main__":
     unittest.main()

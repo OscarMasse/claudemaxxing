@@ -6,7 +6,7 @@ priority: medium
 autonomy: private
 delivery: pr
 model: sonnet
-effort: low
+effort: medium
 token_budget: 200k
 verification: All existing tests pass (npm test), plus a new unit test covering the three thumbnail sizes; visual spot-check of one generated thumbnail per size recorded in Notes.
 created: 2026-08-20

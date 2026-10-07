@@ -37,8 +37,10 @@ not be parsed also carries `parse_error` (the exception text) and `reason`
 so the failure is diagnosable. An orchestrate session's row also carries
 `outcome`: the task file's `status:` read right after the session (done,
 blocked, ready, in-progress), the success signal that makes cost per
-delivered task computable; rows before 2026-10-07 lack it. Other keys (cost_usd, tokens, ...) are optional
-and readers key off presence; historical rows are never backfilled.
+delivered task computable; rows before 2026-10-07 lack it. Duties and fillers
+stay `ready` by contract, so their `outcome` says nothing about delivery.
+Other keys (cost_usd, tokens, ...) are optional and readers key off
+presence; historical rows are never backfilled.
 
 The unit is USD: a session's actual cost is the entry's `cost_usd`, which is
 Claude Code's own `total_cost_usd` for the run. That figure includes the
@@ -94,13 +96,18 @@ def load_result(result_path):
 def task_outcome(task):
     """The task's `status:` as the session left it, or None when `task` is
     not a task file (an auto-pick or digest session). A done task may already
-    sit in tasks/archive/ when a long session outlived the archive TTL."""
+    sit in tasks/archive/ when a long session outlived the archive TTL.
+    An unreadable file is None too: the outcome is optional, the cost row
+    it rides on is not."""
     path = Path(task)
     if not path.is_file():
         path = path.parent / tasks.ARCHIVE_DIR / path.name
         if not path.is_file():
             return None
-    return tasks._frontmatter(path).get("status")
+    try:
+        return tasks._frontmatter(path).get("status")
+    except OSError:
+        return None
 
 
 def record(state_dir, result_path, mode, task, model, effort, slice_min,

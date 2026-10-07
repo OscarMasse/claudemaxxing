@@ -6,7 +6,7 @@ priority: low
 autonomy: private
 delivery: branch
 model: sonnet
-effort: low
+effort: medium
 token_budget: 150k
 verification: A comparison document exists with a filled decision matrix and a single recommendation; adversarial review pass finds no unsupported claims.
 created: 2026-08-22

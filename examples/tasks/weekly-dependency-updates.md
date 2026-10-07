@@ -6,7 +6,7 @@ priority: low
 autonomy: private
 delivery: pr
 model: sonnet
-effort: low
+effort: medium
 recurring: true
 token_budget: 250k
 verification: Each bumped project builds and its test suite passes locally; the pass summary in Notes lists every bump with its test result.

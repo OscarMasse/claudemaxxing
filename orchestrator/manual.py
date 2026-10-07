@@ -141,7 +141,8 @@ def select(p, acct, projs, plan, now):
     default_cost = float(acct.get("est_session_usd", 2.85))
     picked = []
     for cand in cands:
-        est = measured.get((cand["path"], cand["model"]), default_cost)
+        est = ledger.estimate(measured, cand["path"], cand["model"],
+                              cand["effort"], default_cost)[0]
         if plan.budget_left is not None and est > plan.budget_left:
             plan.done = f"budget left ${plan.budget_left:.2f} < next estimate ${est:.2f}"
             break
@@ -251,7 +252,8 @@ def dry_run(p, acct, projs, plan, now):
                                   model_slots={}, today=now.date(), now=now)
     cum, budget = 0.0, plan.budget_left
     for t in rows:
-        est = measured.get((t["path"], t["model"]), default_cost)
+        est = ledger.estimate(measured, t["path"], t["model"],
+                              t["effort"], default_cost)[0]
         if budget is not None and cum + est > budget:
             print(f"  -- budget ${budget:.2f} reached")
             break

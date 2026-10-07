@@ -24,7 +24,9 @@ measured burn rates and cost stats never bleed across subscriptions.
       deleted). Missing/unparseable data reads as "0.0 0".
 
   Library: stats(state_dir) -> {task: {runs, cost_usd, out_tokens, total_tokens}}
-           session_costs(state_dir) -> {(task, model): usd_per_session}
+           session_costs(state_dir) -> {(task, model, effort) and
+                                        (task, model): usd_per_session}
+           estimate(measured, task, model, effort, default) -> (usd, source)
            spent_since(state_dir, ts) -> USD burned since a timestamp
            accuracy(state_dir) -> per-task estimate-vs-actual error, in USD
            outcome_histogram(runs_log) -> {outcome: count} over agent lines
@@ -32,7 +34,10 @@ measured burn rates and cost stats never bleed across subscriptions.
 Row schema. Every row carries REQUIRED_KEYS. A row whose result file could
 not be parsed also carries `parse_error` (the exception text) and `reason`
 ("unreadable" or "invalid_json"); `exit` is the raw exit status of the run,
-so the failure is diagnosable. Other keys (cost_usd, tokens, ...) are optional
+so the failure is diagnosable. An orchestrate session's row also carries
+`outcome`: the task file's `status:` read right after the session (done,
+blocked, ready, in-progress), the success signal that makes cost per
+delivered task computable; rows before 2026-10-07 lack it. Other keys (cost_usd, tokens, ...) are optional
 and readers key off presence; historical rows are never backfilled.
 
 The unit is USD: a session's actual cost is the entry's `cost_usd`, which is
@@ -47,6 +52,9 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import tasks  # noqa: E402
 
 
 REQUIRED_KEYS = ("ts", "account", "mode", "task", "model", "effort",
@@ -83,6 +91,18 @@ def load_result(result_path):
     return result
 
 
+def task_outcome(task):
+    """The task's `status:` as the session left it, or None when `task` is
+    not a task file (an auto-pick or digest session). A done task may already
+    sit in tasks/archive/ when a long session outlived the archive TTL."""
+    path = Path(task)
+    if not path.is_file():
+        path = path.parent / tasks.ARCHIVE_DIR / path.name
+        if not path.is_file():
+            return None
+    return tasks._frontmatter(path).get("status")
+
+
 def record(state_dir, result_path, mode, task, model, effort, slice_min,
            exit_code, account, est_usd=0, engine="", prompt_sha=""):
     entry = {
@@ -97,6 +117,10 @@ def record(state_dir, result_path, mode, task, model, effort, slice_min,
         # the rendered prompt. Rows before 2026-10-02 lack both: read as "unknown".
         "engine": engine or "unknown", "prompt_sha": prompt_sha or "unknown",
     }
+    if mode == "orchestrate":
+        outcome = task_outcome(task)
+        if outcome is not None:
+            entry["outcome"] = outcome
     text = ""
     try:
         data = load_result(result_path)
@@ -225,7 +249,10 @@ RATE_WINDOW = 5  # runs; a task's cost drifts as it moves through its work
 
 
 def session_costs(state_dir, window=RATE_WINDOW):
-    """Measured cost {(task, model): usd_per_session} from the ledger.
+    """Measured cost per session from the ledger, keyed both by
+    (task, model, effort) and by (task, model); see `estimate()` for the
+    lookup order. The same task costs very differently at `low` and `high`,
+    so an estimate from another effort level is only a fallback.
 
     This is how the planner learns real task costs over time. Only the last
     `window` runs per (task, model) count: a task's cost drifts as it moves
@@ -254,12 +281,25 @@ def session_costs(state_dir, window=RATE_WINDOW):
         cost = _entry_usd(e)
         if cost <= 0:
             continue
-        key = (e.get("task", "?"), e.get("model", "sonnet"))
-        runs = recent.setdefault(key, [])
-        runs.append(cost)
-        if len(runs) > window:
-            runs.pop(0)
+        task, model = e.get("task", "?"), e.get("model", "sonnet")
+        for key in ((task, model, e.get("effort")), (task, model)):
+            runs = recent.setdefault(key, [])
+            runs.append(cost)
+            if len(runs) > window:
+                runs.pop(0)
     return {k: max(runs) for k, runs in recent.items()}
+
+
+def estimate(measured, task, model, effort, default):
+    """(usd, source) for one session of `task` on `model` at `effort`, from
+    `session_costs()`: the same effort's history first, then the task's
+    history on that model at any effort, then `default` (the account's
+    `est_session_usd`). `source` names which one answered."""
+    for key, source in (((task, model, effort), "measured"),
+                        ((task, model), "measured-any-effort")):
+        if key in measured:
+            return measured[key], source
+    return default, "default"
 
 
 def _all_rows(state_root):

@@ -99,7 +99,7 @@ flowchart LR
 ```
 
 1. **Capture.**
-   A task is one Markdown file with frontmatter: project, priority, `delivery`, a `verification` method, a token budget.
+   A task is one Markdown file with frontmatter: project, priority, `delivery`, a `verification` method, a token budget, and the `model:` (sonnet, opus, fable; default sonnet) and `effort:` (low, medium, high, xhigh, max; default medium) its session runs on.
 2. **Spec.**
    You set a task `ready` once its definition of done is checkable.
    Spec quality is the bottleneck, not execution.
@@ -121,6 +121,7 @@ This is the [Ralph Wiggum loop](https://ghuntley.com/ralph/) with a budget and a
 ## The cost ledger
 
 Every session appends one JSON row to `state/<account>/costs.jsonl` (older rows also sit in `state/costs.jsonl`): task, model, effort, cost in USD, duration.
+An orchestrate session's row also carries `outcome`, the task's `status:` read right after the session (`done`, `blocked`, `ready`, `in-progress`), so cost per delivered task can be computed; older rows lack it.
 Two fields say which version of the engine produced the row.
 `engine` is the short git SHA of the claudemaxxing working tree at launch, with `-dirty` when it had uncommitted changes.
 `prompt_sha` is a short hash of the exact rendered prompt the session received.

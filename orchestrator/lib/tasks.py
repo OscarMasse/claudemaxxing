@@ -4,7 +4,7 @@ Selection is deterministic and happens in the gatekeeper (not in the session),
 because the task's declared model must be known before launching the session.
 Frontmatter keys honored: status, project, delivery (branch|pr|local, REQUIRED),
 priority, created, due (YYYY-MM-DD), model (sonnet|opus|fable, default sonnet),
-effort (low|medium|high, default low), workdir (main, default a worktree), branch (an existing
+effort (low|medium|high|xhigh|max, default medium), workdir (main, default a worktree), branch (an existing
 branch to resume in the task's worktree, lib/workspace.py),
 prerequisites (space-separated task basenames, `.md` suffix optional),
 not_before (YYYY-MM-DD or YYYY-MM-DDTHH:MM, local time: the task is not
@@ -87,6 +87,8 @@ unschedulable for weeks at a time, so nothing here orders them any more.
 It must name one of `sonnet`, `opus`, `fable` - the engine's own names, not CLI
 model ids. Anything else makes the task unschedulable and is reported by
 `misconfigured`; see `_declared_model` for why there is no fallback.
+`effort:` follows the same rule: one of EFFORTS (the values `claude --effort`
+accepts), `medium` when absent, unschedulable and reported when unknown.
 
 Scheduling classes (frontmatter, mutually exclusive):
 
@@ -132,6 +134,11 @@ from pathlib import Path
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "normal": 1, "low": 2}
 MODELS = ("sonnet", "opus", "fable")
+# The values `claude --effort` accepts. `medium` is the default: `low` is the
+# worst value point of the Opus 5.5 effort curve (owner's routing grid,
+# 2026-10-07).
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_EFFORT = "medium"
 DELIVERY_VALUES = ("branch", "pr", "local")
 
 
@@ -238,6 +245,17 @@ def _declared_model(fm):
     if raw is None:
         return "sonnet"
     return raw if raw in MODELS else None
+
+
+def _declared_effort(fm):
+    """The task's declared effort, DEFAULT_EFFORT when the key is absent, or
+    None when it names a level `claude --effort` does not accept. Same rule as
+    `_declared_model`: a typo used to surface only when the session failed at
+    launch, so it is now unschedulable and reported by `misconfigured()`."""
+    raw = fm.get("effort")
+    if raw is None:
+        return DEFAULT_EFFORT
+    return raw if raw in EFFORTS else None
 
 
 def _declared_delivery(fm):
@@ -701,6 +719,9 @@ def _ordered(root, projects, account, sched_class=None, today=None,
         model = _declared_model(fm)
         if model is None:
             continue  # unknown model name, reported by misconfigured()
+        effort = _declared_effort(fm)
+        if effort is None:
+            continue  # unknown effort level, reported by misconfigured()
         if _unmet_prerequisites(root, fm, p.stem):
             continue  # a hard prerequisite is not done yet
         if not _declared_not_before(fm)[0]:
@@ -734,7 +755,7 @@ def _ordered(root, projects, account, sched_class=None, today=None,
                proj["rank"],
                fm.get("created", "9999"), p.name)
         found.append((key, {"path": str(p), "model": model,
-                            "effort": fm.get("effort", "low"),
+                            "effort": effort,
                             "project": proj["name"],
                             "delivery": delivery,
                             "local_only": delivery == "local",
@@ -1028,6 +1049,8 @@ def misconfigured(root, projects):
 
     - `model:` naming something outside MODELS (sonnet, opus, fable),
       typically a CLI model id.
+    - `effort:` naming something outside EFFORTS (low, medium, high, xhigh,
+      max).
     - `delivery:` absent, or naming something outside DELIVERY_VALUES.
     - `delivery:` breaching the project's local-only floor.
     - a leftover `local_only:` key, which `delivery:` replaced.
@@ -1051,6 +1074,9 @@ def misconfigured(root, projects):
             continue
         if _declared_model(fm) is None:
             out.append((p.name, f"model={fm['model']}"))
+        if _declared_effort(fm) is None:
+            out.append((p.name, f"effort={fm['effort']} (expected one of "
+                                f"{', '.join(EFFORTS)})"))
         delivery = _declared_delivery(fm)
         proj = projects.get(fm.get("project", "default"))
         if delivery is None:

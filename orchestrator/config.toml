@@ -111,7 +111,10 @@ est_session_usd = 2.85
 # hands down a bare one).
 claude_bin = "/usr/local/bin/claude"
 claude_model = "sonnet"
-claude_effort = "low"
+# One of low|medium|high|xhigh|max (`claude --effort`). Only sessions without a
+# task use it (digest, auto-pick): a task without `effort:` runs at medium,
+# the engine default (lib/tasks.py EFFORTS).
+claude_effort = "medium"
 # Hard per-session cost ceiling (--max-budget-usd, enforced by the CLI even on
 # a subscription). Runaway protection only, NOT a pacing tool: a budget kill is
 # a hard stop with no clean shutdown (no resume point written). Keep it ~5x the

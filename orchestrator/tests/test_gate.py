@@ -459,6 +459,9 @@ class TestGate(unittest.TestCase):
         # Nothing claimed it either: the live session owns the file.
         self.assertNotIn("claimed by the gatekeeper",
                          (self.root / "tasks" / "t1.md").read_text())
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertIn("a live session holds them though they read `ready`: "
+                      "['t1.md']", log)
 
     def test_a_live_session_on_another_account_holds_its_task_too(self):
         other = self.root / "orchestrator" / "state" / "elsewhere"

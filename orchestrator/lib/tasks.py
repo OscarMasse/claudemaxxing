@@ -309,6 +309,13 @@ def task_path(root, name):
     return archived if not live.exists() and archived.exists() else live
 
 
+def status_of(root, ref):
+    """The `status:` of task `ref` (name or filename), None when it exists
+    nowhere."""
+    path = task_path(root, task_name(ref))
+    return _frontmatter(path).get("status") if path.is_file() else None
+
+
 def _is_done(root, name):
     """Whether task `name` is finished. A file in tasks/archive/ is done by
     definition, whatever its frontmatter says: only `archive_done` puts it

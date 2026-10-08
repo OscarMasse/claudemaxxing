@@ -126,7 +126,8 @@ def select(p, acct, projs, plan, now):
     model_slots.setdefault("fable", max(
         plan.fable_slots - gate.running_models(state).count("fable"), 0))
     # Never next to a live session of the same task (gate.live_tasks), even
-    # one named by the owner: it waits in the list until that session exits.
+    # one named by the owner: it stays in the list, launched once that
+    # session exits (if a session of this account is still running then).
     live = gate.live_tasks(p)
     if plan.mode == "tasks":
         cands, dropped = _explicit_candidates(p, acct, projs, plan, now)

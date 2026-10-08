@@ -176,6 +176,21 @@ class TestManual(unittest.TestCase):
         self.assertIn("manual dropped task=orphan-dep: prerequisites not done", log)
         self.assertEqual(self.status("never-listed"), "ready")
 
+    def test_a_task_held_by_a_live_session_waits_even_when_named(self):
+        # The status says `ready` (the 2026-10-08 race), but a live session
+        # still holds the task: neither the queue nor a named list launches it.
+        self.task("held", "high")
+        self.task("other", "low")
+        state = self.p["state"] / "personal"
+        state.mkdir(parents=True)
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {time.time()} opus held.md")
+        picked = manual.select(self.p, self.acct, self.projs,
+                               self.plan("--count", "2", "--parallel", "4"), DAY)
+        self.assertEqual([Path(t["path"]).stem for t in picked], ["other"])
+        plan = self.plan("--tasks", "held", "--parallel", "4")
+        self.assertEqual(manual.select(self.p, self.acct, self.projs, plan, DAY), [])
+        self.assertEqual([manual.tasks.task_name(r) for r in plan.refs], ["held"])
+
     def test_named_duty_does_not_consume_its_period(self):
         self.task("routine", extra="duty: weekly\n")
         m, _ = self.run_plan(self.plan("--tasks", "routine"))

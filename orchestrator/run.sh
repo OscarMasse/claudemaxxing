@@ -71,17 +71,25 @@ if [ -z "$ACCOUNT" ]; then ACCOUNT="$(cfg first-account)"; fi
 # python3 subprocess each - about a second in total, which is a wide enough
 # window to matter once the gatekeeper ticks every few minutes.
 #
-# The lock records `<pid> <epoch> <model>`. The model is the gatekeeper's
+# The lock records `<pid> <epoch> <model> <task>`. The model is the gatekeeper's
 # argument (ARGS[2]), known before the lock and before any config read, so it
-# can be written here; it is empty for the digest and for manual runs that
+# can be written here; it is `-` for the digest and for manual runs that
 # leave it to the config. gate.py reads it to count the Fable sessions that
 # are RUNNING, not just the ones a single tick launches (2026-09-12: a second
 # Fable session was launched next to one five minutes old).
+#
+# The fourth field is the task's basename, so the gatekeeper never launches a
+# task a live session already holds, whatever the task's `status:` says. The
+# status alone cannot say it: a session that hands its task back `ready` is
+# still alive and writing, and on 2026-10-08 one rewrote `ready` over the next
+# launch's claim, so a third session joined the second in the same worktree.
+# An absent model or task is written `-` to keep the fields positional.
 STATE="$STATE_ROOT/$ACCOUNT"
 mkdir -p "$STATE"
+TASK_NAME="${TASK_FILE##*/}"
 SLOT=""
 for i in 1 2 3 4 5 6 7 8; do
-  if ( set -o noclobber; echo "$$ $(date +%s) ${MODEL_OVR:-}" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
+  if ( set -o noclobber; echo "$$ $(date +%s) ${MODEL_OVR:--} ${TASK_NAME:--}" > "$STATE/RUNNING.$i" ) 2>/dev/null; then
     SLOT=$i; break
   fi
 done

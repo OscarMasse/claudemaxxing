@@ -233,7 +233,8 @@ def live_tasks(p):
             except ValueError:
                 continue
             if _pid_alive(pid):
-                out.add(fields[3])
+                # `run.sh 30 foo` names the task without its extension.
+                out.add(tasks.task_name(fields[3]) + ".md")
     return out
 
 
@@ -410,9 +411,9 @@ def wave_candidates(p, projs, acct, now, d, free, state, served, ladder,
                     out_of_quota, fable_running, live=()):
     """The ordered launch candidates of one tick (before the budget loop).
     Shared by `tick_account` and `preview`. Pure: reads, never writes.
-    `live`: task basenames a live session holds (`live_tasks`); the preview
-    plans tonight's night_start, when today's sessions are gone, so it
-    passes none."""
+    `live`: task basenames a live session holds (`live_tasks`). The preview
+    passes none: it plans whole waves, and says it ignores the sessions
+    running now."""
     name = acct["name"]
     keys = period_keys(acct, now)
     # How many of this tick's slots the strongest model may take. It is a
@@ -529,13 +530,8 @@ def tick_account(p, acct, projs):
             log(p, f"account={name} not relaunched into a shorter slice "
                    f"({d.slice_min}min): {sorted(ladder)}")
         # A task a live session holds is never launched next to it, even
-        # when its status says `ready` (see live_tasks). Logged only in that
-        # case: a held task that reads `in-progress` is the normal one.
+        # when its status says `ready` (see live_tasks; `tick` logs that case).
         live = live_tasks(p)
-        stale = sorted(n for n in live if tasks.status_of(p["root"], n) == "ready")
-        if stale:
-            log(p, f"account={name} not relaunched, a live session holds "
-                   f"them though they read `ready`: {stale}")
         candidates = wave_candidates(p, projs, acct, now, d, free, state,
                                      duties_served(state), ladder, out_of_quota,
                                      fable_running, live)
@@ -669,6 +665,14 @@ def tick(p):
             # `status` (hence the digest) shows it.
             record_dirty_worktrees(p, [(path, outcome) for path, outcome in reaped
                                        if outcome in KEPT_REASONS])
+    # Once per tick, for every account: a queue task the gatekeeper claimed
+    # that reads `ready` while its session lives is the 2026-10-08 race, and
+    # the line is the evidence that `live_tasks` caught it. Duties, fillers
+    # and parallel tasks stay `ready` by contract and are not reported.
+    held = tasks.ready_claimable(p["root"], live_tasks(p))
+    if held:
+        log(p, f"not relaunched, a live session holds them though they read "
+               f"`ready`: {held}")
     idles = []
     for acct in config.accounts(cfg):
         idles.append(tick_account(p, acct, projs))

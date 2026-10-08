@@ -104,12 +104,8 @@ def _explicit_candidates(p, acct, projs, plan, now=None):
 def _coming(root, unmet, listed):
     """Whether every unmet prerequisite can still get done during this run:
     listed itself, or already being worked on."""
-    return all(u in listed or _status(root, u) == "in-progress" for u in unmet)
-
-
-def _status(root, name):
-    path = Path(root) / "tasks" / f"{name}.md"
-    return tasks._frontmatter(path).get("status") if path.is_file() else None
+    return all(u in listed or tasks.status_of(root, u) == "in-progress"
+               for u in unmet)
 
 
 def select(p, acct, projs, plan, now):

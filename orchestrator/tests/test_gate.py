@@ -435,6 +435,77 @@ class TestGate(unittest.TestCase):
         self.assertEqual(gate.active_slots(p, state), 2)
         self.assertEqual(gate.running_models(state), ["fable"])
 
+    def _dead_pid(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        return proc.pid
+
+    def test_a_task_held_by_a_live_session_is_never_relaunched(self):
+        # 2026-10-08, gatekeeper.log 05:06:52 and 05:12:25: a session set its
+        # task `ready` while still wrapping up, then rewrote `ready` over the
+        # next launch's claim, and the 05:12 tick launched the task a third
+        # time next to a live session in the same worktree. The status field
+        # cannot be trusted for liveness: the lock run.sh holds can.
+        self.append_cfg("max_parallel_sessions = 4\nest_session_usd = 0.25\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {int(time.time())} opus t1.md")
+        self.write_task("t2.md", "---\ntitle: Y\nproject: side-projects\n"
+                        "status: ready\npriority: low\ncreated: 2026-08-02\n---\n")
+        r = run_gate(self.root, self.env)
+        runs = [l for l in r.stdout.splitlines() if l.startswith("RUN")]
+        self.assertFalse([l for l in runs if "/t1.md " in l], r.stdout)
+        self.assertTrue([l for l in runs if "/t2.md " in l], r.stdout + r.stderr)
+        # Nothing claimed it either: the live session owns the file.
+        self.assertNotIn("claimed by the gatekeeper",
+                         (self.root / "tasks" / "t1.md").read_text())
+
+    def test_a_live_session_on_another_account_holds_its_task_too(self):
+        other = self.root / "orchestrator" / "state" / "elsewhere"
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "RUNNING.3").write_text(f"{os.getpid()} {int(time.time())} sonnet t1.md")
+        r = run_gate(self.root, self.env)
+        self.assertNotIn("/t1.md ", r.stdout)
+
+    def test_a_dead_sessions_lock_does_not_hold_its_task(self):
+        # A lock left by a killed run.sh (no EXIT trap) names a pid that is
+        # gone: the task is free, only the slot waits for the lock TTL.
+        self.append_cfg("max_parallel_sessions = 4\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "RUNNING.1").write_text(
+            f"{self._dead_pid()} {int(time.time())} sonnet t1.md")
+        r = run_gate(self.root, self.env)
+        self.assertIn("/t1.md ", r.stdout)
+
+    def test_a_parallel_task_is_shared_by_its_live_shards(self):
+        self.append_cfg("max_parallel_sessions = 2\nest_session_usd = 0.25\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {int(time.time())} sonnet t1.md")
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "parallel: true\n---\n")
+        r = run_gate(self.root, self.env)
+        self.assertIn("/t1.md ", r.stdout)
+
+    def test_live_tasks_reads_the_fourth_lock_field(self):
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        now = int(time.time())
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {now} opus a.md")
+        (state / "RUNNING.2").write_text(f"{os.getpid()} {now} - -")  # digest
+        (state / "RUNNING.3").write_text(f"{os.getpid()} {now} sonnet")  # old lock
+        (state / "RUNNING.4").write_text(f"{self._dead_pid()} {now} opus b.md")
+        (state / "RUNNING.5").write_text(f"{os.getpid()} {now - 10 ** 6} opus c.md")
+        with mock.patch.dict(os.environ, {"ORCH_ROOT": str(self.root)}):
+            os.environ.pop("ORCH_CONFIG", None)
+            p = gate.paths()
+        self.assertEqual(gate.live_tasks(p), {"a.md"})
+        # The `-` placeholder is no model.
+        self.assertEqual(sorted(gate.running_models(state)),
+                         ["opus", "opus", "sonnet"])
+
     def test_a_fable_heavy_queue_head_does_not_leave_slots_empty(self):
         # 2026-09-12, 11:00: candidates opus, fable, fable, sonnet with 4 free
         # slots and one fable slot launched only 2. The model filter has to

@@ -125,17 +125,22 @@ def select(p, acct, projs, plan, now):
     model_slots = {family: 0 for family in quota.blocked(state, now)}
     model_slots.setdefault("fable", max(
         plan.fable_slots - gate.running_models(state).count("fable"), 0))
+    # Never next to a live session of the same task (gate.live_tasks), even
+    # one named by the owner: it waits in the list until that session exits.
+    live = gate.live_tasks(p)
     if plan.mode == "tasks":
         cands, dropped = _explicit_candidates(p, acct, projs, plan, now)
         for task_name, why in dropped:
             gate.log(p, f"account={name} manual dropped task={task_name}: {why}")
+        cands = [t for t in cands
+                 if t["parallel"] or Path(t["path"]).name not in live]
         cands = tasks.launchable(cands, free, model_slots)
     else:
         count = free if plan.count_left is None else min(free, plan.count_left)
         cands = tasks.launch_order(p["root"], projs, name, count=count,
                                    done=gate.duties_served(state),
                                    period_keys=gate.period_keys(acct, now),
-                                   model_slots=model_slots,
+                                   model_slots=model_slots, live=live,
                                    today=now.date(), now=now)
     measured = ledger.session_costs(state)
     default_cost = float(acct.get("est_session_usd", 2.85))

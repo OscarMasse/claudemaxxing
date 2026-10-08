@@ -1195,7 +1195,7 @@ def pick_multi(root, projects, account, count, today=None, est_runs=None,
 
 def launch_order(root, projects, account, count,
                  done=None, period_keys=None, model_slots=None,
-                 today=None, est_runs=None, exclude=(), now=None):
+                 today=None, est_runs=None, exclude=(), live=(), now=None):
     """Up to `count` session assignments for one tick, in launch order.
 
     The three scheduling classes are served in a fixed order that encodes their
@@ -1219,16 +1219,26 @@ def launch_order(root, projects, account, count,
     `today` and `est_runs` order the queue's deadlines, and `now` defers
     tasks whose `not_before:` has not passed, see `_ordered`.
 
+    `live` holds the basenames of tasks a live session holds (gate.live_tasks).
+    None of them is returned, whatever its class or `status:`, except a
+    `parallel: true` task, whose shards share it by design.
+
     Each assignment carries `sched` ("duty", "filler" or None) so the caller can
     apply the budget rule that matches the class."""
     if count <= 0:
         return []
     slots = _ModelSlots(model_slots)
-    out = _take(duties_due(root, projects, account, done or {}, period_keys or {}),
+
+    def free(ts):
+        return [t for t in ts
+                if t.get("parallel") or Path(t["path"]).name not in live]
+
+    out = _take(free(duties_due(root, projects, account, done or {},
+                                period_keys or {})),
                 count, slots)
-    queue = [t for t in _ordered(root, projects, account, today=today,
-                                 est_runs=est_runs, now=now)
-             if Path(t["path"]).name not in exclude]
+    queue = free([t for t in _ordered(root, projects, account, today=today,
+                                      est_runs=est_runs, now=now)
+                  if Path(t["path"]).name not in exclude])
     out += _take(queue, count - len(out), slots)
     if len(out) < count:
         key = (period_keys or {}).get("filler")
@@ -1238,7 +1248,7 @@ def launch_order(root, projects, account, count,
                 continue  # already served tonight
             t["period_key"] = key
             due.append(t)
-        out += _take(due, count - len(out), slots)
+        out += _take(free(due), count - len(out), slots)
     return _pad_parallel(out, queue, count, slots)
 
 

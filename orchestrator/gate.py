@@ -159,8 +159,9 @@ def notify_duty(p, idle, open_cmd=None):
 def _fresh_locks(state_dir):
     """(lock path, fields) of every RUNNING* lock in one account's state dir
     that is younger than the lock TTL. The fields are what run.sh wrote:
-    `<pid> <epoch> [<model>]`; the model is absent in digest runs and in
-    locks written before it was recorded. A lock that cannot be read is
+    `<pid> <epoch> [<model> [<task>]]`; model and task are `-` when unknown
+    (digest runs, sessions that pick their own task) and absent in locks
+    written before they were recorded. A lock that cannot be read is
     yielded with an empty field list, so the caller can break it."""
     if not state_dir.is_dir():
         return [], []
@@ -193,7 +194,47 @@ def running_models(state_dir):
     exactly the race the setting exists to prevent. Locks without a model
     field (digest runs, older launchers) hold a slot but no model slot."""
     fresh, _ = _fresh_locks(state_dir)
-    return [fields[2] for _, fields in fresh if len(fields) > 2]
+    return [fields[2] for _, fields in fresh if len(fields) > 2 and fields[2] != "-"]
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except (OverflowError, ValueError):
+        return False
+    return True
+
+
+def live_tasks(p):
+    """Basenames of the tasks a live session holds, on every account: the
+    fourth field of each fresh RUNNING lock whose pid (run.sh's) is alive.
+
+    This, not the task's `status:`, is what keeps a task from being launched
+    twice. The status is a field every session rewrites: on 2026-10-08 a
+    session set its task `ready` at 05:04 and was still wrapping up when the
+    05:06 tick launched the task again; at 05:08 it rewrote `ready` over that
+    launch's claim, and the 05:12 tick put a third session in the same
+    worktree next to the second. Locks written before the task was recorded,
+    digest runs and sessions that pick their own task hold no task."""
+    out = set()
+    if not p["state"].is_dir():
+        return out
+    for state_dir in sorted(d for d in p["state"].iterdir() if d.is_dir()):
+        fresh, _ = _fresh_locks(state_dir)
+        for _, fields in fresh:
+            if len(fields) < 4 or fields[3] == "-":
+                continue
+            try:
+                pid = int(fields[0])
+            except ValueError:
+                continue
+            if _pid_alive(pid):
+                out.add(fields[3])
+    return out
 
 
 def night_start_dt(acct, now):
@@ -396,6 +437,7 @@ def wave_candidates(p, projs, acct, now, d, free, state, served, ladder,
                                     period_keys=keys,
                                     model_slots=model_slots,
                                     exclude=ladder,
+                                    live=live_tasks(p),
                                     today=now.date(), now=now)
     return candidates
 

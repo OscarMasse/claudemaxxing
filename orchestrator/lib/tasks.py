@@ -316,6 +316,22 @@ def status_of(root, ref):
     return _frontmatter(path).get("status") if path.is_file() else None
 
 
+def ready_claimable(root, refs):
+    """The refs whose task reads `ready` although it is a task the gatekeeper
+    claims `in-progress` at launch: a plain queue task, not a duty, filler or
+    `parallel: true` task, which stay `ready` by contract. Sorted."""
+    out = []
+    for ref in refs:
+        path = task_path(root, task_name(ref))
+        if not path.is_file():
+            continue
+        fm = _frontmatter(path)
+        if (fm.get("status") == "ready" and _sched_class(fm) is None
+                and fm.get("parallel") != "true"):
+            out.append(ref)
+    return sorted(out)
+
+
 def _is_done(root, name):
     """Whether task `name` is finished. A file in tasks/archive/ is done by
     definition, whatever its frontmatter says: only `archive_done` puts it
@@ -1023,7 +1039,8 @@ def repair_stuck(root, now, ttl_s, date):
     it has now happened five, so the engine repairs them.
 
     Liveness is inferred from the file's own mtime rather than from the RUNNING
-    locks, because the locks do not record which task they hold. A session
+    locks: a lock names its task only since 2026-10-08, and not at all for a
+    session that picked its own task. A session
     cannot outlive its slice (hard kill at slice + 10 minutes, an hour at the
     configured slice), so `ttl_s` at the lock TTL leaves no window in which a
     working session's task could be reset under it.

@@ -463,6 +463,19 @@ class TestGate(unittest.TestCase):
         self.assertIn("a live session holds them though they read `ready`: "
                       "['t1.md']", log)
 
+    def test_a_held_duty_is_withheld_but_not_reported(self):
+        # Duties stay `ready` by contract: holding one is normal, not the race.
+        self.write_task("t1.md", "---\ntitle: X\nproject: side-projects\n"
+                        "status: ready\npriority: high\ncreated: 2026-08-01\n"
+                        "duty: nightly\n---\n")
+        state = self.root / "orchestrator" / "state" / "personal"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {int(time.time())} sonnet t1.md")
+        r = run_gate(self.root, self.env)
+        self.assertNotIn("/t1.md ", r.stdout)
+        log = (self.root / "orchestrator" / "state" / "gatekeeper.log").read_text()
+        self.assertNotIn("live session holds", log)
+
     def test_a_live_session_on_another_account_holds_its_task_too(self):
         other = self.root / "orchestrator" / "state" / "elsewhere"
         other.mkdir(parents=True, exist_ok=True)
@@ -496,7 +509,7 @@ class TestGate(unittest.TestCase):
         state = self.root / "orchestrator" / "state" / "personal"
         state.mkdir(parents=True, exist_ok=True)
         now = int(time.time())
-        (state / "RUNNING.1").write_text(f"{os.getpid()} {now} opus a.md")
+        (state / "RUNNING.1").write_text(f"{os.getpid()} {now} opus a")
         (state / "RUNNING.2").write_text(f"{os.getpid()} {now} - -")  # digest
         (state / "RUNNING.3").write_text(f"{os.getpid()} {now} sonnet")  # old lock
         (state / "RUNNING.4").write_text(f"{self._dead_pid()} {now} opus b.md")

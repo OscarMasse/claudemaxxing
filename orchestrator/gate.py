@@ -407,9 +407,12 @@ def select_picks(candidates, measured, default_cost, budget):
 
 
 def wave_candidates(p, projs, acct, now, d, free, state, served, ladder,
-                    out_of_quota, fable_running):
+                    out_of_quota, fable_running, live=()):
     """The ordered launch candidates of one tick (before the budget loop).
-    Shared by `tick_account` and `preview`. Pure: reads, never writes."""
+    Shared by `tick_account` and `preview`. Pure: reads, never writes.
+    `live`: task basenames a live session holds (`live_tasks`); the preview
+    plans tonight's night_start, when today's sessions are gone, so it
+    passes none."""
     name = acct["name"]
     keys = period_keys(acct, now)
     # How many of this tick's slots the strongest model may take. It is a
@@ -437,7 +440,7 @@ def wave_candidates(p, projs, acct, now, d, free, state, served, ladder,
                                     period_keys=keys,
                                     model_slots=model_slots,
                                     exclude=ladder,
-                                    live=live_tasks(p),
+                                    live=live,
                                     today=now.date(), now=now)
     return candidates
 
@@ -525,9 +528,17 @@ def tick_account(p, acct, projs):
         if ladder:
             log(p, f"account={name} not relaunched into a shorter slice "
                    f"({d.slice_min}min): {sorted(ladder)}")
+        # A task a live session holds is never launched next to it, even
+        # when its status says `ready` (see live_tasks). Logged only in that
+        # case: a held task that reads `in-progress` is the normal one.
+        live = live_tasks(p)
+        stale = sorted(n for n in live if tasks.status_of(p["root"], n) == "ready")
+        if stale:
+            log(p, f"account={name} not relaunched, a live session holds "
+                   f"them though they read `ready`: {stale}")
         candidates = wave_candidates(p, projs, acct, now, d, free, state,
                                      duties_served(state), ladder, out_of_quota,
-                                     fable_running)
+                                     fable_running, live)
         picked = select_picks(
             candidates, ledger.session_costs(state),
             float(acct.get("est_session_usd", 2.85)), d.budget_usd)

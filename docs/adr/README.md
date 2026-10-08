@@ -55,7 +55,7 @@ The number is the one its ADR takes, when it has one.
 | 0010 | Keep OS specifics behind a platform seam of five hooks; ship the macOS adapter only | <= 2026-09-04 | `568f33a`, `orchestrator/platform/README.md`, `README.md:86,94,102,213-215` | partial | log only |
 | 0011 | Resolve the backlog root explicitly and fail loudly instead of falling back to the example data | 2026-09-27 | `02ec85e`, `README.md:107-110`, notes | yes | log only |
 | 0012 | Several accounts and projects, each account with its own budget, idle clock and ledger | <= 2026-09-04 | `568f33a`, `README.md:74-82`, `orchestrator/config.yaml:121-126` | partial | log only |
-| 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08, before any config read 2026-09-08 | `orchestrator/run.sh:60-88`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial | log only |
+| 0066 | Session slots are `RUNNING.N` lock files, taken as soon as the account is resolved and broken after a lock TTL | 2026-08, before any config read 2026-09-08 | `orchestrator/run.sh:62-98`, `orchestrator/gate.py:42`, `b90f4fe`, `f01b3cc`, `README.md:177`, notes | partial | log only |
 | 0067 | Every tick logs its decision and the reason, one line per account or slot | 2026-08 | `README.md:28-30,104`, `3d0739e`, notes | partial | log only |
 | 0068 | Headless sessions run with `--permission-mode bypassPermissions`; deny rules are the only enforced limits | <= 2026-09-04 | `568f33a`, `orchestrator/run.sh:199,271`, `orchestrator/lib/permissions.py:1-5` | yes (answered 2026-09-30) | [0068](0068-run-headless-sessions-in-bypass-mode-with-deny-rules-as-the-limits.md) |
 

@@ -102,7 +102,9 @@ def merge_rules():
 PROTECTED_REFS = ("main", "master")
 # Endings of a lease push that names no refspec, so git falls back to
 # push.default (or to the current branch, `HEAD`).
-NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD")
+NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD", " @")
+# Lease push options that pick the refs themselves, `main` included.
+MULTI_REF_FLAGS = ("--all", "--branches", "--tags", "--prune", "--repo")
 LEASE = "--force-with-lease"
 
 
@@ -118,13 +120,16 @@ def irreversible_rules():
       end of the command or followed by a space), `--mirror` (it forces every
       ref), and a `+refspec` (`git push origin +branch`, the `push * +*` form);
     - a lease push that names no refspec (the lease flag last, or the command
-      ending on a remote or on `HEAD`), since git would then follow
-      push.default;
-    - a lease push towards `main` or `master`, as a destination or as the
-      lease ref.
+      ending on a remote or on `HEAD`/`@`), since git would then follow
+      push.default, and one that lets git pick the refs (`--all`,
+      `--branches`, `--tags`, `--prune`, `--repo`);
+    - a lease push towards `main` or `master`, as a destination (bare or
+      quoted) or as the lease ref.
     Accepted gaps: a lease push towards another non-`agent/*` ref (`origin
-    feature/x`; the globs cannot say "not agent/"), a remote spelled other
-    than `origin`, `upstream` or a `.git` URL followed by no refspec, bundled
+    feature/x`; the globs cannot say "not agent/"), a wildcard refspec
+    (`refs/heads/*:refs/heads/*`), a lease push ending on a flag after the
+    remote (`origin -u`), a remote spelled other than `origin`, `upstream` or
+    a `.git` URL followed by no refspec, bundled
     short flags (`-uf`), a `remote.<name>.push` refspec with a `+` set in git
     config, and env-var prefixes (`FOO=1 git push`) if the harness does not
     strip them. Accepted false refusals: the lease flag placed after the
@@ -141,8 +146,10 @@ def irreversible_rules():
                  f"{g}push*--mirror*", f"{g}push * +*", f"{g}filter-branch*"]
         cmds += [f"{g}push*{LEASE}*{end}" if end else f"{g}push*{LEASE}"
                  for end in NO_REFSPEC_ENDINGS]
+        cmds += [f"{g}push*{LEASE}*{flag}*" for flag in MULTI_REF_FLAGS]
         for ref in PROTECTED_REFS:
             cmds += [f"{g}push*{LEASE}* {ref}", f"{g}push*{LEASE}* {ref} *",
+                     f"{g}push*{LEASE}* '{ref}*", f"{g}push*{LEASE}* \"{ref}*",
                      f"{g}push*{LEASE}*:{ref}", f"{g}push*{LEASE}*:{ref} *",
                      f"{g}push*{LEASE}*/heads/{ref}*", f"{g}push*{LEASE}={ref}*"]
     return _with_rtk(cmds)

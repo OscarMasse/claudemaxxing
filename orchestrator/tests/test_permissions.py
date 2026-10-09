@@ -93,6 +93,14 @@ LEASE_DENIED = [
     "git push --force-with-lease=main origin main",
     "git push --force-with-lease https://github.com/o/r.git master",
     "rtk git push origin agent/x --force-with-lease",
+    "git push --force-with-lease origin @",
+    "git push --force-with-lease origin --all",
+    "git push --force-with-lease origin --branches",
+    "git push --force-with-lease origin --tags",
+    "git push --force-with-lease --prune origin agent/x",
+    "git push --force-with-lease --repo=origin",
+    "git push --force-with-lease origin 'main'",
+    'git push --force-with-lease origin "main"',
 ]
 MERGES = [
     "gh pr -R o/r merge 5", "gh pr --repo o/r merge 5", "rtk gh pr --repo=o/r merge 5",

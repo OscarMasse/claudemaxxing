@@ -145,7 +145,9 @@ def irreversible_rules():
     feature/x`; the globs cannot say "not agent/"), a wildcard refspec
     (`refs/heads/*:refs/heads/*`), a lease push ending on a flag not listed
     in NO_REFSPEC_ENDINGS, a lease ref with no remote nor refspec
-    (`--force-with-lease=agent/x:<sha>` alone: it only forces that ref),
+    (`--force-with-lease=agent/x:<sha>` alone: it only forces that ref), a
+    refspec-less lease push followed by a redirection other than `2>`/`>`
+    (`&>/dev/null`, `1>log`),
     abbreviations of `--mirror` and of the flags that let git pick the refs
     (`--tag`), tabs instead of spaces, a remote spelled other than `origin`,
     `upstream` or a `.git` URL followed by no refspec, bundled short flags

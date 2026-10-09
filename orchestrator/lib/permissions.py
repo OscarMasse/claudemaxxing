@@ -106,7 +106,10 @@ PROTECTED_REFS = ("main", "master")
 NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD", " @",
                       "--force-if-includes", " -u", "--set-upstream",
                       "--no-verify", " -v", "--verbose", " -q", "--quiet",
-                      "--atomic")
+                      "--atomic", " --")
+# What may follow those endings: nothing, or a redirection (`2>&1`, `> log`),
+# which agents append all the time and which would otherwise hide the ending.
+ENDING_SUFFIXES = ("", " 2>*", " >*")
 # Lease push options that pick the refs themselves, `main` included.
 MULTI_REF_FLAGS = ("--all", "--branches", "--tags", "--prune", "--repo")
 # Git accepts any unambiguous abbreviation of a long option, and
@@ -130,7 +133,8 @@ def irreversible_rules():
       ref), and a `+refspec` (`git push origin +branch`, the `push * +*` form);
     - a lease push that names no refspec (the lease flag last, or the command
       ending on a remote, on `HEAD`/`@` or on a common flag such as
-      `--force-if-includes` or `-u`), since git would then follow
+      `--force-if-includes`, `-u` or `--`, a redirection allowed after
+      it), since git would then follow
       push.default, and one that lets git pick the refs (`--all`,
       `--branches`, `--tags`, `--prune`, `--repo`);
     - a lease push towards `main` or `master`, as a destination (bare,
@@ -161,8 +165,10 @@ def irreversible_rules():
     for g in GIT_PREFIXES:
         cmds += [f"{g}push*--force", f"{g}push*--force *", f"{g}push* -f*",
                  f"{g}push*--mirror*", f"{g}push * +*", f"{g}filter-branch*"]
-        cmds += [f"{g}push*{spelled}" for spelled in LEASE_SPELLINGS]
-        cmds += [f"{g}push*{LEASE_STEM}*{end}" for end in NO_REFSPEC_ENDINGS if end]
+        for tail in ENDING_SUFFIXES:
+            cmds += [f"{g}push*{spelled}{tail}" for spelled in LEASE_SPELLINGS]
+            cmds += [f"{g}push*{LEASE_STEM}*{end}{tail}"
+                     for end in NO_REFSPEC_ENDINGS if end]
         cmds += [f"{g}push*{LEASE_STEM}*{flag}*" for flag in MULTI_REF_FLAGS]
         for ref in PROTECTED_REFS:
             lease = f"{g}push*{LEASE_STEM}*"

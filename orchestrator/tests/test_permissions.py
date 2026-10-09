@@ -74,6 +74,8 @@ LEASE_ALLOWED = [
     "git push --force-with origin agent/x",
     "git push --force-with-lease origin agent/fix-origin",
     "git push --force-with-lease origin agent/claudemaxxing-prune-logs",
+    "git push --force-with-lease origin agent/x 2>&1",
+    "git push -u --force-with-lease --no-verify origin agent/x > /tmp/log",
 ]
 # Lease pushes still denied: no explicit refspec (git would follow
 # push.default), towards main/master, or with the flag after the refspec.
@@ -120,6 +122,10 @@ LEASE_DENIED = [
     "git push --force-with-lease -u",
     "git push --force-with-lease --set-upstream",
     "git push --force-with-lease --no-verify",
+    "git push --force-with-lease 2>&1",
+    "git push --force-with-lease origin 2>&1",
+    "git push --force-with-lease > /tmp/log",
+    "git push --force-with-lease origin --",
 ]
 MERGES = [
     "gh pr -R o/r merge 5", "gh pr --repo o/r merge 5", "rtk gh pr --repo=o/r merge 5",

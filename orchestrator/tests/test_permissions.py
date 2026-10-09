@@ -71,6 +71,9 @@ LEASE_ALLOWED = [
     "git push --force-with-lease=agent/x:abc123 https://github.com/o/r.git agent/x",
     "git push --force-with-lease --force-if-includes origin agent/x",
     "git push --force-with-lease origin agent/claudemaxxing-fix-main",
+    "git push --force-with origin agent/x",
+    "git push --force-with-lease origin agent/fix-origin",
+    "git push --force-with-lease origin agent/claudemaxxing-prune-logs",
 ]
 # Lease pushes still denied: no explicit refspec (git would follow
 # push.default), towards main/master, or with the flag after the refspec.
@@ -101,6 +104,13 @@ LEASE_DENIED = [
     "git push --force-with-lease --repo=origin",
     "git push --force-with-lease origin 'main'",
     'git push --force-with-lease origin "main"',
+    "git push --force-with-lease origin 'HEAD:main'",
+    "git push --force-with origin main",
+    "git push --force-w origin main",
+    "git push --force-with-leas origin HEAD:main",
+    "git push --force-with origin",
+    "git push --force-with",
+    "git push --force-with=main:abc123 origin agent/x",
 ]
 MERGES = [
     "gh pr -R o/r merge 5", "gh pr --repo o/r merge 5", "rtk gh pr --repo=o/r merge 5",

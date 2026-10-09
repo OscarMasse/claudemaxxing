@@ -50,13 +50,49 @@ IRREVERSIBLE = [
     "git push origin agent/x --force",
     "git push -f origin agent/x",
     "git push origin agent/x -f",
-    "git push --force-with-lease origin agent/x",
-    "rtk git push origin agent/x --force-with-lease",
     "git push origin +agent/x",
+    "git push --force-with-lease origin +agent/x",
+    "git push --mirror https://github.com/o/r.git",
+    "git push --force-with-lease origin agent/x --force",
     "git -C /tmp/wt push --force origin agent/x",
     "git filter-branch --tree-filter x HEAD",
     "cat ~/.config/backlog-agents/github-token",
     "cat /Users/o/.ssh/id_ed25519",
+]
+# A `pr` session may refresh its own agent/* PR branch, always with a lease.
+LEASE_ALLOWED = [
+    "git push --force-with-lease origin agent/x",
+    "git push --force-with-lease https://github.com/o/r.git agent/x",
+    "git push --force-with-lease origin HEAD:agent/x",
+    "rtk git push --force-with-lease origin agent/x",
+    "git -C /tmp/wt push --force-with-lease origin agent/x",
+    "rtk git -C /tmp/wt push --force-with-lease origin agent/x",
+    "git push --force-with-lease=agent/x:abc123 origin agent/x",
+    "git push --force-with-lease=agent/x:abc123 https://github.com/o/r.git agent/x",
+    "git push --force-with-lease --force-if-includes origin agent/x",
+    "git push --force-with-lease origin agent/claudemaxxing-fix-main",
+]
+# Lease pushes still denied: no explicit refspec (git would follow
+# push.default), towards main/master, or with the flag after the refspec.
+LEASE_DENIED = [
+    "git push --force-with-lease",
+    "rtk git push --force-with-lease",
+    "git -C /tmp/wt push --force-with-lease",
+    "git push --force-with-lease origin",
+    "git push --force-with-lease https://github.com/o/r.git",
+    "git push --force-with-lease=agent/x:abc123 origin",
+    "git push --force-with-lease origin HEAD",
+    "git push --force-with-lease origin main",
+    "rtk git push --force-with-lease origin main",
+    "git -C /tmp/wt push --force-with-lease origin main",
+    "git push --force-with-lease origin main --force-if-includes",
+    "git push --force-with-lease origin HEAD:main",
+    "git push --force-with-lease origin agent/x:main",
+    "git push --force-with-lease origin HEAD:refs/heads/main",
+    "git push --force-with-lease=main:abc123 origin agent/x",
+    "git push --force-with-lease=main origin main",
+    "git push --force-with-lease https://github.com/o/r.git master",
+    "rtk git push origin agent/x --force-with-lease",
 ]
 MERGES = [
     "gh pr -R o/r merge 5", "gh pr --repo o/r merge 5", "rtk gh pr --repo=o/r merge 5",
@@ -99,6 +135,20 @@ class TestDenyRules(unittest.TestCase):
             self.assertFalse(denied(rules, cmd), cmd)
         for cmd in IRREVERSIBLE:
             self.assertTrue(denied(rules, cmd), cmd)
+
+    def test_pr_may_lease_push_agent_branches_only(self):
+        for employer in (False, True):
+            rules = permissions.deny_rules("pr", employer=employer)
+            for cmd in LEASE_ALLOWED:
+                self.assertFalse(denied(rules, cmd), cmd)
+            for cmd in LEASE_DENIED + IRREVERSIBLE:
+                self.assertTrue(denied(rules, cmd), cmd)
+
+    def test_non_pr_deliveries_deny_every_lease_push(self):
+        for delivery in ("local", "branch", ""):
+            rules = permissions.deny_rules(delivery)
+            for cmd in LEASE_ALLOWED + LEASE_DENIED:
+                self.assertTrue(denied(rules, cmd), f"{delivery!r}: {cmd}")
 
     def test_employer_pr_allows_push_and_own_pr_only(self):
         rules = permissions.deny_rules("pr", employer=True)

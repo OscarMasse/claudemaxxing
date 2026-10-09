@@ -69,6 +69,11 @@ Procedure:
      may push: the launcher denies `git push` outright for `branch` and `local`
      tasks, so a refused push there means the delivery contract, not a permission
      problem to diagnose.
+     To refresh a PR branch after main moved (rebase), a `pr` session may rewrite
+     only its own `agent/*` branch, always with a lease and an explicit refspec:
+     `git push --force-with-lease https://github.com/<owner>/<repo>.git agent/<task>`.
+     Plain `--force`, `-f`, `+refspec` and any lease push without a refspec or
+     towards `main` are denied.
      Workflow files (`.github/workflows/*`) are pushed like any other file: the agent
      token has the Workflows permission (since 2026-09-25). Only if GitHub actually
      rejects such a push, quote the rejection in the task notes, leave the hunk out,

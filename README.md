@@ -151,7 +151,7 @@ The morning digest names the engine the night ran on and flags a night that stra
   A `pr` task may push its branch and open a pull request.
   A `branch` task commits locally.
   A `local` task leaves nothing outside the machine.
-  Force pushes, `git filter-branch` and credential reads are denied to every session.
+  Force pushes, `git filter-branch` and credential reads are denied to every session, with one exception: a `pr` session may rewrite its own `agent/*` branch with `git push --force-with-lease <remote> agent/<task>`, to refresh its PR after `main` moved.
   Pushing to `main` is forbidden by the prompt only: protect `main` with branch protection or a pre-push hook.
 - **Where an agent may write.**
   Its own worktree under `<repo>/.agent-worktrees/<task>`, plus the backlog itself (task notes, digest, questions).

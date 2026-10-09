@@ -18,6 +18,7 @@ Experience showed that prose alone does not hold the rails that must never break
 - 2026-09-25: `run.sh` fails closed, refusing to launch a session when the builder errors or prints nothing, and more `gh` writes are covered (`32a5a02`).
 
 A later step reused the same builder to make undeclared optional dirs read-only (`fa258d4`).
+On 2026-10-09 the owner allowed `pr` sessions to refresh their own PR branches: the force family was rewritten so that `--force` no longer prefix-matches `--force-with-lease`, and a lease push is allowed only with an explicit refspec that is not `main` or `master` (the accepted gaps are listed in `irreversible_rules()`).
 This ADR also covers inventory row 0048 ("Enforce the delivery rails with per-session deny rules built in one place, failing closed"), folded in here because the rails are what makes bypass mode acceptable.
 
 ## Decision

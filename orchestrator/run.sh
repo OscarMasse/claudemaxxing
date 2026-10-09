@@ -227,8 +227,9 @@ esac
 # lib/permissions.py builds the rails as deny rules, one family per function
 # with its reason: pushes and mutating gh calls for every delivery but `pr`
 # (digest and auto modes carry no delivery and never publish either), force
-# pushes, filter-branch and credential reads for every session, and writes
-# under each read-only optional dir.
+# pushes (but a `pr` session's lease push to its own agent/* branch),
+# filter-branch and credential reads for every session, and writes under each
+# read-only optional dir.
 EMPLOYER_FLAG=""
 if [ -n "$PROJECT" ] && [ "$(cfg project-local-only "$PROJECT")" = "true" ]; then
   EMPLOYER_FLAG="--employer"

@@ -97,24 +97,54 @@ def merge_rules():
     return _with_rtk(cmds)
 
 
-def irreversible_rules():
-    """History rewriting on a remote and filter-branch. Denied to every session,
-    `pr` included: a pushed branch is the owner's review surface.
+# Refs a lease push must never target, spelled as a destination (`origin
+# main`, `HEAD:main`, `refs/heads/main`) or as the lease ref itself.
+PROTECTED_REFS = ("main", "master")
+# Endings of a lease push that names no refspec, so git falls back to
+# push.default (or to the current branch, `HEAD`).
+NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD")
+LEASE = "--force-with-lease"
 
-    Force flags are matched anywhere after `push`. A `+refspec`
-    (`git push origin +branch`) is a force push too and is caught by the
-    `push * +*` form. Accepted gaps: bundled short flags (`-uf`) and a
-    `remote.<name>.push` refspec with a `+` set in git config, and env-var
-    prefixes (`FOO=1 git push`) if the harness does not strip them. The
-    `git -C * ` prefix over-matches (`git -C wt log --grep push` is denied):
-    accepted, a false refusal costs less than a missed push.
+
+def irreversible_rules():
+    """History rewriting on a remote and filter-branch. Denied to every session.
+
+    One exception: a session may rewrite its own `agent/*` PR branch, always
+    with a lease (`git push --force-with-lease <remote> agent/<task>`, or
+    `--force-with-lease=agent/<task>:<sha>`), to refresh a PR after main moved.
+    Deny globs cannot express negation, so the families below are written so
+    that `--force` stops prefix-matching `--force-with-lease`:
+    - plain `--force` and `-f` anywhere after `push` (`--force` matched at the
+      end of the command or followed by a space), `--mirror` (it forces every
+      ref), and a `+refspec` (`git push origin +branch`, the `push * +*` form);
+    - a lease push that names no refspec (the lease flag last, or the command
+      ending on a remote or on `HEAD`), since git would then follow
+      push.default;
+    - a lease push towards `main` or `master`, as a destination or as the
+      lease ref.
+    Accepted gaps: a lease push towards another non-`agent/*` ref (`origin
+    feature/x`; the globs cannot say "not agent/"), a remote spelled other
+    than `origin`, `upstream` or a `.git` URL followed by no refspec, bundled
+    short flags (`-uf`), a `remote.<name>.push` refspec with a `+` set in git
+    config, and env-var prefixes (`FOO=1 git push`) if the harness does not
+    strip them. Accepted false refusals: the lease flag placed after the
+    refspec (`git push origin agent/x --force-with-lease`: put it before the
+    remote), a local branch whose name starts with `main`/`master` after a
+    space, and the `git -C * ` prefix over-matching (`git -C wt log --grep
+    push` is denied): a false refusal costs less than a missed push.
     `git reset --hard` is deliberately NOT here: inside a disposable worktree
     it is the routine way to abandon a bad attempt, and nothing is lost.
     """
     cmds = []
     for g in GIT_PREFIXES:
-        cmds += [f"{g}push*--force*", f"{g}push* -f*", f"{g}push * +*",
-                 f"{g}filter-branch*"]
+        cmds += [f"{g}push*--force", f"{g}push*--force *", f"{g}push* -f*",
+                 f"{g}push*--mirror*", f"{g}push * +*", f"{g}filter-branch*"]
+        cmds += [f"{g}push*{LEASE}*{end}" if end else f"{g}push*{LEASE}"
+                 for end in NO_REFSPEC_ENDINGS]
+        for ref in PROTECTED_REFS:
+            cmds += [f"{g}push*{LEASE}* {ref}", f"{g}push*{LEASE}* {ref} *",
+                     f"{g}push*{LEASE}*:{ref}", f"{g}push*{LEASE}*:{ref} *",
+                     f"{g}push*{LEASE}*/heads/{ref}*", f"{g}push*{LEASE}={ref}*"]
     return _with_rtk(cmds)
 
 

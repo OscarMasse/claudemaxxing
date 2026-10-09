@@ -101,8 +101,12 @@ def merge_rules():
 # main`, `HEAD:main`, `refs/heads/main`) or as the lease ref itself.
 PROTECTED_REFS = ("main", "master")
 # Endings of a lease push that names no refspec, so git falls back to
-# push.default (or to the current branch, `HEAD`).
-NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD", " @")
+# push.default (or to the current branch, `HEAD`): a remote, `HEAD`, or one of
+# the flags most often written after the lease flag.
+NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD", " @",
+                      "--force-if-includes", " -u", "--set-upstream",
+                      "--no-verify", " -v", "--verbose", " -q", "--quiet",
+                      "--atomic")
 # Lease push options that pick the refs themselves, `main` included.
 MULTI_REF_FLAGS = ("--all", "--branches", "--tags", "--prune", "--repo")
 # Git accepts any unambiguous abbreviation of a long option, and
@@ -125,7 +129,8 @@ def irreversible_rules():
       end of the command or followed by a space), `--mirror` (it forces every
       ref), and a `+refspec` (`git push origin +branch`, the `push * +*` form);
     - a lease push that names no refspec (the lease flag last, or the command
-      ending on a remote or on `HEAD`/`@`), since git would then follow
+      ending on a remote, on `HEAD`/`@` or on a common flag such as
+      `--force-if-includes` or `-u`), since git would then follow
       push.default, and one that lets git pick the refs (`--all`,
       `--branches`, `--tags`, `--prune`, `--repo`);
     - a lease push towards `main` or `master`, as a destination (bare,
@@ -134,16 +139,18 @@ def irreversible_rules():
       in all the lease families above.
     Accepted gaps: a lease push towards another non-`agent/*` ref (`origin
     feature/x`; the globs cannot say "not agent/"), a wildcard refspec
-    (`refs/heads/*:refs/heads/*`), a lease push ending on a flag after the
-    remote (`origin -u`), abbreviations of `--mirror` and of the flags that
-    let git pick the refs (`--tag`), tabs instead of spaces, a remote spelled
-    other than `origin`, `upstream` or a `.git` URL followed by no refspec,
-    bundled short flags (`-uf`), a `remote.<name>.push` refspec with a `+`
-    set in git config, and env-var prefixes (`FOO=1 git push`) if the harness
-    does not strip them. Accepted false refusals: the lease flag placed after
-    the refspec (`git push origin agent/x --force-with-lease`: put it before
-    the remote), a branch named `main...`/`master...` after a space or
-    `heads/`, an `agent/*` branch ending in `.git` or holding `--all`-like
+    (`refs/heads/*:refs/heads/*`), a lease push ending on a flag not listed
+    in NO_REFSPEC_ENDINGS, a lease ref with no remote nor refspec
+    (`--force-with-lease=agent/x:<sha>` alone: it only forces that ref),
+    abbreviations of `--mirror` and of the flags that let git pick the refs
+    (`--tag`), tabs instead of spaces, a remote spelled other than `origin`,
+    `upstream` or a `.git` URL followed by no refspec, bundled short flags
+    (`-uf`), a `remote.<name>.push` refspec with a `+` set in git config, and
+    env-var prefixes (`FOO=1 git push`) if the harness does not strip them.
+    Accepted false refusals: the lease flag, or one of the flags above,
+    placed after the refspec (`git push origin agent/x --force-with-lease`:
+    put every flag before the remote), a branch named `main...`/`master...`
+    after a space or `heads/`, an `agent/*` branch ending in `.git` or holding `--all`-like
     words after a double dash, and the `git -C * ` prefix over-matching
     (`git -C wt log --grep push` is denied): a false refusal costs less than
     a missed push.

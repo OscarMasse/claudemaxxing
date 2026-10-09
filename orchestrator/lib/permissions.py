@@ -105,7 +105,12 @@ PROTECTED_REFS = ("main", "master")
 NO_REFSPEC_ENDINGS = ("", " origin", " upstream", ".git", " HEAD", " @")
 # Lease push options that pick the refs themselves, `main` included.
 MULTI_REF_FLAGS = ("--all", "--branches", "--tags", "--prune", "--repo")
+# Git accepts any unambiguous abbreviation of a long option, and
+# `--force-w` is the shortest one of `--force-with-lease`: rules that need the
+# flag's exact end enumerate every spelling, the others match the stem.
 LEASE = "--force-with-lease"
+LEASE_STEM = "--force-w"
+LEASE_SPELLINGS = tuple(LEASE[:n] for n in range(len(LEASE_STEM), len(LEASE) + 1))
 
 
 def irreversible_rules():
@@ -124,18 +129,21 @@ def irreversible_rules():
       push.default, and one that lets git pick the refs (`--all`,
       `--branches`, `--tags`, `--prune`, `--repo`);
     - a lease push towards `main` or `master`, as a destination (bare or
-      quoted) or as the lease ref.
+      quoted) or as the lease ref;
+    - every abbreviation git accepts for `--force-with-lease` (`--force-with`),
+      in all the lease families above.
     Accepted gaps: a lease push towards another non-`agent/*` ref (`origin
     feature/x`; the globs cannot say "not agent/"), a wildcard refspec
     (`refs/heads/*:refs/heads/*`), a lease push ending on a flag after the
-    remote (`origin -u`), a remote spelled other than `origin`, `upstream` or
+    remote (`origin -u`), abbreviations of `--mirror` and of the flags that
+    let git pick the refs (`--tag`), tabs instead of spaces, a remote spelled other than `origin`, `upstream` or
     a `.git` URL followed by no refspec, bundled
     short flags (`-uf`), a `remote.<name>.push` refspec with a `+` set in git
     config, and env-var prefixes (`FOO=1 git push`) if the harness does not
     strip them. Accepted false refusals: the lease flag placed after the
     refspec (`git push origin agent/x --force-with-lease`: put it before the
-    remote), a local branch whose name starts with `main`/`master` after a
-    space, and the `git -C * ` prefix over-matching (`git -C wt log --grep
+    remote), a branch named `main...`/`master...` after a space, an `agent/*`
+    branch ending in `.git` or holding `--all`-like words after a double dash, and the `git -C * ` prefix over-matching (`git -C wt log --grep
     push` is denied): a false refusal costs less than a missed push.
     `git reset --hard` is deliberately NOT here: inside a disposable worktree
     it is the routine way to abandon a bad attempt, and nothing is lost.
@@ -144,14 +152,16 @@ def irreversible_rules():
     for g in GIT_PREFIXES:
         cmds += [f"{g}push*--force", f"{g}push*--force *", f"{g}push* -f*",
                  f"{g}push*--mirror*", f"{g}push * +*", f"{g}filter-branch*"]
-        cmds += [f"{g}push*{LEASE}*{end}" if end else f"{g}push*{LEASE}"
-                 for end in NO_REFSPEC_ENDINGS]
-        cmds += [f"{g}push*{LEASE}*{flag}*" for flag in MULTI_REF_FLAGS]
+        cmds += [f"{g}push*{spelled}" for spelled in LEASE_SPELLINGS]
+        cmds += [f"{g}push*{LEASE_STEM}*{end}" for end in NO_REFSPEC_ENDINGS if end]
+        cmds += [f"{g}push*{LEASE_STEM}*{flag}*" for flag in MULTI_REF_FLAGS]
         for ref in PROTECTED_REFS:
-            cmds += [f"{g}push*{LEASE}* {ref}", f"{g}push*{LEASE}* {ref} *",
-                     f"{g}push*{LEASE}* '{ref}*", f"{g}push*{LEASE}* \"{ref}*",
-                     f"{g}push*{LEASE}*:{ref}", f"{g}push*{LEASE}*:{ref} *",
-                     f"{g}push*{LEASE}*/heads/{ref}*", f"{g}push*{LEASE}={ref}*"]
+            lease = f"{g}push*{LEASE_STEM}*"
+            cmds += [f"{lease} {ref}", f"{lease} {ref} *", f"{lease} '{ref}*",
+                     f"{lease} \"{ref}*", f"{lease}:{ref}", f"{lease}:{ref} *",
+                     f"{lease}:{ref}'*", f"{lease}:{ref}\"*",
+                     f"{lease}/heads/{ref}*"]
+            cmds += [f"{g}push*{spelled}={ref}*" for spelled in LEASE_SPELLINGS]
     return _with_rtk(cmds)
 
 
